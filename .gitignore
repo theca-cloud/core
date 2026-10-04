@@ -1,0 +1,9 @@
+._*
+.DS_Store
+claude*.sh
+target/
+dist/
+build/
+node_modules/
+data/
+TODOs.md
