@@ -5,5 +5,17 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[dependencies]
+fastcdc.workspace = true
+futures.workspace = true
+lz4_flex.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+twox-hash.workspace = true
+unicode-normalization.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
 [lints]
 workspace = true
