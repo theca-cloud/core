@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+# Refuses the push if a CI check fails. Bypass once: git push --no-verify
+exec "$(git rev-parse --show-toplevel)/scripts/ci.sh"

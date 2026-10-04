@@ -1,0 +1,10 @@
+when:
+  - event: [push, pull_request, manual]
+
+steps:
+  - name: ci
+    # Built and pushed from a dev machine by scripts/ci-image.sh;
+    # tag = the Rust version in rust-toolchain.toml.
+    image: git.pband.ch/theca/ci-rust:1.98.0
+    commands:
+      - scripts/ci.sh

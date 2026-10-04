@@ -7,3 +7,4 @@ build/
 node_modules/
 data/
 TODOs.md
+.env

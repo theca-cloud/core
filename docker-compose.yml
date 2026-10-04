@@ -1,0 +1,22 @@
+name: theca-core
+
+# Dev services. Run scripts/dev.sh rather than `docker compose up` directly:
+# it writes the .env this file reads its variables from.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      # Built-in C.UTF-8 collation: full Unicode lower(), identical on every install.
+      POSTGRES_INITDB_ARGS: --locale-provider=builtin --builtin-locale=C.UTF-8
+    ports:
+      - 127.0.0.1:5432:5432
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 2s
+      timeout: 2s
+      retries: 15
