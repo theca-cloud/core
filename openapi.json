@@ -1,0 +1,111 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Theca",
+    "description": "",
+    "license": {
+      "name": "AGPL-3.0-only",
+      "identifier": "AGPL-3.0-only"
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "tags": [],
+        "summary": "Readiness probe: 200 when the server can serve requests, 503 otherwise.",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "Ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/version": {
+      "get": {
+        "tags": [],
+        "summary": "Server version and supported API majors.",
+        "operationId": "version",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Version"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Health": {
+        "type": "object",
+        "description": "Health report. The contract is the HTTP status (200 / 503); the body is informational.",
+        "required": [
+          "status",
+          "checks"
+        ],
+        "properties": {
+          "checks": {
+            "type": "object",
+            "description": "Each check: `ok` or `failing`. Details go to the logs, never here.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "description": "`ok` or `failing`."
+          }
+        }
+      },
+      "Version": {
+        "type": "object",
+        "description": "Server and API versions, for clients to check compatibility.",
+        "required": [
+          "server",
+          "api"
+        ],
+        "properties": {
+          "api": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Supported major API versions."
+          },
+          "server": {
+            "type": "string",
+            "description": "Version of this server."
+          }
+        }
+      }
+    }
+  }
+}

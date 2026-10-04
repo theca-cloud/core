@@ -10,12 +10,21 @@ Design and decisions: [theca/docs](https://git.pband.ch/theca/docs). Contributin
 
 ## Development
 
-Prerequisites: Rust (the toolchain is pinned in `rust-toolchain.toml`), Docker.
+Prerequisites: Rust (the toolchain is pinned in `rust-toolchain.toml`), Docker, and:
 
 ```sh
-scripts/dev.sh                 # start Postgres, write .env (idempotent)
-cargo run -p theca-core        # run the server (binary: theca-server)
-scripts/ci.sh                  # every CI check, natively (needs: cargo install --locked cargo-deny)
+cargo install --locked sqlx-cli --no-default-features --features postgres,rustls
+cargo install --locked cargo-deny
+```
+
+```sh
+scripts/dev.sh                 # start Postgres, write .env and dev secrets, migrate (idempotent)
+cargo run -p theca-core        # run the server on :8080 (binary: theca-server)
+cargo run -p theca-core -- healthcheck   # probe /api/health, exit 0 or 1
+cargo test --workspace         # needs scripts/dev.sh (tests use the dev Postgres)
+UPDATE_OPENAPI=1 cargo test    # regenerate openapi.json after changing the API
+cargo sqlx prepare --workspace -- --all-targets   # refresh .sqlx/ after changing a query
+scripts/ci.sh                  # every CI check, natively
 scripts/ci-docker.sh           # the real Woodpecker pipeline, in Docker (needs woodpecker-cli)
 scripts/install-hooks.sh       # run scripts/ci.sh before every push (bypass: git push --no-verify)
 cargo fmt --all                # fix formatting

@@ -9,4 +9,5 @@ FROM rust:${RUST_VERSION}
 RUN rustup component add rustfmt clippy \
  && rustup target add wasm32-unknown-unknown \
  && cargo install --locked cargo-deny \
+ && cargo install --locked sqlx-cli --no-default-features --features postgres,rustls \
  && rm -rf "$CARGO_HOME/registry" "$CARGO_HOME/git"
