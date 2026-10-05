@@ -21,6 +21,10 @@ Every release of `core`: the server image, the crates, the browser package, `ope
 - **core**: Rate limits, trusted proxies and metrics
 - **core**: Account and organization deletion, export
 
+### Fixes
+
+- **ci**: Run the release pipeline on manual triggers too
+
 ### Build and CI
 
 - Split the pipeline into steps, skip documentation-only changes
