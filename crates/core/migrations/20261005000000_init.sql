@@ -53,7 +53,8 @@ CREATE TABLE organization (
     name text NOT NULL,
     -- TRIGGER: the default storage is shared (NULL) or belongs to this organization.
     default_storage bigint REFERENCES storage,
-    owner bigint NOT NULL,  -- composite FK added below (cycle with "user")
+    -- Composite FK added below (cycle with "user"). NULL only once deleted.
+    owner bigint,
     -- Storage quota in bytes (sum of the stored sizes of its chunks). NULL: unlimited.
     quota bigint CONSTRAINT organization_quota CHECK (quota >= 0),
     -- Constant, only for the owner FK below: the owner has joined (not an invitation).
@@ -64,7 +65,11 @@ CREATE TABLE organization (
     personal_of bigint UNIQUE,  -- FK to account added below (account is created after)
     -- Suspended (e.g. unpaid): nothing of it is reachable (organization_access);
     -- its members still log in and see it suspended.
-    suspended_at timestamptz
+    suspended_at timestamptz,
+    -- Deleted: its data is gone, its chunks tombstoned; the row stays (chunks
+    -- reference it until the GC has deleted their objects), then goes.
+    deleted_at timestamptz,
+    CONSTRAINT organization_owner_present CHECK (owner IS NOT NULL OR deleted_at IS NOT NULL)
 );
 
 ALTER TABLE storage

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT o.name FROM organization o JOIN \"user\" u ON u.pk = o.owner\n           WHERE u.account = $1 AND o.personal_of IS NULL AND o.deleted_at IS NULL\n           ORDER BY lower(o.name)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9bf216ad2408dfa7f30731ece6059ad9f04c9b1431a4d2eb87b8804071c1486c"
+}

@@ -835,3 +835,73 @@ pub struct ProviderRequest {
     #[serde(default)]
     pub enabled: Option<bool>,
 }
+
+/// `POST /organizations/{id}/owner`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TransferOwnership {
+    /// The joined member becoming the owner.
+    pub member: Uuid,
+}
+
+/// `DELETE /me`: the account confirms (its password if it has one, its TOTP
+/// code if on).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct DeleteAccount {
+    /// The account's password.
+    #[serde(default)]
+    pub password: Option<String>,
+    /// A TOTP or recovery code.
+    #[serde(default)]
+    pub totp: Option<String>,
+}
+
+/// Everything the server holds about an account (`GET /me/export`), never
+/// secrets. Files come through the usual paths (CLI, WebDAV).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Export {
+    /// The account.
+    pub account: ExportedAccount,
+    /// Its organizations.
+    pub organizations: Vec<Membership>,
+    /// Its live sessions.
+    pub sessions: Vec<Session>,
+    /// Its ways to log in.
+    pub identities: Vec<Identity>,
+    /// Its app passwords (names and scopes).
+    pub app_passwords: Vec<AppPassword>,
+    /// The files of its personal organization.
+    pub files: Vec<ExportedFile>,
+}
+
+/// The account part of an export.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ExportedAccount {
+    /// The account.
+    pub id: Uuid,
+    /// Its email.
+    pub email: String,
+    /// Its email is verified.
+    pub verified: bool,
+    /// TOTP is on.
+    pub totp: bool,
+    /// When it was created.
+    pub created_at: String,
+}
+
+/// A file of an export.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ExportedFile {
+    /// The file.
+    pub id: Uuid,
+    /// Its library.
+    pub library: String,
+    /// Its path.
+    pub path: String,
+    /// How many versions it has.
+    pub versions: i64,
+}

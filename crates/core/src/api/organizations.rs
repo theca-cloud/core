@@ -19,6 +19,8 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/organizations/{id}/members", get(members).post(add))
         .route("/organizations/{id}/members/{user}", delete(remove))
+        .route("/organizations/{id}", delete(delete_organization))
+        .route("/organizations/{id}/owner", axum::routing::post(transfer))
         .route(
             "/organizations/{id}/identity-providers",
             get(providers).post(create_provider),
@@ -204,4 +206,57 @@ pub async fn delete_provider(
 ) -> Result<StatusCode, HttpError> {
     let organization = owned(&state, &account, id).await?;
     super::providers::delete(&state, Some(organization.pk), provider).await
+}
+
+/// Give the organization to another joined member (the owner).
+#[utoipa::path(post, path = "/api/v1/organizations/{id}/owner", params(("id" = Uuid, Path)), request_body = api::TransferOwnership, responses(
+    (status = 204),
+    (status = 404, description = "Not the owner, or not a joined member", body = api::ApiError),
+    (status = 409, description = "`personal_organization`", body = api::ApiError),
+))]
+pub async fn transfer(
+    State(state): State<AppState>,
+    account: CurrentAccount,
+    Path(id): Path<Uuid>,
+    ApiJson(request): ApiJson<api::TransferOwnership>,
+) -> Result<StatusCode, HttpError> {
+    let organization = owned(&state, &account, id).await?;
+    if organization.personal {
+        return Err(personal());
+    }
+    let mut tx = state.pool.begin().await?;
+    if !db::deletion::transfer(&mut tx, organization.pk, request.member).await? {
+        return Err(HttpError::not_found("member"));
+    }
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Delete the organization (the owner): every library, file and version at
+/// once; the stored data follows with the garbage collection, started now.
+#[utoipa::path(delete, path = "/api/v1/organizations/{id}", params(("id" = Uuid, Path)), responses(
+    (status = 204),
+    (status = 404, body = api::ApiError),
+    (status = 409, description = "`personal_organization` (deleted with the account)", body = api::ApiError),
+))]
+pub async fn delete_organization(
+    State(state): State<AppState>,
+    account: CurrentAccount,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, HttpError> {
+    let organization = owned(&state, &account, id).await?;
+    if organization.personal {
+        return Err(personal());
+    }
+    erase(&state, organization.pk).await
+}
+
+/// Deletes an organization and starts the GC (also for the admin API).
+pub(super) async fn erase(state: &AppState, organization: i64) -> Result<StatusCode, HttpError> {
+    let mut tx = state.pool.begin().await?;
+    db::deletion::organization(&mut tx, organization).await?;
+    tx.commit().await?;
+    crate::jobs::trigger(state, crate::jobs::Job::ChunkGc).await;
+    tracing::info!(organization, "organization deleted");
+    Ok(StatusCode::NO_CONTENT)
 }

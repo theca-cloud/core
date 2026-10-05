@@ -170,6 +170,17 @@ pub async fn next_wait(pool: &PgPool, job: Job, interval: Duration) -> sqlx::Res
 /// A run being recorded: `(pk, uuid)`.
 pub type Run = (i64, Uuid);
 
+/// Runs a job now, in the background (unless it's running already).
+pub async fn trigger(state: &AppState, job: Job) {
+    match start(&state.pool, job).await {
+        Ok(Some(run)) => {
+            tokio::spawn(execute(state.clone(), job, run));
+        }
+        Ok(None) => {}
+        Err(e) => tracing::warn!(job = job.name(), error = %e, "cannot start the job"),
+    }
+}
+
 /// Records a new run, unless the job is already running.
 pub async fn start(pool: &PgPool, job: Job) -> sqlx::Result<Option<Run>> {
     let row = sqlx::query!(
@@ -405,6 +416,14 @@ async fn cleanup(state: &AppState) -> Result<i64, JobError> {
         crate::db::organization::delete_if_phantom(&mut *state.pool.acquire().await?, row.account)
             .await?;
     }
+    // Deleted organizations whose last chunk the GC has removed.
+    let deleted = sqlx::query!(
+        "DELETE FROM organization o WHERE o.deleted_at IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM chunk c WHERE c.organization = o.pk)"
+    )
+    .execute(&state.pool)
+    .await?
+    .rows_affected();
     // Self-registered accounts never verified: they could never log in, and
     // their address is freed (someone else may have registered it).
     let unverified = sqlx::query_scalar!(
@@ -419,7 +438,7 @@ async fn cleanup(state: &AppState) -> Result<i64, JobError> {
     for &account in &unverified {
         delete_unverified(&state.pool, account).await?;
     }
-    Ok((tokens + runs + emails) as i64 + expired.len() as i64 + unverified.len() as i64)
+    Ok((tokens + runs + emails + deleted) as i64 + expired.len() as i64 + unverified.len() as i64)
 }
 
 /// Deletes a never verified account: its memberships, its personal

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT details->>'hash' AS \"hash!\" FROM identity WHERE account = $1 AND kind = 'password'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "hash!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b7823967c2d2f6bc38c1fbdd4907074ab0ccba4ea4a4d25d30a8e5223a2111fa"
+}

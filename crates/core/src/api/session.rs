@@ -20,7 +20,8 @@ pub fn router() -> Router<AppState> {
         .route("/auth/logout", post(logout))
         .route("/auth/sessions", get(sessions))
         .route("/auth/sessions/{id}", delete(revoke))
-        .route("/me", get(me))
+        .route("/me", get(me).delete(delete_me))
+        .route("/me/export", get(export))
 }
 
 /// Log in with email and password. Sets the session cookie. Unknown email and
@@ -170,4 +171,155 @@ pub async fn me(
     account: CurrentAccount,
 ) -> Result<Json<api::Me>, HttpError> {
     Ok(Json(db::account::me(&state.pool, account.account).await?))
+}
+
+/// Deletes an account, if it owns no company organization and isn't the
+/// last active instance admin; starts the GC for its personal data.
+pub(super) async fn erase_account(state: &AppState, account: i64) -> Result<(), HttpError> {
+    let owned = db::deletion::owned_organizations(&state.pool, account).await?;
+    if !owned.is_empty() {
+        return Err(HttpError::conflict(
+            "owns_organizations",
+            format!(
+                "transfer or delete these organizations first: {}",
+                owned.join(", ")
+            ),
+        ));
+    }
+    let mut tx = state.pool.begin().await?;
+    sqlx::query!("SELECT pg_advisory_xact_lock(hashtext('theca instance admins'))")
+        .execute(&mut *tx)
+        .await?;
+    let others = sqlx::query_scalar!(
+        r#"SELECT count(*) AS "count!" FROM account
+           WHERE instance_admin AND suspended_at IS NULL AND pk <> $1"#,
+        account
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    let admin = sqlx::query_scalar!("SELECT instance_admin FROM account WHERE pk = $1", account)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| HttpError::not_found("account"))?;
+    if admin && others == 0 {
+        return Err(HttpError::conflict(
+            "last_admin",
+            "the instance needs at least one active admin",
+        ));
+    }
+    db::deletion::account(&mut tx, account).await?;
+    tx.commit().await?;
+    crate::jobs::trigger(state, crate::jobs::Job::ChunkGc).await;
+    Ok(())
+}
+
+/// Delete this account (a full session, confirmed with its password if it has
+/// one and its TOTP code if on): its personal organization, memberships,
+/// identities, tokens and emails, at once. Refused while it owns a company
+/// organization (transfer or delete it first).
+#[utoipa::path(delete, path = "/api/v1/me", request_body = api::DeleteAccount, responses(
+    (status = 204),
+    (status = 401, description = "`invalid_credentials`, `totp_required`, `invalid_totp`", body = api::ApiError),
+    (status = 409, description = "`owns_organizations`, `last_admin`", body = api::ApiError),
+))]
+pub async fn delete_me(
+    State(state): State<AppState>,
+    account: CurrentAccount,
+    ip: ClientIp,
+    ApiJson(request): ApiJson<api::DeleteAccount>,
+) -> Result<(StatusCode, HeaderMap), HttpError> {
+    account.require_full_session()?;
+    let hash = sqlx::query_scalar!(
+        r#"SELECT details->>'hash' AS "hash!" FROM identity WHERE account = $1 AND kind = 'password'"#,
+        account.account
+    )
+    .fetch_optional(&state.pool)
+    .await?;
+    if let Some(hash) = hash
+        && !verify_password(Some(&hash), request.password.as_deref().unwrap_or_default())
+    {
+        return Err(HttpError::new(
+            StatusCode::UNAUTHORIZED,
+            "invalid_credentials",
+            "wrong password",
+        ));
+    }
+    if let Some(identity) = db::account::totp_of(&state.pool, account.account)
+        .await?
+        .filter(|t| t.confirmed)
+    {
+        let code = request.totp.as_deref().ok_or_else(|| {
+            HttpError::new(
+                StatusCode::UNAUTHORIZED,
+                "totp_required",
+                "send a TOTP code",
+            )
+        })?;
+        if !super::totp::check_code(&state, account.account_uuid, &identity, code, true, ip).await?
+        {
+            return Err(HttpError::new(
+                StatusCode::UNAUTHORIZED,
+                "invalid_totp",
+                "wrong or reused code",
+            ));
+        }
+    }
+    erase_account(&state, account.account).await?;
+    tracing::info!(account = %account.account_uuid, "account deleted by itself");
+    let mut headers = HeaderMap::new();
+    clear_session_cookie(&mut headers);
+    Ok((StatusCode::NO_CONTENT, headers))
+}
+
+/// Everything the server holds about this account, never secrets (a full
+/// session). Files come through the usual paths (CLI, WebDAV).
+#[utoipa::path(get, path = "/api/v1/me/export", responses((status = 200, body = api::Export)))]
+pub async fn export(
+    State(state): State<AppState>,
+    account: CurrentAccount,
+) -> Result<Json<api::Export>, HttpError> {
+    account.require_full_session()?;
+    let row = sqlx::query!(
+        r#"SELECT uuid, email, verified, created_at::text AS "created_at!",
+                  EXISTS (SELECT 1 FROM identity WHERE account = $1 AND kind = 'totp'
+                          AND details->>'confirmed' = 'true') AS "totp!"
+           FROM account WHERE pk = $1"#,
+        account.account
+    )
+    .fetch_one(&state.pool)
+    .await?;
+    let files = sqlx::query_as!(
+        api::ExportedFile,
+        r#"SELECT n.uuid AS id, l.name AS library, node_path(n.pk) AS "path!",
+                  (SELECT count(*) FROM version v WHERE v.file = n.pk) AS "versions!"
+           FROM node n JOIN library l ON l.pk = n.library
+           JOIN organization o ON o.pk = l.owner
+           WHERE o.personal_of = $1 AND n.is_file AND node_reachable(n.pk)
+           ORDER BY l.name, node_path(n.pk)"#,
+        account.account
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(api::Export {
+        account: api::ExportedAccount {
+            id: row.uuid,
+            email: row.email,
+            verified: row.verified,
+            totp: row.totp,
+            created_at: row.created_at,
+        },
+        organizations: db::account::me(&state.pool, account.account)
+            .await?
+            .organizations,
+        sessions: db::account::sessions(
+            &state.pool,
+            account.account_uuid,
+            account.token_uuid,
+            state.settings.get().session_lifetime(),
+        )
+        .await?,
+        identities: db::identity::identities(&state.pool, account.account).await?,
+        app_passwords: db::account::app_passwords(&state.pool, &account).await?,
+        files,
+    }))
 }

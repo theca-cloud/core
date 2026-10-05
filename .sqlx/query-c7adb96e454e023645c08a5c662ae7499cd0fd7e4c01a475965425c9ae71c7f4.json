@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT n.uuid AS id, l.name AS library, node_path(n.pk) AS \"path!\",\n                  (SELECT count(*) FROM version v WHERE v.file = n.pk) AS \"versions!\"\n           FROM node n JOIN library l ON l.pk = n.library\n           JOIN organization o ON o.pk = l.owner\n           WHERE o.personal_of = $1 AND n.is_file AND node_reachable(n.pk)\n           ORDER BY l.name, node_path(n.pk)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "library",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "path!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "versions!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "c7adb96e454e023645c08a5c662ae7499cd0fd7e4c01a475965425c9ae71c7f4"
+}

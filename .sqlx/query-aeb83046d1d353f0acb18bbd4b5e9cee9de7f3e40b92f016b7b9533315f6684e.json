@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE organization SET deleted_at = now(), owner = NULL, personal_of = NULL, default_storage = NULL\n         WHERE pk = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "aeb83046d1d353f0acb18bbd4b5e9cee9de7f3e40b92f016b7b9533315f6684e"
+}

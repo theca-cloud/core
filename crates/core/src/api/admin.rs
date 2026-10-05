@@ -26,9 +26,15 @@ pub fn router() -> Router<AppState> {
             "/admin/organizations",
             get(organizations).post(create_organization),
         )
-        .route("/admin/organizations/{id}", patch(update_organization))
+        .route(
+            "/admin/organizations/{id}",
+            patch(update_organization).delete(delete_organization),
+        )
         .route("/admin/accounts", get(accounts))
-        .route("/admin/accounts/{id}", patch(update_account))
+        .route(
+            "/admin/accounts/{id}",
+            patch(update_account).delete(delete_account),
+        )
         .route("/admin/storages", get(storages).post(add_storage))
         .route("/admin/storages/{id}/default", post(default_storage))
         .route(
@@ -433,4 +439,44 @@ pub async fn delete_provider(
 ) -> Result<StatusCode, HttpError> {
     require_admin(&state, &account, true).await?;
     super::providers::delete(&state, None, id).await
+}
+
+/// Delete an organization (personal ones included): its data at once, its
+/// stored chunks with the garbage collection, started now.
+#[utoipa::path(delete, path = "/api/v1/admin/organizations/{id}", params(("id" = Uuid, Path)), responses(
+    (status = 204),
+    (status = 404, body = api::ApiError),
+))]
+pub async fn delete_organization(
+    State(state): State<AppState>,
+    account: CurrentAccount,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, HttpError> {
+    require_admin(&state, &account, true).await?;
+    let pk = db::admin::organization_pk(&state.pool, id)
+        .await?
+        .ok_or_else(|| HttpError::not_found("organization"))?;
+    super::organizations::erase(&state, pk).await
+}
+
+/// Delete an account (GDPR erasure). Refused while it owns a company
+/// organization (transfer it with the owner's API, or delete it first).
+#[utoipa::path(delete, path = "/api/v1/admin/accounts/{id}", params(("id" = Uuid, Path)), responses(
+    (status = 204),
+    (status = 404, body = api::ApiError),
+    (status = 409, description = "`owns_organizations`, `last_admin`", body = api::ApiError),
+))]
+pub async fn delete_account(
+    State(state): State<AppState>,
+    account: CurrentAccount,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, HttpError> {
+    require_admin(&state, &account, true).await?;
+    let pk = sqlx::query_scalar!("SELECT pk FROM account WHERE uuid = $1", id)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| HttpError::not_found("account"))?;
+    super::session::erase_account(&state, pk).await?;
+    tracing::info!(account = %id, by = %account.account_uuid, "account deleted by an admin");
+    Ok(StatusCode::NO_CONTENT)
 }

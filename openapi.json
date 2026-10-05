@@ -78,6 +78,49 @@
       }
     },
     "/api/v1/admin/accounts/{id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete an account (GDPR erasure). Refused while it owns a company\norganization (transfer it with the owner's API, or delete it first).",
+        "operationId": "delete_account",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`owns_organizations`, `last_admin`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
       "patch": {
         "tags": [
           "admin"
@@ -450,6 +493,39 @@
       }
     },
     "/api/v1/admin/organizations/{id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete an organization (personal ones included): its data at once, its\nstored chunks with the garbage collection, started now.",
+        "operationId": "delete_organization",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
       "patch": {
         "tags": [
           "admin"
@@ -2149,6 +2225,69 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "session"
+        ],
+        "summary": "Delete this account (a full session, confirmed with its password if it has\none and its TOTP code if on): its personal organization, memberships,\nidentities, tokens and emails, at once. Refused while it owns a company\norganization (transfer or delete it first).",
+        "operationId": "delete_me",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteAccount"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": "`invalid_credentials`, `totp_required`, `invalid_totp`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`owns_organizations`, `last_admin`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/export": {
+      "get": {
+        "tags": [
+          "session"
+        ],
+        "summary": "Everything the server holds about this account, never secrets (a full\nsession). Files come through the usual paths (CLI, WebDAV).",
+        "operationId": "export",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Export"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/nodes/{id}": {
@@ -2526,6 +2665,51 @@
         }
       }
     },
+    "/api/v1/organizations/{id}": {
+      "delete": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Delete the organization (the owner): every library, file and version at\nonce; the stored data follows with the garbage collection, started now.",
+        "operationId": "delete_organization",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`personal_organization` (deleted with the account)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organizations/{id}/identity-providers": {
       "get": {
         "tags": [
@@ -2882,6 +3066,61 @@
           },
           "409": {
             "description": "`owner`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{id}/owner": {
+      "post": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Give the organization to another joined member (the owner).",
+        "operationId": "transfer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferOwnership"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "Not the owner, or not a joined member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`personal_organization`",
             "content": {
               "application/json": {
                 "schema": {
@@ -3529,6 +3768,26 @@
           }
         }
       },
+      "DeleteAccount": {
+        "type": "object",
+        "description": "`DELETE /me`: the account confirms (its password if it has one, its TOTP\ncode if on).",
+        "properties": {
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The account's password."
+          },
+          "totp": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A TOTP or recovery code."
+          }
+        }
+      },
       "Download": {
         "type": "object",
         "description": "`GET /files/{id}/download`.",
@@ -3597,6 +3856,123 @@
           "email": {
             "type": "string",
             "description": "The address."
+          }
+        }
+      },
+      "Export": {
+        "type": "object",
+        "description": "Everything the server holds about an account (`GET /me/export`), never\nsecrets. Files come through the usual paths (CLI, WebDAV).",
+        "required": [
+          "account",
+          "organizations",
+          "sessions",
+          "identities",
+          "app_passwords",
+          "files"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/ExportedAccount",
+            "description": "The account."
+          },
+          "app_passwords": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AppPassword"
+            },
+            "description": "Its app passwords (names and scopes)."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExportedFile"
+            },
+            "description": "The files of its personal organization."
+          },
+          "identities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Identity"
+            },
+            "description": "Its ways to log in."
+          },
+          "organizations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Membership"
+            },
+            "description": "Its organizations."
+          },
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Session"
+            },
+            "description": "Its live sessions."
+          }
+        }
+      },
+      "ExportedAccount": {
+        "type": "object",
+        "description": "The account part of an export.",
+        "required": [
+          "id",
+          "email",
+          "verified",
+          "totp",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "When it was created."
+          },
+          "email": {
+            "type": "string",
+            "description": "Its email."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The account."
+          },
+          "totp": {
+            "type": "boolean",
+            "description": "TOTP is on."
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "Its email is verified."
+          }
+        }
+      },
+      "ExportedFile": {
+        "type": "object",
+        "description": "A file of an export.",
+        "required": [
+          "id",
+          "library",
+          "path",
+          "versions"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The file."
+          },
+          "library": {
+            "type": "string",
+            "description": "Its library."
+          },
+          "path": {
+            "type": "string",
+            "description": "Its path."
+          },
+          "versions": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many versions it has."
           }
         }
       },
@@ -4606,6 +4982,20 @@
           "uri": {
             "type": "string",
             "description": "The `otpauth://` URI, to show as a QR code."
+          }
+        }
+      },
+      "TransferOwnership": {
+        "type": "object",
+        "description": "`POST /organizations/{id}/owner`.",
+        "required": [
+          "member"
+        ],
+        "properties": {
+          "member": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The joined member becoming the owner."
           }
         }
       },

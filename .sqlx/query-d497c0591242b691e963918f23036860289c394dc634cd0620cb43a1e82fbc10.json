@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM token WHERE usage = 'invitation'\n             AND resource IN (SELECT uuid FROM \"user\" WHERE organization = $1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d497c0591242b691e963918f23036860289c394dc634cd0620cb43a1e82fbc10"
+}

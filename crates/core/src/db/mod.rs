@@ -5,6 +5,7 @@
 pub mod account;
 pub mod admin;
 pub mod chunk;
+pub mod deletion;
 pub mod file;
 pub mod identity;
 pub mod library;
