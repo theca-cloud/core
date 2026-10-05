@@ -20,3 +20,37 @@ services:
       interval: 2s
       timeout: 2s
       retries: 15
+
+  # S3 (dev only). Config written by scripts/dev.sh (random secrets).
+  garage:
+    image: dxflrs/garage:v2.4.1
+    volumes:
+      - ./data/garage/garage.toml:/etc/garage.toml:ro
+      - ./data/garage/meta:/var/lib/garage/meta
+      - ./data/garage/data:/var/lib/garage/data
+    ports:
+      - 127.0.0.1:3900:3900
+
+  # S3 explorer (dev only): http://localhost:3909.
+  garage-webui:
+    image: khairul169/garage-webui:1.1.0
+    volumes:
+      - ./data/garage/garage.toml:/etc/garage.toml:ro
+    environment:
+      API_BASE_URL: http://garage:3903
+      S3_ENDPOINT_URL: http://garage:3900
+    ports:
+      - 127.0.0.1:3909:3909
+    depends_on:
+      - garage
+
+  # Database explorer (dev only): http://localhost:8081, no login screen.
+  pgweb:
+    image: sosedoff/pgweb:latest
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+    ports:
+      - 127.0.0.1:8081:8081
+    depends_on:
+      postgres:
+        condition: service_healthy

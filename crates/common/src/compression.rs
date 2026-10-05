@@ -27,7 +27,7 @@ pub enum Compression {
 pub enum Mode {
     /// Skip high-entropy chunks, keep the result only if it saves enough.
     Auto,
-    /// Always compress.
+    /// Compress whenever it makes the chunk smaller.
     Always,
     /// Never compress.
     Never,
@@ -84,7 +84,12 @@ pub fn compress(
     }
     let compressed = encode(policy.algorithm, chunk)?;
     let saving = 1.0 - compressed.len() as f64 / chunk.len().max(1) as f64;
-    if policy.mode == Mode::Auto && saving < policy.min_saving {
+    // Never store a chunk bigger than its plaintext, in any mode (the server
+    // refuses stored_size > plain_size): the LZ4 frame header can make
+    // incompressible data slightly bigger.
+    let keep = compressed.len() < chunk.len()
+        && (policy.mode == Mode::Always || saving >= policy.min_saving);
+    if !keep {
         return Ok((Compression::None, chunk.to_vec()));
     }
     Ok((policy.algorithm, compressed))
@@ -197,7 +202,12 @@ mod tests {
             mode: Mode::Never,
             ..CompressionPolicy::default()
         };
-        assert_eq!(compress(&always, &random()).unwrap().0, Compression::Lz4);
+        assert_eq!(compress(&always, &text()).unwrap().0, Compression::Lz4);
+        // Random data grows under LZ4 (frame header): stored as is, even in "always".
+        assert_eq!(
+            compress(&always, &random()).unwrap(),
+            (Compression::None, random())
+        );
         assert_eq!(compress(&never, &text()).unwrap().0, Compression::None);
     }
 
@@ -208,6 +218,21 @@ mod tests {
             Compression::Unknown
         );
         assert!(decompress(Compression::Unknown, b"x").is_err());
+    }
+
+    #[test]
+    fn never_bigger_than_the_plaintext() {
+        for policy in [
+            CompressionPolicy::default(),
+            CompressionPolicy {
+                mode: Mode::Always,
+                ..CompressionPolicy::default()
+            },
+        ] {
+            for data in [text(), random(), vec![], vec![1]] {
+                assert!(compress(&policy, &data).unwrap().1.len() <= data.len());
+            }
+        }
     }
 
     #[test]

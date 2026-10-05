@@ -193,7 +193,7 @@ pub async fn version_chunks(
         .fetch_one(pool)
         .await?;
     let rows = sqlx::query!(
-        r#"SELECT c.uuid, c.hash, c.compression AS "compression!", c.plain_size AS "plain_size!", c.storage
+        r#"SELECT c.uuid, c.hash, c.compression AS "compression!", c.plain_size, c.storage
            FROM chunk_in_version civ JOIN chunk c ON c.pk = civ.chunk
            WHERE civ.version = $1 ORDER BY civ.position"#,
         version

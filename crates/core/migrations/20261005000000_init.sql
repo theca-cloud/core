@@ -52,6 +52,8 @@ CREATE TABLE organization (
     -- TRIGGER: the default storage is shared (NULL) or belongs to this organization.
     default_storage bigint REFERENCES storage,
     owner bigint NOT NULL,  -- composite FK added below (cycle with "user")
+    -- Storage quota in bytes (sum of the stored sizes of its chunks). NULL: unlimited.
+    quota bigint CONSTRAINT organization_quota CHECK (quota >= 0),
     -- Constant, only for the owner FK below: the owner has joined (not an invitation).
     owner_joined boolean NOT NULL DEFAULT true CHECK (owner_joined)
 );
@@ -268,7 +270,7 @@ ALTER TABLE node
     ADD CONSTRAINT node_current_version FOREIGN KEY (pk, current_version) REFERENCES version (file, pk)
     DEFERRABLE INITIALLY DEFERRED;
 
--- chunk : organization, library (origin), hash (16 bytes), storage, stored_size, plain_size, compression, uploaded_at, touched_at, deleting_at
+-- chunk : organization, library (origin), hash (16 bytes), storage, sizes, compression, stored_sha256, url_expires_at, uploaded_at, touched_at, deleting_at
 CREATE TABLE chunk (
     pk bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     uuid uuid NOT NULL UNIQUE DEFAULT uuidv7(),
@@ -281,9 +283,20 @@ CREATE TABLE chunk (
     hash bytea NOT NULL CHECK (length(hash) = 16),
     -- TRIGGER: the storage is shared (NULL organization) or the chunk's organization's.
     storage bigint NOT NULL REFERENCES storage,
-    stored_size bigint,  -- from the backend, set at announce
-    plain_size bigint,   -- from the client, set at announce
+    -- Declared by the client at lookup: size before compression (and encryption).
+    plain_size bigint NOT NULL CONSTRAINT chunk_plain_size CHECK (plain_size BETWEEN 0 AND 8388608),
+    -- Declared together at upload-urls (only for chunks actually uploaded), then
+    -- fixed: the presigned URL signs stored_sha256, so the backend only accepts
+    -- exactly these bytes. NULL: not declared yet.
+    stored_size bigint,
     compression text CHECK (compression IN ('none', 'lz4')),
+    stored_sha256 bytea CHECK (length(stored_sha256) = 32),
+    -- The user who declared it (counts towards their pending uploads). NULL once
+    -- they leave the organization.
+    declared_by bigint,
+    -- When the last presigned URL issued for this chunk expires (plus a margin):
+    -- its object can't be deleted before, or a late upload would leak an object.
+    url_expires_at timestamptz,
     uploaded_at timestamptz,  -- NULL = pending
     touched_at timestamptz NOT NULL DEFAULT now(),
     deleting_at timestamptz,  -- GC tombstone
@@ -293,14 +306,21 @@ CREATE TABLE chunk (
     ready boolean NOT NULL GENERATED ALWAYS AS (uploaded_at IS NOT NULL AND deleting_at IS NULL) STORED,
     UNIQUE (organization, pk, ready),
     FOREIGN KEY (organization, library) REFERENCES library (owner, pk) ON DELETE SET NULL (library),
+    FOREIGN KEY (organization, declared_by) REFERENCES "user" (organization, pk) ON DELETE SET NULL (declared_by),
     -- Pending (all NULL) or announced (all set).
-    CONSTRAINT chunk_announced_stored_size CHECK ((uploaded_at IS NULL) = (stored_size IS NULL)),
-    CONSTRAINT chunk_announced_plain_size CHECK ((uploaded_at IS NULL) = (plain_size IS NULL)),
-    CONSTRAINT chunk_announced_compression CHECK ((uploaded_at IS NULL) = (compression IS NULL)),
-    CONSTRAINT chunk_sizes CHECK (stored_size >= 0 AND plain_size >= 0)
+    -- The declaration is all or nothing.
+    CONSTRAINT chunk_declared CHECK (
+        (stored_size IS NULL) = (compression IS NULL) AND (stored_size IS NULL) = (stored_sha256 IS NULL)
+    ),
+    -- Compression never makes a chunk bigger (E2EE will relax this for its overhead).
+    CONSTRAINT chunk_stored_size CHECK (stored_size BETWEEN 0 AND plain_size),
+    -- An uploaded chunk was declared.
+    CONSTRAINT chunk_uploaded_declared CHECK (uploaded_at IS NULL OR stored_size IS NOT NULL)
 );
 -- Lookups: by hash within an organization.
 CREATE INDEX chunk_hash ON chunk (organization, hash);
+-- A user's uploads in progress (max_pending_uploads).
+CREATE INDEX chunk_declared_by ON chunk (declared_by) WHERE uploaded_at IS NULL AND declared_by IS NOT NULL;
 
 -- chunk_in_version : version, chunk, position (UNIQUE(version, position))
 CREATE TABLE chunk_in_version (

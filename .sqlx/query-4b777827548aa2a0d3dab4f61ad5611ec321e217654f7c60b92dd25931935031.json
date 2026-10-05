@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"count!\" FROM chunk\n           WHERE declared_by = $1 AND uploaded_at IS NULL AND deleting_at IS NULL\n             AND url_expires_at > now() AND NOT (uuid = ANY($2))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "4b777827548aa2a0d3dab4f61ad5611ec321e217654f7c60b92dd25931935031"
+}

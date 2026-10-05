@@ -15,6 +15,10 @@ dotenvy.workspace = true
 getrandom.workspace = true
 hmac.workspace = true
 object_store.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+http.workspace = true
+base64.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -28,6 +32,9 @@ utoipa.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+# v7: random test IDs (native only; WASM would need a randomness source).
+uuid = { workspace = true, features = ["v7"] }
+tracing-subscriber.workspace = true
 tempfile.workspace = true
 tower.workspace = true
 

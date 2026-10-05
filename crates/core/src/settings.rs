@@ -17,6 +17,11 @@ pub struct Settings {
     pub instance_name: String,
     /// How long an unreferenced, untouched chunk is kept before GC deletes it.
     pub gc_grace_period: Duration,
+    /// How long presigned upload and download URLs stay valid.
+    pub presigned_url_lifetime: Duration,
+    /// Most chunks a user may have "being uploaded" at once: declared, with an
+    /// upload URL still valid, not uploaded yet. Clients upload in batches.
+    pub max_pending_uploads: i64,
 }
 
 impl Settings {
@@ -31,10 +36,15 @@ impl Settings {
 
         let settings = Self {
             instance_name: take(&mut values, "instance_name", "Theca", |v| Ok(v.to_owned()))?,
-            gc_grace_period: take(&mut values, "gc_grace_period_secs", "86400", |v| {
-                v.parse()
-                    .map(Duration::from_secs)
-                    .map_err(|e| format!("{e}"))
+            gc_grace_period: take(&mut values, "gc_grace_period_secs", "86400", seconds)?,
+            presigned_url_lifetime: take(
+                &mut values,
+                "presigned_url_lifetime_secs",
+                "900",
+                seconds,
+            )?,
+            max_pending_uploads: take(&mut values, "max_pending_uploads", "15", |v| {
+                v.parse::<u32>().map(i64::from).map_err(|e| format!("{e}"))
             })?,
         };
 
@@ -46,6 +56,12 @@ impl Settings {
         }
         Ok(settings)
     }
+}
+
+fn seconds(v: &str) -> Result<Duration, String> {
+    v.parse()
+        .map(Duration::from_secs)
+        .map_err(|e| format!("{e}"))
 }
 
 fn take<T>(

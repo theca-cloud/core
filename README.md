@@ -6,7 +6,7 @@ The Theca server and the Rust libraries shared by its clients:
 - `core`: the server (API, WebDAV, background jobs, migrations).
 - `client`: the engine every Rust client is built on (auth, upload, download).
 
-Design and decisions: [theca/docs](https://git.pband.ch/theca/docs). Contributing: see [CONTRIBUTING.md](https://git.pband.ch/theca/docs/src/branch/prod/CONTRIBUTING.md).
+Configuring a server: [CONFIGURATION.md](CONFIGURATION.md). Design and decisions: [theca/docs](https://git.pband.ch/theca/docs). Contributing: see [CONTRIBUTING.md](https://git.pband.ch/theca/docs/src/branch/prod/CONTRIBUTING.md).
 
 ## Development
 
@@ -21,15 +21,17 @@ cargo install --locked cargo-deny
 scripts/dev.sh                 # start Postgres, write .env and dev secrets, migrate (idempotent)
 cargo run -p theca-core        # run the server on :8080 (binary: theca-server)
 cargo run -p theca-core -- healthcheck   # probe /api/health, exit 0 or 1
-cargo test --workspace         # needs scripts/dev.sh (tests use the dev Postgres)
+cargo test --workspace         # needs scripts/dev.sh (tests use the dev Postgres and Garage)
 UPDATE_OPENAPI=1 cargo test    # regenerate openapi.json after changing the API
 cargo sqlx prepare --workspace -- --all-targets   # refresh .sqlx/ after changing a query
-sqlx database reset -y --source crates/core/migrations   # after editing the migration (rewritten in place until 1.0.0)
+sqlx database reset -y -f --source crates/core/migrations   # after editing the migration (rewritten in place until 1.0.0)
 scripts/ci.sh                  # every CI check, natively
 scripts/ci-docker.sh           # the real Woodpecker pipeline, in Docker (needs woodpecker-cli)
 scripts/install-hooks.sh       # run scripts/ci.sh before every push (bypass: git push --no-verify)
 cargo fmt --all                # fix formatting
 ```
+
+Dev explorers: database (pgweb, no login) http://localhost:8081, S3 (garage-webui) http://localhost:3909.
 
 Start over: `rm -rf data/ .env`, then `scripts/dev.sh`.
 

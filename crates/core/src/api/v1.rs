@@ -12,11 +12,12 @@ use theca_common::chunking::MAX_SIZE;
 use uuid::Uuid;
 
 use super::AppState;
-use super::auth::CurrentUser;
+use super::auth::{ClientIp, CurrentUser};
 use super::error::{ApiJson, HttpError};
 use crate::db;
 use crate::db::library::Access;
 use crate::storage::{Backend, Operation};
+use theca_common::hash::Sha256;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -56,8 +57,7 @@ fn require_write(access: &Access) -> Result<(), HttpError> {
 }
 
 async fn backend(state: &AppState, storage: i64) -> Result<Backend, HttpError> {
-    let (implementation, details) = db::chunk::storage(&state.pool, storage).await?;
-    Ok(Backend::new(&implementation, &details)?)
+    Ok(state.backends.get(storage).await?)
 }
 
 /// Create a library: its root folder, the creator as `write` member, in the given
@@ -132,111 +132,143 @@ async fn lookup(
     let access = library_access(&state, &user, req.library).await?;
     require_write(&access)?;
     Ok(Json(
-        db::chunk::lookup(&state.pool, &access, &req.hashes).await?,
+        db::chunk::lookup(&state.pool, &access, &req.chunks).await?,
     ))
 }
 
-/// Presigned upload URLs for pending chunks (request them in batches).
-#[utoipa::path(post, path = "/api/v1/chunks/upload-urls", request_body = api::Chunks, responses(
+/// Declare what will be uploaded and get presigned upload URLs (in batches).
+/// The declaration is fixed at the first request; the URL only accepts exactly
+/// the declared bytes (their SHA-256 is signed). Checks the organization's quota.
+#[utoipa::path(post, path = "/api/v1/chunks/upload-urls", request_body = Vec<api::Declare>, responses(
     (status = 200, body = Vec<api::ChunkUrl>),
-    (status = 403, description = "Chunks not pending or not writable", body = api::ApiError),
+    (status = 400, description = "`invalid_declaration`", body = api::ApiError),
+    (status = 403, description = "`chunk_not_allowed`: not pending, or not writable", body = api::ApiError),
+    (status = 409, description = "`declaration_mismatch`, `quota_exceeded`", body = api::ApiError),
 ))]
 async fn upload_urls(
     State(state): State<AppState>,
     user: CurrentUser,
-    ApiJson(req): ApiJson<api::Chunks>,
+    ApiJson(req): ApiJson<Vec<api::Declare>>,
 ) -> Result<Json<Vec<api::ChunkUrl>>, HttpError> {
-    let allowed = writable_pending(&state, &user, &req.chunks).await?;
-    Ok(Json(
-        allowed
-            .iter()
-            .map(|(chunk, _)| api::ChunkUrl {
-                chunk: *chunk,
-                url: state.signer.url(Operation::Put, *chunk),
-            })
-            .collect(),
-    ))
-}
-
-/// All requested chunks must be pending and uploaded into a library the user can write.
-async fn writable_pending(
-    state: &AppState,
-    user: &CurrentUser,
-    chunks: &[Uuid],
-) -> Result<Vec<(Uuid, i64)>, HttpError> {
-    let allowed = db::chunk::writable_pending(&state.pool, user.pk, chunks).await?;
-    let refused: Vec<Uuid> = chunks
-        .iter()
-        .filter(|c| !allowed.iter().any(|(a, _)| a == *c))
-        .copied()
-        .collect();
-    if refused.is_empty() {
-        Ok(allowed)
-    } else {
-        Err(
-            HttpError::forbidden("chunks not pending, or not in a library you can write")
-                .with_chunks(refused),
-        )
+    use db::chunk::DeclareError;
+    let lifetime = state.settings.presigned_url_lifetime;
+    let max_uploads = state.settings.max_pending_uploads;
+    let declared = db::chunk::declare(&state.pool, user.pk, user.organization, &req, lifetime, max_uploads)
+        .await
+        .map_err(|e| match e {
+            DeclareError::NotAllowed(chunks) => {
+                tracing::warn!(anomaly = "upload_url_not_allowed", user = %user.uuid, ?chunks,
+                    "upload URL requested for chunks not pending or not writable");
+                HttpError::forbidden("chunks not pending, or not in a library you can write")
+                    .into_code("chunk_not_allowed")
+                    .with_chunks(chunks)
+            }
+            DeclareError::Mismatch(chunks) => {
+                tracing::warn!(anomaly = "declaration_mismatch", user = %user.uuid, ?chunks,
+                    "chunk declared again with another size, compression or checksum");
+                HttpError::conflict(
+                    "declaration_mismatch",
+                    "these chunks were declared with other values",
+                )
+                .with_chunks(chunks)
+            }
+            DeclareError::Invalid(chunks) => {
+                tracing::warn!(anomaly = "invalid_declaration", user = %user.uuid, ?chunks,
+                    "stored size above plain size, or unknown compression");
+                HttpError::bad_request(
+                    "invalid_declaration",
+                    "stored size above plain size, or unknown compression",
+                )
+                .with_chunks(chunks)
+            }
+            DeclareError::TooManyUploads { in_progress, requested, max } => HttpError::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "too_many_pending_uploads",
+                format!("{in_progress} uploads in progress and {requested} more requested, the limit is {max}: upload and announce first"),
+            ),
+            DeclareError::QuotaExceeded { quota, needed } => HttpError::conflict(
+                "quota_exceeded",
+                format!(
+                    "the organization's quota ({quota} bytes) would be exceeded ({needed} bytes)"
+                ),
+            ),
+            DeclareError::Db(e) => e.into(),
+        })?;
+    let mut urls = Vec::with_capacity(declared.len());
+    for d in declared {
+        let presigned = backend(&state, d.storage)
+            .await?
+            .upload_url(&state.signer, d.chunk, d.sha256, lifetime)
+            .await?;
+        urls.push(api::ChunkUrl {
+            chunk: d.chunk,
+            url: presigned.url,
+            headers: presigned.headers,
+        });
     }
+    Ok(Json(urls))
 }
 
-/// Mark uploaded chunks as ready. The real size is read from the backend; a
-/// chunk whose object is missing stays pending (`upload`).
-#[utoipa::path(post, path = "/api/v1/chunks/announce", request_body = Vec<api::Announce>, responses(
-    (status = 200, description = "Chunks still to upload (object missing), with fresh URLs", body = Vec<api::ChunkUrl>),
+/// Mark uploaded chunks as ready, after checking each object exists with the
+/// declared size. Returns the chunks still to upload (object missing): request
+/// new URLs for them (same declaration).
+#[utoipa::path(post, path = "/api/v1/chunks/announce", request_body = api::Chunks, responses(
+    (status = 200, description = "Chunks not uploaded yet", body = api::Chunks),
+    (status = 403, description = "`chunk_not_allowed`", body = api::ApiError),
 ))]
 async fn announce(
     State(state): State<AppState>,
     user: CurrentUser,
-    ApiJson(req): ApiJson<Vec<api::Announce>>,
-) -> Result<Json<Vec<api::ChunkUrl>>, HttpError> {
-    let ids: Vec<Uuid> = req.iter().map(|a| a.chunk).collect();
-    let allowed = writable_pending(&state, &user, &ids).await?;
+    ApiJson(req): ApiJson<api::Chunks>,
+) -> Result<Json<api::Chunks>, HttpError> {
+    let allowed = db::chunk::announceable(&state.pool, user.pk, &req.chunks).await?;
+    let refused: Vec<Uuid> = req
+        .chunks
+        .iter()
+        .filter(|c| !allowed.iter().any(|(a, _, _)| a == *c))
+        .copied()
+        .collect();
+    if !refused.is_empty() {
+        tracing::warn!(anomaly = "announce_not_allowed", user = %user.uuid, chunks = ?refused,
+            "announce of chunks not pending, not declared, or not writable");
+        return Err(
+            HttpError::forbidden("chunks not pending, not declared, or not writable")
+                .into_code("chunk_not_allowed")
+                .with_chunks(refused),
+        );
+    }
     let mut missing = Vec::new();
-    for item in &req {
-        let storage = allowed
-            .iter()
-            .find(|(c, _)| *c == item.chunk)
-            .expect("checked")
-            .1;
-        match backend(&state, storage).await?.size(item.chunk).await? {
-            Some(size) => {
-                db::chunk::announce(
-                    &state.pool,
-                    item.chunk,
-                    size,
-                    item.plain_size,
-                    item.compression,
-                )
-                .await?
+    for (chunk, storage, declared) in allowed {
+        match backend(&state, storage).await?.size(chunk).await? {
+            Some(size) if i64::try_from(size).ok() == Some(declared) => {
+                db::chunk::mark_uploaded(&state.pool, chunk).await?;
             }
-            None => missing.push(item.chunk),
+            Some(size) => {
+                // The signed checksum should make this impossible: a backend
+                // ignoring it, or an attempt. The chunk stays pending.
+                tracing::warn!(anomaly = "announce_size_mismatch", user = %user.uuid, %chunk, declared, size,
+                    "uploaded object doesn't have the declared size");
+                missing.push(chunk);
+            }
+            None => {
+                tracing::warn!(anomaly = "announce_missing_object", user = %user.uuid, %chunk,
+                    "announced chunk has no object");
+                missing.push(chunk);
+            }
         }
     }
-    // The chunks still to upload, with a fresh URL.
-    Ok(Json(
-        missing
-            .into_iter()
-            .map(|chunk| api::ChunkUrl {
-                chunk,
-                url: state.signer.url(Operation::Put, chunk),
-            })
-            .collect(),
-    ))
+    Ok(Json(api::Chunks { chunks: missing }))
 }
 
-/// Cancel an upload: deletes the given chunks that no version references.
+/// Cancel an upload: tombstones the given chunks that no version references.
+/// Their objects are deleted later, once their upload URLs have expired.
 #[utoipa::path(post, path = "/api/v1/chunks/cancel", request_body = api::Chunks, responses((status = 204)))]
 async fn cancel(
     State(state): State<AppState>,
     user: CurrentUser,
     ApiJson(req): ApiJson<api::Chunks>,
 ) -> Result<StatusCode, HttpError> {
-    // Rows first, then objects: a crash in between leaves an orphan object
-    // (wasted space), never a row pointing to a missing object.
-    for (chunk, storage) in db::chunk::cancel(&state.pool, user.pk, &req.chunks).await? {
-        backend(&state, storage).await?.delete(chunk).await?;
-    }
+    db::chunk::cancel(&state.pool, user.pk, &req.chunks).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -283,9 +315,11 @@ async fn commit(
         CommitError::FileNotFound => HttpError::not_found("file"),
         CommitError::ParentNotFound => HttpError::not_found("folder"),
         CommitError::BaseNotFound => HttpError::not_found("base version"),
-        CommitError::ChunksNotAllowed(c) => {
+        CommitError::ChunksNotAllowed(chunks) => {
+            tracing::warn!(anomaly = "commit_chunk_not_allowed", user = %user.uuid, library = %req.library,
+                ?chunks, "commit with chunks outside the library's dedup scope");
             HttpError::forbidden("chunks outside this library's dedup scope")
-                .with_chunks(c)
+                .with_chunks(chunks)
                 .into_code("chunk_not_allowed")
         }
         CommitError::Db(e) => e.into(),
@@ -316,18 +350,24 @@ async fn download(
         .current_version
         .ok_or_else(|| HttpError::not_found("version"))?;
     let (version, chunks) = db::file::version_chunks(&state.pool, version).await?;
+    let lifetime = state.settings.presigned_url_lifetime;
+    let mut out = Vec::with_capacity(chunks.len());
+    for c in chunks {
+        let url = backend(&state, c.storage)
+            .await?
+            .download_url(&state.signer, c.uuid, lifetime)
+            .await?;
+        out.push(api::DownloadChunk {
+            chunk: c.uuid,
+            hash: c.hash,
+            compression: c.compression,
+            plain_size: c.plain_size,
+            url,
+        });
+    }
     Ok(Json(api::Download {
         version,
-        chunks: chunks
-            .into_iter()
-            .map(|c| api::DownloadChunk {
-                chunk: c.uuid,
-                hash: c.hash,
-                compression: c.compression,
-                plain_size: c.plain_size,
-                url: state.signer.url(Operation::Get, c.uuid),
-            })
-            .collect(),
+        chunks: out,
     }))
 }
 
@@ -335,6 +375,8 @@ async fn download(
 struct Signed {
     op: String,
     expires: u64,
+    #[serde(default)]
+    sha256: String,
     sig: String,
 }
 
@@ -343,29 +385,44 @@ fn check_signature(
     op: Operation,
     chunk: Uuid,
     q: &Signed,
+    ip: ClientIp,
 ) -> Result<(), HttpError> {
     let expected = match op {
         Operation::Put => "put",
         Operation::Get => "get",
     };
-    if q.op == expected && state.signer.verify(op, chunk, q.expires, &q.sig) {
+    if q.op == expected && state.signer.verify(op, chunk, q.expires, &q.sha256, &q.sig) {
         Ok(())
     } else {
+        tracing::warn!(anomaly = "invalid_signature", %chunk, ip = ?ip.0, "invalid or expired presigned URL");
         Err(HttpError::forbidden("invalid or expired URL"))
     }
 }
 
-/// Presigned upload (filesystem backend). No authentication: the URL is the authorization.
+/// Presigned upload (filesystem backend). No authentication: the URL is the
+/// authorization. Accepts exactly the declared bytes (SHA-256), while pending.
 async fn put_blob(
     State(state): State<AppState>,
     Path(chunk): Path<Uuid>,
     Query(q): Query<Signed>,
+    ip: ClientIp,
     body: Bytes,
 ) -> Result<StatusCode, HttpError> {
-    check_signature(&state, Operation::Put, chunk, &q)?;
-    let storage = db::chunk::blob_storage(&state.pool, chunk, true)
-        .await?
-        .ok_or_else(|| HttpError::not_found("pending chunk"))?;
+    check_signature(&state, Operation::Put, chunk, &q, ip)?;
+    let Some((storage, declared)) = db::chunk::pending_upload(&state.pool, chunk).await? else {
+        tracing::warn!(anomaly = "upload_not_pending", %chunk, ip = ?ip.0, "upload to a chunk no longer pending");
+        return Err(HttpError::conflict(
+            "not_pending",
+            "this chunk is already uploaded, or cancelled",
+        ));
+    };
+    if Sha256::of(&body).0[..] != declared[..] {
+        tracing::warn!(anomaly = "upload_checksum_mismatch", %chunk, ip = ?ip.0, "uploaded bytes don't match the declared SHA-256");
+        return Err(HttpError::bad_request(
+            "bad_digest",
+            "the uploaded bytes don't match the declared SHA-256",
+        ));
+    }
     backend(&state, storage)
         .await?
         .put(chunk, body.to_vec())
@@ -378,9 +435,10 @@ async fn get_blob(
     State(state): State<AppState>,
     Path(chunk): Path<Uuid>,
     Query(q): Query<Signed>,
+    ip: ClientIp,
 ) -> Result<Vec<u8>, HttpError> {
-    check_signature(&state, Operation::Get, chunk, &q)?;
-    let storage = db::chunk::blob_storage(&state.pool, chunk, false)
+    check_signature(&state, Operation::Get, chunk, &q, ip)?;
+    let storage = db::chunk::download_storage(&state.pool, chunk)
         .await?
         .ok_or_else(|| HttpError::not_found("chunk"))?;
     Ok(backend(&state, storage).await?.get(chunk).await?)

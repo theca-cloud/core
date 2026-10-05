@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE chunk c SET deleting_at = now() FROM library_member m\n           WHERE c.uuid = ANY($2) AND m.library = c.library AND m.\"user\" = $1 AND m.role = 'write'\n             AND c.deleting_at IS NULL\n             AND NOT EXISTS (SELECT 1 FROM chunk_in_version WHERE chunk = c.pk)\n           RETURNING c.uuid",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "19061d2e92f7abbda9fdc653e4117e5ea3b97485b04b2f237cd6445f8fda0b41"
+}

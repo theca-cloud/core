@@ -13,4 +13,10 @@ fi
 # looks at /var/run/docker.sock otherwise.
 export DOCKER_HOST="${DOCKER_HOST:-$(docker context inspect --format '{{.Endpoints.docker.Host}}')}"
 
+# woodpecker-cli doesn't honor `pull: true` locally: pull the CI image ourselves,
+# so a stale local copy can't hide what the real CI runs. Published images only:
+# after changing ci/Dockerfile, run scripts/ci-image.sh first.
+image=$(sed -n 's/^ *image: \(git\.pband\.ch\/[^ ]*\)$/\1/p' .woodpecker/ci.yaml | head -1)
+docker pull -q "$image" >/dev/null
+
 woodpecker-cli exec --backend-engine docker .woodpecker/ci.yaml

@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.uuid, c.storage, c.stored_size AS \"stored_size!\" FROM chunk c\n           JOIN library_member m ON m.library = c.library AND m.\"user\" = $1 AND m.role = 'write'\n           WHERE c.uuid = ANY($2) AND c.uploaded_at IS NULL AND c.deleting_at IS NULL\n             AND c.stored_size IS NOT NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "storage",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "stored_size!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "fec1e502c6c438025166b46744ac23b318c087ab7c3708cee14e74f2b98e04c5"
+}

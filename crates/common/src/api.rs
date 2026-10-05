@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::compression::Compression;
-use crate::hash::ChunkHash;
+use std::collections::BTreeMap;
+
+use crate::hash::{ChunkHash, Sha256};
 use crate::name::Name;
 
 /// An API error: a stable machine-readable `code` and a human message.
@@ -64,9 +66,19 @@ pub struct Node {
 pub struct Lookup {
     /// The library being uploaded into.
     pub library: Uuid,
-    /// Hashes of the file's chunks.
-    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
-    pub hashes: Vec<ChunkHash>,
+    /// The file's chunks.
+    pub chunks: Vec<LookupChunk>,
+}
+
+/// One chunk of a lookup.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LookupChunk {
+    /// Hash of the plaintext.
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
+    pub hash: ChunkHash,
+    /// Size of the plaintext (at most 8 MiB).
+    pub plain_size: u64,
 }
 
 /// Whether a chunk must be uploaded.
@@ -96,7 +108,24 @@ pub struct LookupEntry {
     pub state: ChunkState,
 }
 
-/// A list of chunks (`/chunks/upload-urls`, `/chunks/cancel`).
+/// One chunk of `POST /chunks/upload-urls`: what the client will upload. Fixed
+/// at the first request; a later request (expired URL) must repeat it exactly.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Declare {
+    /// A pending chunk from the lookup.
+    pub chunk: Uuid,
+    /// Size of the bytes to upload (after compression), at most `plain_size`.
+    pub stored_size: u64,
+    /// How those bytes are compressed.
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
+    pub compression: Compression,
+    /// SHA-256 of those bytes: the upload URL only accepts exactly them.
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
+    pub stored_sha256: Sha256,
+}
+
+/// A list of chunks (`/chunks/announce`, `/chunks/cancel`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct Chunks {
@@ -112,19 +141,9 @@ pub struct ChunkUrl {
     pub chunk: Uuid,
     /// Where to `PUT` (upload) or `GET` (download) it, without authentication.
     pub url: String,
-}
-
-/// One chunk of `POST /chunks/announce`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct Announce {
-    /// The uploaded chunk.
-    pub chunk: Uuid,
-    /// Its size before compression and encryption.
-    pub plain_size: u64,
-    /// How it was compressed.
-    #[cfg_attr(feature = "openapi", schema(value_type = String))]
-    pub compression: Compression,
+    /// Headers to send with the request, exactly (they are signed).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub headers: BTreeMap<String, String>,
 }
 
 /// `POST /files/commit`: either `file` (a new version of an existing file) or

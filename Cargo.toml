@@ -13,7 +13,13 @@ axum = "0.8"
 dotenvy = "0.15"
 getrandom = "0.3"
 hmac = "0.13"
-object_store = { version = "0.14", default-features = false, features = ["fs"] }
+# S3 with ring (not the "aws" feature, which pulls aws-lc-rs).
+object_store = { version = "0.14", default-features = false, features = ["fs", "aws-base", "reqwest", "ring"] }
+# rustls-no-provider: the "rustls" feature would pull aws-lc-rs; ring is installed in main.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+http = "1"
+base64 = "0.22"
 sha2 = "0.11"
 tempfile = "3"
 uuid = { version = "1", features = ["serde"] }

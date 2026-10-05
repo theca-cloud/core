@@ -17,7 +17,7 @@ use sqlx::PgPool;
 use utoipa::{OpenApi, ToSchema};
 
 use crate::settings::Settings;
-use crate::storage::UrlSigner;
+use crate::storage::{Backends, UrlSigner};
 
 /// Shared by every handler.
 #[derive(Clone)]
@@ -26,6 +26,8 @@ pub struct AppState {
     pub settings: Arc<Settings>,
     /// Signs and verifies the server's own presigned URLs (filesystem backend).
     pub signer: UrlSigner,
+    /// Storage backends, built once per storage.
+    pub backends: Backends,
 }
 
 /// The OpenAPI description of the API, committed as `openapi.json`.
@@ -141,8 +143,11 @@ mod tests {
         let settings = Arc::new(Settings {
             instance_name: "Theca".into(),
             gc_grace_period: Duration::from_secs(1),
+            presigned_url_lifetime: Duration::from_secs(60),
+            max_pending_uploads: 100,
         });
         router(AppState {
+            backends: Backends::new(pool.clone()),
             pool,
             settings,
             signer: UrlSigner::new([0; 32], "http://test"),

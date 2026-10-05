@@ -10,6 +10,7 @@ fastcdc.workspace = true
 futures.workspace = true
 lz4_flex.workspace = true
 serde.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
 twox-hash.workspace = true
 unicode-normalization.workspace = true

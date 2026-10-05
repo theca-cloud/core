@@ -20,6 +20,13 @@ use crate::config::Config;
 use crate::jwt::JwtKey;
 use crate::settings::Settings;
 
+/// Installs `ring` as the TLS crypto provider (S3, and later OIDC). Call once
+/// at startup, before any HTTP client is built. See docs: Rust stack.
+pub fn install_crypto_provider() {
+    // Fails only if a provider is already installed, which is fine.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 /// Starts the server and returns when it stops (SIGTERM or Ctrl-C).
 pub async fn run() -> Result<(), Error> {
     let config = Config::from_env()?;
@@ -32,13 +39,17 @@ pub async fn run() -> Result<(), Error> {
     // health probe fails during startup.
     let listener = tokio::net::TcpListener::bind(config.listen_addr).await?;
     tracing::info!(addr = %config.listen_addr, public_url = config.public_url, "listening");
+    let backends = storage::Backends::new(pool.clone());
+    let app = api::router(AppState {
+        pool,
+        settings,
+        signer,
+        backends,
+    });
+    // Connect info: the client's IP, logged with anomalies.
     axum::serve(
         listener,
-        api::router(AppState {
-            pool,
-            settings,
-            signer,
-        }),
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
     .with_graceful_shutdown(shutdown_signal())
     .await?;

@@ -95,6 +95,12 @@ impl From<sqlx::Error> for HttpError {
                 Some("node_name_valid" | "library_name_valid") => {
                     return Self::bad_request("name_invalid", "invalid name");
                 }
+                Some("chunk_plain_size") => {
+                    return Self::bad_request(
+                        "invalid_plain_size",
+                        "a chunk's plain size is at most 8 MiB",
+                    );
+                }
                 Some("chunk_in_version_chunk") => {
                     return Self::conflict(
                         "chunk_missing",

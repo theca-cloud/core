@@ -39,12 +39,13 @@ async fn fixture(pool: &PgPool) {
                    (5, 1, 2, NULL, '', false), (6, 2, 3, NULL, '', false), (7, 2, 3, 6, 'g.txt', true);
         INSERT INTO version (pk, organization, file) OVERRIDING SYSTEM VALUE VALUES (1, 1, 4), (2, 2, 7);
         UPDATE node SET current_version = 1 WHERE pk = 4;
-        INSERT INTO chunk (pk, organization, library, hash, storage, stored_size, plain_size, compression, uploaded_at)
+        INSERT INTO chunk (pk, organization, library, hash, storage, plain_size, stored_size, compression,
+                           stored_sha256, uploaded_at)
             OVERRIDING SYSTEM VALUE
-            VALUES (1, 1, 1, '\x00000000000000000000000000000001', 1, 1, 1, 'none', now()),
-                   (2, 2, 3, '\x00000000000000000000000000000002', 1, 1, 1, 'none', now());
-        INSERT INTO chunk (pk, organization, library, hash, storage) OVERRIDING SYSTEM VALUE
-            VALUES (3, 1, 1, '\x00000000000000000000000000000003', 1);
+            VALUES (1, 1, 1, '\x00000000000000000000000000000001', 1, 1, 1, 'none', decode(repeat('00', 32), 'hex'), now()),
+                   (2, 2, 3, '\x00000000000000000000000000000002', 1, 1, 1, 'none', decode(repeat('00', 32), 'hex'), now());
+        INSERT INTO chunk (pk, organization, library, hash, storage, plain_size) OVERRIDING SYSTEM VALUE
+            VALUES (3, 1, 1, '\x00000000000000000000000000000003', 1, 7);
         INSERT INTO chunk_in_version (organization, version, chunk, position) VALUES (1, 1, 1, 0);
         COMMIT;
         -- Explicit keys above: move every identity sequence past them.
@@ -133,7 +134,7 @@ async fn chunk_storage_is_shared_or_its_organizations(pool: PgPool) {
     fixture(&pool).await;
     let chunk = |storage: i32, hash: u8| {
         format!(
-            "INSERT INTO chunk (organization, hash, storage) VALUES (1, '\\x{hash:032x}', {storage})"
+            "INSERT INTO chunk (organization, hash, storage, plain_size) VALUES (1, '\\x{hash:032x}', {storage}, 1)"
         )
     };
     assert_accepted(&pool, &chunk(1, 10)).await;
@@ -476,28 +477,51 @@ async fn versions_only_reference_ready_chunks_of_their_organization(pool: PgPool
 }
 
 #[sqlx::test]
-async fn chunks_are_pending_or_announced(pool: PgPool) {
+async fn chunk_declarations(pool: PgPool) {
     fixture(&pool).await;
-    // Three CHECKs fail together; Postgres reports one of them.
-    let refused = refused_by(&pool, "UPDATE chunk SET uploaded_at = now() WHERE pk = 3").await;
-    assert!(
-        refused
-            .as_deref()
-            .is_some_and(|c| c.starts_with("chunk_announced_")),
-        "{refused:?}"
-    );
-    assert_accepted(
+    let declare = |size: i64, sha_bytes: usize| {
+        format!(
+            "UPDATE chunk SET stored_size = {size}, compression = 'lz4', \
+             stored_sha256 = decode(repeat('00', {sha_bytes}), 'hex') WHERE pk = 3"
+        )
+    };
+    assert_refused(
         &pool,
-        "UPDATE chunk SET uploaded_at = now(), stored_size = 5, plain_size = 7, compression = 'lz4' \
-         WHERE pk = 3",
+        "chunk_uploaded_declared",
+        "UPDATE chunk SET uploaded_at = now() WHERE pk = 3",
     )
     .await;
     assert_refused(
         &pool,
-        "chunk_sizes",
-        "UPDATE chunk SET stored_size = -1 WHERE pk = 3",
+        "chunk_declared",
+        "UPDATE chunk SET stored_size = 5 WHERE pk = 3",
     )
     .await;
+    assert_refused(&pool, "chunk_stored_size", &declare(8, 32)).await; // plain_size is 7
+    assert_refused(&pool, "chunk_stored_sha256_check", &declare(5, 16)).await;
+    assert_accepted(&pool, &declare(5, 32)).await;
+    assert_accepted(&pool, "UPDATE chunk SET uploaded_at = now() WHERE pk = 3").await;
+    assert_refused(
+        &pool,
+        "chunk_plain_size",
+        "INSERT INTO chunk (organization, hash, storage, plain_size) \
+         VALUES (1, '\\x000000000000000000000000000000aa', 1, 8388609)",
+    )
+    .await;
+    assert_refused(
+        &pool,
+        "organization_quota",
+        "UPDATE organization SET quota = -1 WHERE pk = 1",
+    )
+    .await;
+    // declared_by is a user of the chunk's organization (user 3 is in organization 2).
+    assert_refused(
+        &pool,
+        "chunk_organization_declared_by_fkey",
+        "UPDATE chunk SET declared_by = 3 WHERE pk = 3",
+    )
+    .await;
+    assert_accepted(&pool, "UPDATE chunk SET declared_by = 2 WHERE pk = 3").await;
 }
 
 // Background jobs.
@@ -551,13 +575,13 @@ async fn closed_lists_and_formats(pool: PgPool) {
     assert_refused(
         &pool,
         "chunk_hash_check",
-        "INSERT INTO chunk (organization, hash, storage) VALUES (1, '\\x00', 1)",
+        "INSERT INTO chunk (organization, hash, storage, plain_size) VALUES (1, '\\x00', 1, 1)",
     )
     .await;
     assert_refused(
         &pool,
         "chunk_compression_check",
-        "UPDATE chunk SET uploaded_at = now(), stored_size = 1, plain_size = 1, compression = 'zip' WHERE pk = 3",
+        "UPDATE chunk SET stored_size = 1, compression = 'zip', stored_sha256 = decode(repeat('00', 32), 'hex') WHERE pk = 3",
     )
     .await;
     assert_refused(
@@ -653,8 +677,8 @@ async fn tree_remaining_rules(pool: PgPool) {
     assert_refused(
         &pool,
         "chunk_organization_library_fkey",
-        "INSERT INTO chunk (organization, library, hash, storage) \
-         VALUES (1, 3, '\\x000000000000000000000000000000ff', 1)",
+        "INSERT INTO chunk (organization, library, hash, storage, plain_size) \
+         VALUES (1, 3, '\\x000000000000000000000000000000ff', 1, 1)",
     )
     .await;
 }
@@ -729,11 +753,11 @@ async fn references_must_exist(pool: PgPool) {
         ),
         (
             "chunk_organization_fkey",
-            "INSERT INTO chunk (organization, hash, storage) VALUES (99, '\\x000000000000000000000000000000ee', 1)",
+            "INSERT INTO chunk (organization, hash, storage, plain_size) VALUES (99, '\\x000000000000000000000000000000ee', 1, 1)",
         ),
         (
             "chunk_storage_fkey",
-            "INSERT INTO chunk (organization, hash, storage) VALUES (1, '\\x000000000000000000000000000000ee', 99)",
+            "INSERT INTO chunk (organization, hash, storage, plain_size) VALUES (1, '\\x000000000000000000000000000000ee', 99, 1)",
         ),
     ] {
         assert_refused(&pool, constraint, sql).await;

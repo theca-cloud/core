@@ -1,4 +1,5 @@
-//! Chunk hashes: `xxh3_128` of the plaintext chunk.
+//! Chunk hashes: `xxh3_128` of the plaintext chunk (dedup key), and SHA-256 of
+//! the stored bytes (what a presigned upload URL signs).
 
 use std::fmt;
 use std::str::FromStr;
@@ -61,6 +62,65 @@ impl<'de> Deserialize<'de> for ChunkHash {
     }
 }
 
+/// SHA-256 of a chunk's stored bytes (after compression, and later encryption).
+/// Declared before uploading; presigned URLs only accept exactly these bytes.
+/// Displayed and serialized as 64 lowercase hex characters.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Sha256(pub [u8; 32]);
+
+impl Sha256 {
+    /// Hashes stored bytes.
+    pub fn of(data: &[u8]) -> Self {
+        use sha2::Digest;
+        Self(sha2::Sha256::digest(data).into())
+    }
+}
+
+impl fmt::Display for Sha256 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.iter().try_for_each(|b| write!(f, "{b:02x}"))
+    }
+}
+
+impl fmt::Debug for Sha256 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Sha256({self})")
+    }
+}
+
+/// A string that isn't 64 hex characters.
+#[derive(Debug, thiserror::Error)]
+#[error("a SHA-256 is 64 hex characters")]
+pub struct ParseSha256Error;
+
+impl FromStr for Sha256 {
+    type Err = ParseSha256Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() != 64 || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(ParseSha256Error);
+        }
+        let mut out = [0u8; 32];
+        for (i, byte) in out.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&s[2 * i..2 * i + 2], 16).map_err(|_| ParseSha256Error)?;
+        }
+        Ok(Self(out))
+    }
+}
+
+impl Serialize for Sha256 {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for Sha256 {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,6 +140,18 @@ mod tests {
         assert_eq!(hash.to_string().parse::<ChunkHash>().unwrap(), hash);
         let json = serde_json::to_string(&hash).unwrap();
         assert_eq!(serde_json::from_str::<ChunkHash>(&json).unwrap(), hash);
+    }
+
+    #[test]
+    fn sha256_golden_and_round_trip() {
+        // Reference SHA-256 of "hello".
+        let h = Sha256::of(b"hello");
+        assert_eq!(
+            h.to_string(),
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+        assert_eq!(h.to_string().parse::<Sha256>().unwrap(), h);
+        assert!("zz".parse::<Sha256>().is_err());
     }
 
     #[test]

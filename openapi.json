@@ -44,16 +44,13 @@
         "tags": [
           "v1"
         ],
-        "summary": "Mark uploaded chunks as ready. The real size is read from the backend; a\nchunk whose object is missing stays pending (`upload`).",
+        "summary": "Mark uploaded chunks as ready, after checking each object exists with the\ndeclared size. Returns the chunks still to upload (object missing): request\nnew URLs for them (same declaration).",
         "operationId": "announce",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/Announce"
-                }
+                "$ref": "#/components/schemas/Chunks"
               }
             }
           },
@@ -61,14 +58,21 @@
         },
         "responses": {
           "200": {
-            "description": "Chunks still to upload (object missing), with fresh URLs",
+            "description": "Chunks not uploaded yet",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ChunkUrl"
-                  }
+                  "$ref": "#/components/schemas/Chunks"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`chunk_not_allowed`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -81,7 +85,7 @@
         "tags": [
           "v1"
         ],
-        "summary": "Cancel an upload: deletes the given chunks that no version references.",
+        "summary": "Cancel an upload: tombstones the given chunks that no version references.\nTheir objects are deleted later, once their upload URLs have expired.",
         "operationId": "cancel",
         "requestBody": {
           "content": {
@@ -139,13 +143,16 @@
         "tags": [
           "v1"
         ],
-        "summary": "Presigned upload URLs for pending chunks (request them in batches).",
+        "summary": "Declare what will be uploaded and get presigned upload URLs (in batches).\nThe declaration is fixed at the first request; the URL only accepts exactly\nthe declared bytes (their SHA-256 is signed). Checks the organization's quota.",
         "operationId": "upload_urls",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Chunks"
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Declare"
+                }
               }
             }
           },
@@ -165,8 +172,28 @@
               }
             }
           },
+          "400": {
+            "description": "`invalid_declaration`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
           "403": {
-            "description": "Chunks not pending or not writable",
+            "description": "`chunk_not_allowed`: not pending, or not writable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`declaration_mismatch`, `quota_exceeded`",
             "content": {
               "application/json": {
                 "schema": {
@@ -411,32 +438,6 @@
   },
   "components": {
     "schemas": {
-      "Announce": {
-        "type": "object",
-        "description": "One chunk of `POST /chunks/announce`.",
-        "required": [
-          "chunk",
-          "plain_size",
-          "compression"
-        ],
-        "properties": {
-          "chunk": {
-            "type": "string",
-            "format": "uuid",
-            "description": "The uploaded chunk."
-          },
-          "compression": {
-            "type": "string",
-            "description": "How it was compressed."
-          },
-          "plain_size": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Its size before compression and encryption.",
-            "minimum": 0
-          }
-        }
-      },
       "ApiError": {
         "type": "object",
         "description": "An API error: a stable machine-readable `code` and a human message.",
@@ -485,6 +486,16 @@
             "format": "uuid",
             "description": "The chunk."
           },
+          "headers": {
+            "type": "object",
+            "description": "Headers to send with the request, exactly (they are signed).",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
           "url": {
             "type": "string",
             "description": "Where to `PUT` (upload) or `GET` (download) it, without authentication."
@@ -493,7 +504,7 @@
       },
       "Chunks": {
         "type": "object",
-        "description": "A list of chunks (`/chunks/upload-urls`, `/chunks/cancel`).",
+        "description": "A list of chunks (`/chunks/announce`, `/chunks/cancel`).",
         "required": [
           "chunks"
         ],
@@ -615,6 +626,37 @@
           }
         }
       },
+      "Declare": {
+        "type": "object",
+        "description": "One chunk of `POST /chunks/upload-urls`: what the client will upload. Fixed\nat the first request; a later request (expired URL) must repeat it exactly.",
+        "required": [
+          "chunk",
+          "stored_size",
+          "compression",
+          "stored_sha256"
+        ],
+        "properties": {
+          "chunk": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A pending chunk from the lookup."
+          },
+          "compression": {
+            "type": "string",
+            "description": "How those bytes are compressed."
+          },
+          "stored_sha256": {
+            "type": "string",
+            "description": "SHA-256 of those bytes: the upload URL only accepts exactly them."
+          },
+          "stored_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size of the bytes to upload (after compression), at most `plain_size`.",
+            "minimum": 0
+          }
+        }
+      },
       "Download": {
         "type": "object",
         "description": "`GET /files/{id}/download`.",
@@ -727,20 +769,40 @@
         "description": "`POST /chunks/lookup`.",
         "required": [
           "library",
-          "hashes"
+          "chunks"
         ],
         "properties": {
-          "hashes": {
+          "chunks": {
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/LookupChunk"
             },
-            "description": "Hashes of the file's chunks."
+            "description": "The file's chunks."
           },
           "library": {
             "type": "string",
             "format": "uuid",
             "description": "The library being uploaded into."
+          }
+        }
+      },
+      "LookupChunk": {
+        "type": "object",
+        "description": "One chunk of a lookup.",
+        "required": [
+          "hash",
+          "plain_size"
+        ],
+        "properties": {
+          "hash": {
+            "type": "string",
+            "description": "Hash of the plaintext."
+          },
+          "plain_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size of the plaintext (at most 8 MiB).",
+            "minimum": 0
           }
         }
       },

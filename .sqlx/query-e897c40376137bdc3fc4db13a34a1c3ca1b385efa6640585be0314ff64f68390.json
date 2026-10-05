@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT c.uuid, c.hash, c.compression AS \"compression!\", c.plain_size AS \"plain_size!\", c.storage\n           FROM chunk_in_version civ JOIN chunk c ON c.pk = civ.chunk\n           WHERE civ.version = $1 ORDER BY civ.position",
+  "query": "SELECT c.uuid, c.hash, c.compression AS \"compression!\", c.plain_size, c.storage\n           FROM chunk_in_version civ JOIN chunk c ON c.pk = civ.chunk\n           WHERE civ.version = $1 ORDER BY civ.position",
   "describe": {
     "columns": [
       {
@@ -20,7 +20,7 @@
       },
       {
         "ordinal": 3,
-        "name": "plain_size!",
+        "name": "plain_size",
         "type_info": "Int8"
       },
       {
@@ -38,9 +38,9 @@
       false,
       false,
       true,
-      true,
+      false,
       false
     ]
   },
-  "hash": "d83a05ec2b2b6b493374d7b92347e2907bf31da790a025ec93a57fa1fc49210f"
+  "hash": "e897c40376137bdc3fc4db13a34a1c3ca1b385efa6640585be0314ff64f68390"
 }

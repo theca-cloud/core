@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.pk, c.uuid, c.storage, c.plain_size, c.stored_size, c.compression, c.stored_sha256\n           FROM chunk c\n           JOIN library_member m ON m.library = c.library AND m.\"user\" = $1 AND m.role = 'write'\n           WHERE c.uuid = ANY($2) AND c.uploaded_at IS NULL AND c.deleting_at IS NULL\n           FOR UPDATE OF c",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "storage",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "plain_size",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "stored_size",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "compression",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "stored_sha256",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "016b55e096a7282e4677ba96a59dffe24c1a0c50e6c865497b02857b12770032"
+}
