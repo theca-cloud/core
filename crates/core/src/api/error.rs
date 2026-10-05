@@ -89,6 +89,9 @@ impl From<sqlx::Error> for HttpError {
                 Some("node_name") => {
                     return Self::conflict("name_taken", "a file or folder with this name exists");
                 }
+                Some("node_no_cycle") => {
+                    return Self::conflict("move_into_itself", "a folder can't move into itself");
+                }
                 Some("library_name") => {
                     return Self::conflict("library_name_taken", "a library with this name exists");
                 }

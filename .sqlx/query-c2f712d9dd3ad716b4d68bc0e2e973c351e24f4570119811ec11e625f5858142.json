@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT uuid AS id, name, is_file FROM node\n         WHERE parent = $1 AND deleted_at IS NULL ORDER BY is_file, lower(name)",
+  "query": "SELECT n.uuid AS id, n.name, n.is_file, v.created_at::text AS modified\n           FROM node n LEFT JOIN version v ON v.pk = n.current_version\n           WHERE n.parent = $1 AND n.deleted_at IS NULL ORDER BY n.is_file, lower(n.name)",
   "describe": {
     "columns": [
       {
@@ -17,6 +17,11 @@
         "ordinal": 2,
         "name": "is_file",
         "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "modified",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -27,8 +32,9 @@
     "nullable": [
       false,
       false,
-      false
+      false,
+      null
     ]
   },
-  "hash": "b8623a908f063981bd61a0e0003f9c47f0e824c7bc61d2973ed2ec5f326c5c7c"
+  "hash": "c2f712d9dd3ad716b4d68bc0e2e973c351e24f4570119811ec11e625f5858142"
 }

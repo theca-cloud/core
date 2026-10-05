@@ -319,6 +319,10 @@ CREATE TABLE node (
 CREATE UNIQUE INDEX node_name ON node (parent, lower(name)) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX node_one_root ON node (library) WHERE parent IS NULL;
 CREATE INDEX node_name_search ON node USING gin (name gin_trgm_ops);
+-- Walking down a subtree (copies, moves, hard deletion), trashed children included.
+CREATE INDEX node_parent_all ON node (parent);
+-- A library's trash.
+CREATE INDEX node_trash ON node (library) WHERE deleted_at IS NOT NULL;
 
 -- version : file, parent_version (composite FK?), message (nullable)
 CREATE TABLE version (
@@ -330,12 +334,44 @@ CREATE TABLE version (
     file_is_file boolean NOT NULL DEFAULT true CHECK (file_is_file),
     parent_version bigint,
     message text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    -- Who committed it (a member of the organization); NULL once they leave.
+    author bigint,
     UNIQUE (file, pk),
     UNIQUE (organization, pk),  -- target of chunk_in_version's FK
     CONSTRAINT version_file FOREIGN KEY (organization, file, file_is_file) REFERENCES node (organization, pk, is_file),
     -- The parent version is a version of the same file.
-    CONSTRAINT version_parent FOREIGN KEY (file, parent_version) REFERENCES version (file, pk)
+    CONSTRAINT version_parent FOREIGN KEY (file, parent_version) REFERENCES version (file, pk),
+    CONSTRAINT version_author FOREIGN KEY (organization, author) REFERENCES "user" (organization, pk) ON DELETE SET NULL (author)
 );
+-- A file's history; a leaving member's versions (ON DELETE SET NULL).
+CREATE INDEX version_by_file ON version (file);
+CREATE INDEX version_by_author ON version (author);
+
+-- Reachable: neither the node nor an ancestor is in the trash. Only the
+-- trashed node itself is flagged (one row, whatever its subtree), so reads
+-- climb to the root: one primary-key lookup per level.
+CREATE FUNCTION node_reachable(node bigint) RETURNS boolean
+LANGUAGE sql STABLE AS $$
+    WITH RECURSIVE up (parent, deleted_at) AS (
+        SELECT parent, deleted_at FROM node WHERE pk = $1
+        UNION ALL
+        SELECT n.parent, n.deleted_at FROM node n JOIN up ON n.pk = up.parent
+    )
+    SELECT NOT EXISTS (SELECT 1 FROM up WHERE deleted_at IS NOT NULL)
+$$;
+
+-- A node's path in its library: '/' for the root, '/a/b' below.
+CREATE FUNCTION node_path(node bigint) RETURNS text
+LANGUAGE sql STABLE AS $$
+    WITH RECURSIVE up (parent, name, depth) AS (
+        SELECT parent, name, 0 FROM node WHERE pk = $1
+        UNION ALL
+        SELECT n.parent, n.name, up.depth + 1 FROM node n JOIN up ON n.pk = up.parent
+    )
+    SELECT '/' || coalesce(string_agg(name, '/' ORDER BY depth DESC) FILTER (WHERE name <> ''), '')
+    FROM up
+$$;
 
 -- The current version is a version of this node. Deferred: a file and its
 -- first version are inserted in the same transaction.

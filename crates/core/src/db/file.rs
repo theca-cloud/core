@@ -53,7 +53,7 @@ pub async fn commit(
         Target::File { file, base_version } => {
             let node = sqlx::query!(
                 "SELECT pk, current_version FROM node
-                 WHERE uuid = $1 AND library = $2 AND is_file AND deleted_at IS NULL",
+                 WHERE uuid = $1 AND library = $2 AND is_file AND node_reachable(pk)",
                 file,
                 access.library
             )
@@ -77,7 +77,7 @@ pub async fn commit(
         }
         Target::New { parent, name } => {
             let parent = sqlx::query_scalar!(
-                "SELECT pk FROM node WHERE uuid = $1 AND library = $2 AND NOT is_file AND deleted_at IS NULL",
+                "SELECT pk FROM node WHERE uuid = $1 AND library = $2 AND NOT is_file AND node_reachable(pk)",
                 parent,
                 access.library
             )
@@ -141,12 +141,13 @@ pub async fn commit(
         .collect();
 
     let version = sqlx::query!(
-        "INSERT INTO version (organization, file, parent_version, message)
-         VALUES ($1, $2, $3, $4) RETURNING pk, uuid",
+        "INSERT INTO version (organization, file, parent_version, message, author)
+         VALUES ($1, $2, $3, $4, $5) RETURNING pk, uuid",
         access.organization,
         file_pk,
         base,
-        message
+        message,
+        access.user
     )
     .fetch_one(&mut **tx)
     .await?;

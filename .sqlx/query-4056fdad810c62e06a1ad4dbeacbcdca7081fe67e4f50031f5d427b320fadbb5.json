@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT pk FROM node WHERE uuid = $1 AND library = $2 AND NOT is_file AND deleted_at IS NULL",
+  "query": "INSERT INTO version (organization, file, author) VALUES ($1, $2, $3) RETURNING pk",
   "describe": {
     "columns": [
       {
@@ -11,7 +11,8 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid",
+        "Int8",
+        "Int8",
         "Int8"
       ]
     },
@@ -19,5 +20,5 @@
       false
     ]
   },
-  "hash": "da53a3d4b757247bdd0d91ac1da0217a679fc7f07463272ab7965b612bcc3ac3"
+  "hash": "4056fdad810c62e06a1ad4dbeacbcdca7081fe67e4f50031f5d427b320fadbb5"
 }

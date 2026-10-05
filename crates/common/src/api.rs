@@ -62,6 +62,8 @@ pub struct Node {
     pub name: String,
     /// A file (true) or a folder (false).
     pub is_file: bool,
+    /// A file's current version date.
+    pub modified: Option<String>,
 }
 
 /// `POST /chunks/lookup`.
@@ -452,4 +454,120 @@ pub enum StorageBackend {
 
 fn yes() -> bool {
     true
+}
+
+/// A file or folder, with where it is.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NodeInfo {
+    /// The node.
+    pub id: Uuid,
+    /// Its library.
+    pub library: Uuid,
+    /// Its name (empty for the root).
+    pub name: String,
+    /// A file (true) or a folder (false).
+    pub is_file: bool,
+    /// Its folder (none for the root).
+    pub parent: Option<Uuid>,
+    /// Its path in the library, e.g. `/a/b.txt` (`/` for the root).
+    pub path: String,
+    /// A file's current version.
+    pub current_version: Option<Uuid>,
+}
+
+/// `POST /nodes/{parent}/folders`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CreateFolder {
+    /// Its name.
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
+    pub name: Name,
+}
+
+/// `PATCH /nodes/{id}`: rename and/or move.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UpdateNode {
+    /// The new name.
+    #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
+    pub name: Option<Name>,
+    /// The new folder (in any library of the same organization).
+    #[serde(default)]
+    pub parent: Option<Uuid>,
+}
+
+/// `POST /nodes/{id}/copy`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CopyNode {
+    /// The folder to copy into (in any library of the same organization).
+    pub parent: Uuid,
+    /// The copy's name (default: the source's).
+    #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
+    pub name: Option<Name>,
+}
+
+/// A trashed file or folder.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TrashEntry {
+    /// The node.
+    pub id: Uuid,
+    /// Its name.
+    pub name: String,
+    /// A file (true) or a folder (false).
+    pub is_file: bool,
+    /// Where it was.
+    pub path: String,
+    /// When it was trashed.
+    pub deleted_at: String,
+}
+
+/// Where a restored node landed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Restored {
+    /// Its folder: its old one, or the library's root if that one is in the trash.
+    pub parent: Uuid,
+    /// Its name (` (restored)` added if the old one was taken).
+    pub name: String,
+    /// Its path.
+    pub path: String,
+}
+
+/// A version of a file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Version {
+    /// The version.
+    pub id: Uuid,
+    /// The version it was based on (a tree: branches after conflicts and restores).
+    pub parent: Option<Uuid>,
+    /// Who committed it (their email), unless they left the organization.
+    pub author: Option<String>,
+    /// When.
+    pub created_at: String,
+    /// Its description.
+    pub message: Option<String>,
+    /// The file's current version.
+    pub current: bool,
+}
+
+/// A search result.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SearchResult {
+    /// The node.
+    pub id: Uuid,
+    /// Its library.
+    pub library: Uuid,
+    /// Its name.
+    pub name: String,
+    /// A file (true) or a folder (false).
+    pub is_file: bool,
+    /// Its path in the library.
+    pub path: String,
 }

@@ -43,11 +43,14 @@ pub async fn access(
     }))
 }
 
-/// A node (not in the trash) and the user's access to its library.
+/// A reachable node (neither it nor an ancestor in the trash) and the user's
+/// access to its library.
 #[derive(Debug, Clone, Copy)]
 pub struct NodeAccess {
     pub access: Access,
     pub node: i64,
+    /// `None`: the library's root.
+    pub parent: Option<i64>,
     pub is_file: bool,
     pub current_version: Option<i64>,
 }
@@ -58,12 +61,12 @@ pub async fn node_access(
     node: Uuid,
 ) -> sqlx::Result<Option<NodeAccess>> {
     let row = sqlx::query!(
-        r#"SELECT n.pk, n.is_file, n.current_version, l.pk AS library, l.owner, l.storage,
+        r#"SELECT n.pk, n.parent, n.is_file, n.current_version, l.pk AS library, l.owner, l.storage,
                   a."user" AS "user!", a.can_write AS "can_write!"
            FROM node n
            JOIN library l ON l.pk = n.library
            JOIN library_access($1) a ON a.library = l.pk
-           WHERE n.uuid = $2 AND n.deleted_at IS NULL"#,
+           WHERE n.uuid = $2 AND node_reachable(n.pk)"#,
         who.token,
         node
     )
@@ -78,6 +81,7 @@ pub async fn node_access(
             can_write: r.can_write,
         },
         node: r.pk,
+        parent: r.parent,
         is_file: r.is_file,
         current_version: r.current_version,
     }))
@@ -211,8 +215,9 @@ pub async fn list(pool: &PgPool, who: &Credential) -> sqlx::Result<Vec<api::Libr
 pub async fn children(pool: &PgPool, folder: i64) -> sqlx::Result<Vec<api::Node>> {
     sqlx::query_as!(
         api::Node,
-        "SELECT uuid AS id, name, is_file FROM node
-         WHERE parent = $1 AND deleted_at IS NULL ORDER BY is_file, lower(name)",
+        r#"SELECT n.uuid AS id, n.name, n.is_file, v.created_at::text AS modified
+           FROM node n LEFT JOIN version v ON v.pk = n.current_version
+           WHERE n.parent = $1 AND n.deleted_at IS NULL ORDER BY n.is_file, lower(n.name)"#,
         folder
     )
     .fetch_all(pool)

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT pk, current_version FROM node\n                 WHERE uuid = $1 AND library = $2 AND is_file AND deleted_at IS NULL",
+  "query": "SELECT pk, current_version FROM node\n                 WHERE uuid = $1 AND library = $2 AND is_file AND node_reachable(pk)",
   "describe": {
     "columns": [
       {
@@ -25,5 +25,5 @@
       true
     ]
   },
-  "hash": "e1c3767dafc3b9d09fec9723f74df763507ca6aaafb711570b9f4d5ed57c96d9"
+  "hash": "3d25f29b33ee7e9bb7d797c888b1e1b7b2ad4790e45282b738ba9007ebda5cc1"
 }

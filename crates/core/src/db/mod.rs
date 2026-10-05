@@ -7,6 +7,7 @@ pub mod chunk;
 pub mod file;
 pub mod identity;
 pub mod library;
+pub mod node;
 pub mod setup;
 
 use sqlx::PgPool;

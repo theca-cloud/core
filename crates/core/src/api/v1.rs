@@ -38,7 +38,7 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-async fn library_access(
+pub(super) async fn library_access(
     state: &AppState,
     user: &CurrentAccount,
     library: Uuid,
@@ -48,7 +48,7 @@ async fn library_access(
         .ok_or_else(|| HttpError::not_found("library"))
 }
 
-fn require_write(access: &Access) -> Result<(), HttpError> {
+pub(super) fn require_write(access: &Access) -> Result<(), HttpError> {
     if access.can_write {
         Ok(())
     } else {
@@ -337,8 +337,15 @@ async fn commit(
     }))
 }
 
-/// The current version's chunks, in order, with presigned download URLs.
-#[utoipa::path(get, path = "/api/v1/files/{id}/download", params(("id" = Uuid, Path)), responses(
+#[derive(Deserialize, utoipa::IntoParams)]
+pub(super) struct DownloadParams {
+    /// A version of the file (default: the current one).
+    version: Option<Uuid>,
+}
+
+/// A version's chunks (the current one by default), in order, with presigned
+/// download URLs.
+#[utoipa::path(get, path = "/api/v1/files/{id}/download", params(("id" = Uuid, Path), DownloadParams), responses(
     (status = 200, body = api::Download),
     (status = 404, body = api::ApiError),
 ))]
@@ -346,14 +353,17 @@ async fn download(
     State(state): State<AppState>,
     user: CurrentAccount,
     Path(id): Path<Uuid>,
+    Query(params): Query<DownloadParams>,
 ) -> Result<Json<api::Download>, HttpError> {
     let node = db::library::node_access(&state.pool, &user, id)
         .await?
         .filter(|n| n.is_file)
         .ok_or_else(|| HttpError::not_found("file"))?;
-    let version = node
-        .current_version
-        .ok_or_else(|| HttpError::not_found("version"))?;
+    let version = match params.version {
+        Some(version) => db::node::version_of(&state.pool, node.node, version).await?,
+        None => node.current_version,
+    }
+    .ok_or_else(|| HttpError::not_found("version"))?;
     let (version, chunks) = db::file::version_chunks(&state.pool, version).await?;
     let lifetime = state.settings.presigned_url_lifetime;
     let mut out = Vec::with_capacity(chunks.len());

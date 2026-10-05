@@ -939,8 +939,63 @@
         "tags": [
           "v1"
         ],
-        "summary": "The current version's chunks, in order, with presigned download URLs.",
+        "summary": "A version's chunks (the current one by default), in order, with presigned\ndownload URLs.",
         "operationId": "download",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "description": "A version of the file (default: the current one).",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Download"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/files/{id}/versions": {
+      "get": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "A file's versions: a tree (branches after conflicts and restores).",
+        "operationId": "versions",
         "parameters": [
           {
             "name": "id",
@@ -958,10 +1013,57 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Download"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Version"
+                  }
                 }
               }
             }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/files/{id}/versions/{version}/restore": {
+      "post": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Make an old version current. The next commit based on it branches the tree.",
+        "operationId": "restore_version",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
           },
           "404": {
             "description": "",
@@ -1049,6 +1151,51 @@
         }
       }
     },
+    "/api/v1/libraries/{id}/trash": {
+      "get": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "A library's trash.",
+        "operationId": "trash",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TrashEntry"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/me": {
       "get": {
         "tags": [
@@ -1063,6 +1210,170 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{id}": {
+      "get": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "A file or folder, with its library and path.",
+        "operationId": "info",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Put a file or folder in the trash, or (`permanent`, from the trash) delete\nit for good with its subtree and history.",
+        "operationId": "delete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "permanent",
+            "in": "path",
+            "description": "Delete for good (a node already in the trash only).",
+            "required": true,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "`root`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Rename and/or move a file or folder. Within a library a move is one row;\nto another library of the same organization, the subtree (and its\nhistory) follows.",
+        "operationId": "update",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateNode"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`root`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`name_taken`, `move_into_itself`, `other_organization`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -1104,6 +1415,230 @@
           },
           "404": {
             "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{id}/copy": {
+      "post": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Copy a file or folder into a folder of any library of the same\norganization. Files keep their current version only, sharing its chunks.",
+        "operationId": "copy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyNode"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`name_taken`, `other_organization`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{id}/folders": {
+      "post": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Create a folder.",
+        "operationId": "create_folder",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateFolder"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Node"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`name_taken`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{id}/restore": {
+      "post": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Take a file or folder out of the trash: back in its folder, or into the\nlibrary's root if that one is trashed too; renamed if its name is taken.",
+        "operationId": "restore",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Restored"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/search": {
+      "get": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Files and folders by name (case-insensitive), in the libraries the user\nreaches, outside the trash. At most 50.",
+        "operationId": "search",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "path",
+            "description": "Part of a name (at least 3 characters).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "library",
+            "in": "path",
+            "description": "Only this library.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SearchResult"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`query_too_short`",
             "content": {
               "application/json": {
                 "schema": {
@@ -1436,6 +1971,27 @@
           }
         }
       },
+      "CopyNode": {
+        "type": "object",
+        "description": "`POST /nodes/{id}/copy`.",
+        "required": [
+          "parent"
+        ],
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The copy's name (default: the source's)."
+          },
+          "parent": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The folder to copy into (in any library of the same organization)."
+          }
+        }
+      },
       "CreateAppPassword": {
         "type": "object",
         "description": "Create an app password (CLI, API clients, WebDAV): data access only.",
@@ -1466,6 +2022,19 @@
           "read_only": {
             "type": "boolean",
             "description": "Read only, whatever the account's role in the libraries."
+          }
+        }
+      },
+      "CreateFolder": {
+        "type": "object",
+        "description": "`POST /nodes/{parent}/folders`.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Its name."
           }
         }
       },
@@ -1897,9 +2466,67 @@
             "type": "boolean",
             "description": "A file (true) or a folder (false)."
           },
+          "modified": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A file's current version date."
+          },
           "name": {
             "type": "string",
             "description": "Its name."
+          }
+        }
+      },
+      "NodeInfo": {
+        "type": "object",
+        "description": "A file or folder, with where it is.",
+        "required": [
+          "id",
+          "library",
+          "name",
+          "is_file",
+          "path"
+        ],
+        "properties": {
+          "current_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "A file's current version."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The node."
+          },
+          "is_file": {
+            "type": "boolean",
+            "description": "A file (true) or a folder (false)."
+          },
+          "library": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Its library."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name (empty for the root)."
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Its folder (none for the root)."
+          },
+          "path": {
+            "type": "string",
+            "description": "Its path in the library, e.g. `/a/b.txt` (`/` for the root)."
           }
         }
       },
@@ -1929,6 +2556,65 @@
               "type": "string"
             },
             "description": "The codes."
+          }
+        }
+      },
+      "Restored": {
+        "type": "object",
+        "description": "Where a restored node landed.",
+        "required": [
+          "parent",
+          "name",
+          "path"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Its name (` (restored)` added if the old one was taken)."
+          },
+          "parent": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Its folder: its old one, or the library's root if that one is in the trash."
+          },
+          "path": {
+            "type": "string",
+            "description": "Its path."
+          }
+        }
+      },
+      "SearchResult": {
+        "type": "object",
+        "description": "A search result.",
+        "required": [
+          "id",
+          "library",
+          "name",
+          "is_file",
+          "path"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The node."
+          },
+          "is_file": {
+            "type": "boolean",
+            "description": "A file (true) or a folder (false)."
+          },
+          "library": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Its library."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "path": {
+            "type": "string",
+            "description": "Its path in the library."
           }
         }
       },
@@ -2139,24 +2825,104 @@
           }
         }
       },
-      "Version": {
+      "TrashEntry": {
         "type": "object",
-        "description": "Server and API versions, for clients to check compatibility.",
+        "description": "A trashed file or folder.",
         "required": [
-          "server",
-          "api"
+          "id",
+          "name",
+          "is_file",
+          "path",
+          "deleted_at"
         ],
         "properties": {
-          "api": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Supported major API versions."
-          },
-          "server": {
+          "deleted_at": {
             "type": "string",
-            "description": "Version of this server."
+            "description": "When it was trashed."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The node."
+          },
+          "is_file": {
+            "type": "boolean",
+            "description": "A file (true) or a folder (false)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "path": {
+            "type": "string",
+            "description": "Where it was."
+          }
+        }
+      },
+      "UpdateNode": {
+        "type": "object",
+        "description": "`PATCH /nodes/{id}`: rename and/or move.",
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The new name."
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The new folder (in any library of the same organization)."
+          }
+        }
+      },
+      "Version": {
+        "type": "object",
+        "description": "A version of a file.",
+        "required": [
+          "id",
+          "created_at",
+          "current"
+        ],
+        "properties": {
+          "author": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who committed it (their email), unless they left the organization."
+          },
+          "created_at": {
+            "type": "string",
+            "description": "When."
+          },
+          "current": {
+            "type": "boolean",
+            "description": "The file's current version."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The version."
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its description."
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The version it was based on (a tree: branches after conflicts and restores)."
           }
         }
       }

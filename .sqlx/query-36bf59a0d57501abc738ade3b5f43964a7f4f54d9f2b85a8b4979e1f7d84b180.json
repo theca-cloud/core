@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE node SET current_version = NULL WHERE pk = ANY($1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "36bf59a0d57501abc738ade3b5f43964a7f4f54d9f2b85a8b4979e1f7d84b180"
+}

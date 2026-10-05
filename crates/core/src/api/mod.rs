@@ -3,6 +3,7 @@
 mod app_password;
 pub mod auth;
 pub mod error;
+mod nodes;
 mod oidc;
 mod session;
 pub mod setup;
@@ -76,6 +77,16 @@ pub struct AppState {
         v1::cancel,
         v1::commit,
         v1::download,
+        nodes::info,
+        nodes::create_folder,
+        nodes::update,
+        nodes::delete,
+        nodes::copy,
+        nodes::trash,
+        nodes::restore,
+        nodes::versions,
+        nodes::restore_version,
+        nodes::search,
     ),
     components(schemas(theca_common::api::ApiError, theca_common::api::ChunkState))
 )]
@@ -90,6 +101,7 @@ pub fn router(state: AppState) -> Router {
         .nest(
             "/api/v1",
             v1::router()
+                .merge(nodes::router())
                 .merge(session::router())
                 .merge(app_password::router())
                 .merge(totp::router())

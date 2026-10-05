@@ -1,0 +1,43 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO node (organization, library, parent, name, is_file)\n           VALUES ($1, $2, $3, $4, false)\n           RETURNING uuid AS id, name, is_file, NULL::text AS modified",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "is_file",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "modified",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "e9d121027762696224489b9a941e6c3c07d3673becf5a71158e8a4d31fa2e101"
+}

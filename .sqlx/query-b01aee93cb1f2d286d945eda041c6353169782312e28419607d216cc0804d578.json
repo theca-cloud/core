@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH RECURSIVE subtree (pk, parent, name, is_file, current_version, depth) AS (\n               SELECT pk, parent, name, is_file, current_version, 0 FROM node WHERE pk = $1\n               UNION ALL\n               SELECT n.pk, n.parent, n.name, n.is_file, n.current_version, s.depth + 1\n               FROM node n JOIN subtree s ON n.parent = s.pk\n               WHERE n.deleted_at IS NULL\n           )\n           SELECT pk AS \"pk!\", parent, name AS \"name!\", is_file AS \"is_file!\", current_version\n           FROM subtree ORDER BY depth",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "parent",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "is_file!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "current_version",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "b01aee93cb1f2d286d945eda041c6353169782312e28419607d216cc0804d578"
+}

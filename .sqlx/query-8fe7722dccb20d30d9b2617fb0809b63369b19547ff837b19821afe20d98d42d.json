@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT uuid AS id, name, is_file, node_path(pk) AS \"path!\", deleted_at::text AS \"deleted_at!\"\n           FROM node WHERE library = $1 AND deleted_at IS NOT NULL ORDER BY deleted_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "is_file",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "path!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "deleted_at!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "8fe7722dccb20d30d9b2617fb0809b63369b19547ff837b19821afe20d98d42d"
+}

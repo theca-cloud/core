@@ -206,6 +206,26 @@ async fn account_email_unique_ignoring_case(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn a_leaving_author_keeps_their_versions(pool: PgPool) {
+    fixture(&pool).await;
+    sqlx::raw_sql(r#"UPDATE version SET author = 2 WHERE pk = 1; DELETE FROM "user" WHERE pk = 2"#)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let author: Option<i64> = sqlx::query_scalar("SELECT author FROM version WHERE pk = 1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(author, None);
+    assert_refused(
+        &pool,
+        "version_author",
+        "UPDATE version SET author = 3 WHERE pk = 1",
+    )
+    .await;
+}
+
+#[sqlx::test]
 async fn leaving_an_organization_drops_its_identities(pool: PgPool) {
     fixture(&pool).await;
     // Account 2 (user 2, organization 1) logs in through organization 1's

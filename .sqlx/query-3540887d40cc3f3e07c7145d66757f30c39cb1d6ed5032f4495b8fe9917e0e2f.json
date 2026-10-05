@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM node WHERE pk = ANY($1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3540887d40cc3f3e07c7145d66757f30c39cb1d6ed5032f4495b8fe9917e0e2f"
+}

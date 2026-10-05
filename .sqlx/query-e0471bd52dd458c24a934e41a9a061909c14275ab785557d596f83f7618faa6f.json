@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH RECURSIVE subtree (pk) AS (\n               SELECT $1::bigint\n               UNION ALL\n               SELECT n.pk FROM node n JOIN subtree s ON n.parent = s.pk\n           )\n           SELECT pk AS \"pk!\" FROM subtree",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e0471bd52dd458c24a934e41a9a061909c14275ab785557d596f83f7618faa6f"
+}

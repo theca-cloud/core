@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT n.name,\n                  CASE WHEN node_reachable(n.parent) THEN n.parent\n                       ELSE (SELECT r.pk FROM node r WHERE r.library = n.library AND r.parent IS NULL)\n                  END AS \"parent!\"\n           FROM node n WHERE n.pk = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "parent!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "e235857675d6adc4f51243eff54bb06b3861ffe1ad647fd2a3e79f985595f36f"
+}
