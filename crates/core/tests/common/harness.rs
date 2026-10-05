@@ -108,15 +108,19 @@ async fn world(kind: Kind, pool: PgPool) -> World {
 }
 
 async fn app(pool: &PgPool) -> Router {
-    let settings = Arc::new(Settings::load(pool).await.unwrap());
-    router(AppState {
+    router(state(pool).await)
+}
+
+/// The server's state, with the settings currently in the database.
+async fn state(pool: &PgPool) -> AppState {
+    AppState {
         pool: pool.clone(),
-        settings,
+        settings: Arc::new(Settings::load(pool).await.unwrap()),
         signer: UrlSigner::new([9; 32], PUBLIC_URL),
         backends: Backends::new(pool.clone()),
         cipher: theca_core::keys::DataCipher::new(&[7; 32]),
         setup: theca_core::api::setup::SetupState::done(),
-    })
+    }
 }
 
 /// Every test account's password, hashed once (Argon2 is deliberately slow).

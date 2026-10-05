@@ -571,3 +571,33 @@ pub struct SearchResult {
     /// Its path in the library.
     pub path: String,
 }
+
+/// A background job and its last runs (admin).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct JobStatus {
+    /// The job: `chunk_gc`, `trash_purge`, `cleanup`, `orphan_check`.
+    pub job: String,
+    /// How often it runs, in seconds.
+    pub interval_secs: u64,
+    /// Its last runs, newest first.
+    pub runs: Vec<JobRun>,
+}
+
+/// One run of a background job.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct JobRun {
+    /// The run.
+    pub id: Uuid,
+    /// When it started.
+    pub started_at: String,
+    /// When it ended (none while running).
+    pub finished_at: Option<String>,
+    /// `running`, `success`, `failure` or `interrupted` (cut off by a stop).
+    pub status: String,
+    /// How many items it handled.
+    pub items: i32,
+    /// Why it failed.
+    pub error: Option<String>,
+}

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT pk FROM node WHERE deleted_at <= now() - make_interval(secs => $1)\n             ORDER BY deleted_at LIMIT $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "09db53de60ea557e90c4293a3bef7c03579dd7a42ce67984674fbdd089c5f07f"
+}

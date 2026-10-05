@@ -1,5 +1,6 @@
 //! HTTP API. Unversioned probes (`/api/health`, `/api/version`) and `/api/v1`.
 
+mod admin;
 mod app_password;
 pub mod auth;
 pub mod error;
@@ -87,6 +88,8 @@ pub struct AppState {
         nodes::versions,
         nodes::restore_version,
         nodes::search,
+        admin::jobs,
+        admin::run_job,
     ),
     components(schemas(theca_common::api::ApiError, theca_common::api::ChunkState))
 )]
@@ -102,6 +105,7 @@ pub fn router(state: AppState) -> Router {
             "/api/v1",
             v1::router()
                 .merge(nodes::router())
+                .merge(admin::router())
                 .merge(session::router())
                 .merge(app_password::router())
                 .merge(totp::router())
@@ -128,6 +132,9 @@ pub struct Health {
     status: &'static str,
     /// Each check: `ok` or `failing`. Details go to the logs, never here.
     checks: BTreeMap<&'static str, &'static str>,
+    /// Background jobs whose last 3 runs failed (reported, not a failed probe:
+    /// restarting the server wouldn't fix them).
+    failing_jobs: Vec<String>,
 }
 
 /// Readiness probe: 200 when the server can serve requests, 503 otherwise.
@@ -146,6 +153,10 @@ async fn health(State(state): State<AppState>) -> (StatusCode, Json<Health>) {
     }
 
     let checks = BTreeMap::from([("database", if database.is_ok() { "ok" } else { "failing" })]);
+    let failing_jobs = match database {
+        Ok(_) => crate::jobs::failing(&state.pool).await.unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
     let healthy = checks.values().all(|c| *c == "ok");
     let status = if healthy {
         StatusCode::OK
@@ -157,6 +168,7 @@ async fn health(State(state): State<AppState>) -> (StatusCode, Json<Health>) {
         Json(Health {
             status: if healthy { "ok" } else { "failing" },
             checks,
+            failing_jobs,
         }),
     )
 }
@@ -206,6 +218,7 @@ mod tests {
             session_idle_lifetime: Duration::from_secs(3600),
             session_max_lifetime: None,
             oidc_link_by_email: false,
+            trash_retention: Duration::from_secs(0),
         });
         router(AppState {
             backends: Backends::new(pool.clone()),

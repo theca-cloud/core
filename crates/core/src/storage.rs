@@ -124,6 +124,19 @@ impl Backend {
         }
     }
 
+    /// Every object: `(key, last modified in Unix seconds)`, as a stream (a
+    /// backend can hold millions).
+    pub fn list(&self) -> futures::stream::BoxStream<'static, Result<(String, i64), BackendError>> {
+        use futures::StreamExt;
+        self.store()
+            .list(None)
+            .map(|meta| {
+                let meta = meta?;
+                Ok((meta.location.to_string(), meta.last_modified.timestamp()))
+            })
+            .boxed()
+    }
+
     /// Deletes a chunk's object; deleting a missing object is fine.
     pub async fn delete(&self, chunk: Uuid) -> Result<(), BackendError> {
         match self.store().delete(&key(chunk)).await {
@@ -180,6 +193,11 @@ impl Backend {
                 .to_string(),
         })
     }
+}
+
+/// The chunk an object key is for, if it is one.
+pub fn chunk_of(key: &str) -> Option<Uuid> {
+    Uuid::parse_str(key).ok().filter(|u| key == u.to_string())
 }
 
 fn key(chunk: Uuid) -> Path {

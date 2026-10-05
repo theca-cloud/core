@@ -29,6 +29,9 @@ pub struct Settings {
     /// An OIDC login with an unknown identity is linked to the account with
     /// the same email, if the provider says the email is verified.
     pub oidc_link_by_email: bool,
+    /// How long trashed files stay restorable before the purge (`0`: purged at
+    /// its next run).
+    pub trash_retention: Duration,
 }
 
 /// The shortest session lifetime: `last_seen` is only written every
@@ -77,6 +80,7 @@ impl Settings {
                     d => session_lifetime(v).map(|_| Some(d)),
                 }
             })?,
+            trash_retention: take(&mut values, "trash_retention_secs", "2592000", seconds)?,
             oidc_link_by_email: take(&mut values, "oidc_link_by_email", "false", |v| {
                 v.parse::<bool>().map_err(|e| format!("{e}"))
             })?,

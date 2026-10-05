@@ -39,6 +39,91 @@
         }
       }
     },
+    "/api/v1/admin/jobs": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Every background job with its last 10 runs.",
+        "operationId": "jobs",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JobStatus"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`admin_required`, `full_session_required`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/jobs/{job}/run": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Run a job now, in the background. Returns its run (`running`).",
+        "operationId": "run_job",
+        "parameters": [
+          {
+            "name": "job",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobRun"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`job_running`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/app-passwords": {
       "get": {
         "tags": [
@@ -2159,7 +2244,8 @@
         "description": "Health report. The contract is the HTTP status (200 / 503); the body is informational.",
         "required": [
           "status",
-          "checks"
+          "checks",
+          "failing_jobs"
         ],
         "properties": {
           "checks": {
@@ -2171,6 +2257,13 @@
             "propertyNames": {
               "type": "string"
             }
+          },
+          "failing_jobs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Background jobs whose last 3 runs failed (reported, not a failed probe:\nrestarting the server wouldn't fix them)."
           },
           "status": {
             "type": "string",
@@ -2228,6 +2321,78 @@
           "name": {
             "type": "string",
             "description": "Its name, e.g. \"Google\"."
+          }
+        }
+      },
+      "JobRun": {
+        "type": "object",
+        "description": "One run of a background job.",
+        "required": [
+          "id",
+          "started_at",
+          "status",
+          "items"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When it ended (none while running)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The run."
+          },
+          "items": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many items it handled."
+          },
+          "started_at": {
+            "type": "string",
+            "description": "When it started."
+          },
+          "status": {
+            "type": "string",
+            "description": "`running`, `success`, `failure` or `interrupted` (cut off by a stop)."
+          }
+        }
+      },
+      "JobStatus": {
+        "type": "object",
+        "description": "A background job and its last runs (admin).",
+        "required": [
+          "job",
+          "interval_secs",
+          "runs"
+        ],
+        "properties": {
+          "interval_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How often it runs, in seconds.",
+            "minimum": 0
+          },
+          "job": {
+            "type": "string",
+            "description": "The job: `chunk_gc`, `trash_purge`, `cleanup`, `orphan_check`."
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobRun"
+            },
+            "description": "Its last runs, newest first."
           }
         }
       },

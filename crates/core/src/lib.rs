@@ -8,6 +8,7 @@ pub mod auth;
 pub mod config;
 pub mod db;
 mod error;
+pub mod jobs;
 pub mod keys;
 pub mod oidc;
 pub mod settings;
@@ -15,6 +16,7 @@ pub mod storage;
 pub mod totp;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 pub use error::Error;
 
@@ -62,21 +64,45 @@ pub async fn run() -> Result<(), Error> {
     } else {
         api::setup::SetupState::done()
     };
-    let app = api::router(AppState {
+    let state = AppState {
         pool,
         settings,
         signer,
         backends,
         cipher,
         setup,
-    });
+    };
+
+    let interrupted = jobs::mark_interrupted(&state.pool).await?;
+    if interrupted > 0 {
+        tracing::warn!(
+            interrupted,
+            "job runs cut off by the last stop: they resume now"
+        );
+    }
+    let (stop, stopping) = tokio::sync::watch::channel(false);
+    let mut job_tasks = jobs::spawn_all(state.clone(), stopping);
+
+    let app = api::router(state);
     // Connect info: the client's IP, logged with anomalies.
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown_signal())
+    .with_graceful_shutdown(async move {
+        shutdown_signal().await;
+        let _ = stop.send(true);
+    })
     .await?;
+    // Jobs: no new runs; current ones get a few seconds, then are dropped (the
+    // next start marks them interrupted, and they resume).
+    let drain = async { while job_tasks.join_next().await.is_some() {} };
+    if tokio::time::timeout(Duration::from_secs(5), drain)
+        .await
+        .is_err()
+    {
+        tracing::warn!("job runs still going: dropped, they resume at the next start");
+    }
     tracing::info!("stopped");
     Ok(())
 }

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT instance_admin FROM account WHERE pk = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "instance_admin",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d44359888a6e2211985b7d5bce796e52bb42bb413cc193126a2909d8b1a3fbac"
+}
