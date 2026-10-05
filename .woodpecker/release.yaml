@@ -2,7 +2,7 @@
 # version is Cargo.toml's, written by scripts/release.sh (see the release
 # process in docs/CONTRIBUTING.md).
 when:
-  - event: push
+  - event: [push, manual]
     branch: [dev, prod]
 
 depends_on: [ci]
