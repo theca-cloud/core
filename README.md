@@ -33,6 +33,8 @@ GITEA_TOKEN=... scripts/release-local.sh   # the publish step in the CI image, w
 cargo fmt --all                # fix formatting
 ```
 
+Trying it as a user (the released image, a WebDAV drive): [try/](try/README.md).
+
 Dev explorers: database (pgweb, no login) http://localhost:8081, S3 (garage-webui) http://localhost:3909, emails (Mailpit) http://localhost:8025 (SMTP on `localhost:1025`).
 
 Start over: `rm -rf data/ .env`, then `scripts/dev.sh`.
