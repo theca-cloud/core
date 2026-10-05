@@ -48,15 +48,21 @@ tags)
 publish)
     # Crates, in dependency order (already tested: no rebuild).
     export CARGO_REGISTRIES_GITEA_TOKEN="Bearer $GITEA_TOKEN"
+    # What a failed run already published is skipped, so the pipeline can be re-run.
+    published() {
+        curl -fsS -o /dev/null -H "Authorization: token $GITEA_TOKEN" \
+            "$gitea/api/v1/packages/theca/$1/$2/$version" 2>/dev/null
+    }
     for crate in theca-common theca-client theca-core; do
-        cargo publish -q --locked --no-verify --registry gitea -p "$crate"
+        published cargo "$crate" ||
+            cargo publish -q --locked --no-verify --registry gitea -p "$crate"
     done
     # The browser package, as @theca/client.
     wasm-pack build crates/client --release --target web --scope theca --out-dir ../../dist/npm
     sed -i 's|"name": "@theca/theca-client"|"name": "@theca/client"|' dist/npm/package.json
     registry=${gitea#https:}/api/packages/theca/npm/
     printf '%s:_authToken=%s\n' "$registry" "$GITEA_TOKEN" >dist/npm/.npmrc
-    (cd dist/npm && npm publish --registry "https:$registry")
+    published npm %40theca%2Fclient || (cd dist/npm && npm publish --registry "https:$registry")
     # The tag and the release, with this version's changelog and openapi.json.
     notes=$(awk -v v="## [$version]" 'index($0, v) == 1 {on = 1; next} /^## \[/ {on = 0} on' CHANGELOG.md)
     id=$(jq -n --arg tag "v$version" --arg sha "$CI_COMMIT_SHA" --arg body "$notes" \
