@@ -25,7 +25,7 @@ cargo test --workspace         # needs scripts/dev.sh (tests use the dev Postgre
 UPDATE_OPENAPI=1 cargo test    # regenerate openapi.json after changing the API
 cargo sqlx prepare --workspace -- --all-targets   # refresh .sqlx/ after changing a query
 sqlx database reset -y -f --source crates/core/migrations   # after editing the migration (rewritten in place until 1.0.0)
-scripts/ci.sh                  # every CI check, natively
+scripts/ci.sh [lint|test|wasm|deny]   # every CI check natively, or one step
 scripts/ci-docker.sh           # the real Woodpecker pipeline, in Docker (needs woodpecker-cli)
 scripts/install-hooks.sh       # run scripts/ci.sh before every push (bypass: git push --no-verify)
 cargo fmt --all                # fix formatting

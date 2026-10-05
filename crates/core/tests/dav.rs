@@ -471,7 +471,9 @@ async fn run_litmus(port: u16, password: &str) -> String {
         use std::process::Command;
         let local = Command::new("litmus").arg("--version").output().is_ok();
         let output = if local {
+            // litmus writes debug.log into its working directory.
             Command::new("litmus")
+                .current_dir(std::env::temp_dir())
                 .args([
                     "--keep-going",
                     &format!("http://127.0.0.1:{port}/dav/"),

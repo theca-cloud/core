@@ -1,8 +1,22 @@
 #!/usr/bin/env sh
-# Every CI check, run natively. Woodpecker runs this same script.
+# Every CI check, run natively: `scripts/ci.sh` runs them all (locally, and the
+# pre-push hook); `scripts/ci.sh <step>` runs one, as the Woodpecker steps do:
+#   lint  formatting, .sqlx/ up to date, clippy (needs the database)
+#   test  every test (database, S3, SMTP, litmus)
+#   wasm  the crates built for the browser
+#   deny  licenses, advisories, sources
 # Locally it uses the dev environment (scripts/dev.sh); CI sets DATABASE_URL itself.
 set -eu
 cd "$(dirname "$0")/.."
+
+step=${1:-all}
+case "$step" in
+    all | lint | test | wasm | deny) ;;
+    *)
+        echo "usage: scripts/ci.sh [lint|test|wasm|deny]" >&2
+        exit 2
+        ;;
+esac
 
 for tool in cargo-deny sqlx; do
     if ! command -v "$tool" >/dev/null 2>&1; then
@@ -17,11 +31,22 @@ if [ -z "${DATABASE_URL:-}" ] && [ -f .env ]; then
     . ./.env
     set +a
 fi
-: "${DATABASE_URL:?DATABASE_URL is required: run scripts/dev.sh}"
 
-# S3 tests: locally, .env points to the dev Garage (scripts/dev.sh). In CI,
-# start a throwaway Garage (its binary is in the CI image).
-if [ -z "${S3_TEST_HOST:-}" ]; then
+database() {
+    : "${DATABASE_URL:?DATABASE_URL is required: run scripts/dev.sh}"
+    # The database may still be starting (CI service): retry for up to 30 s.
+    attempt=0
+    until sqlx migrate run --source crates/core/migrations; do
+        attempt=$((attempt + 1))
+        [ "$attempt" -lt 30 ] || exit 1
+        sleep 1
+    done
+}
+
+s3() {
+    # Locally, .env points to the dev Garage (scripts/dev.sh). In CI, start a
+    # throwaway Garage (its binary is in the CI image).
+    [ -n "${S3_TEST_HOST:-}" ] && return
     if ! command -v garage >/dev/null 2>&1; then
         echo "no S3 for the tests: run scripts/dev.sh (or use the CI image)" >&2
         exit 1
@@ -32,20 +57,23 @@ if [ -z "${S3_TEST_HOST:-}" ]; then
     export S3_TEST_HOST=http://127.0.0.1:3900 S3_TEST_REGION=garage S3_TEST_BUCKET=theca \
         S3_TEST_ACCESS_KEY_FILE=/tmp/garage/secrets/s3_access_key \
         S3_TEST_SECRET_KEY_FILE=/tmp/garage/secrets/s3_secret_key
+}
+
+if [ "$step" = all ] || [ "$step" = lint ]; then
+    database
+    cargo fmt --all --check
+    cargo sqlx prepare --workspace --check -- --all-targets
+    cargo clippy --workspace --all-targets -- -D warnings
 fi
-
-# The database may still be starting (CI service): retry for up to 30 s.
-attempt=0
-until sqlx migrate run --source crates/core/migrations; do
-    attempt=$((attempt + 1))
-    [ "$attempt" -lt 30 ] || exit 1
-    sleep 1
-done
-
-cargo fmt --all --check
-cargo sqlx prepare --workspace --check -- --all-targets
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo build -p theca-common -p theca-client --target wasm32-unknown-unknown
-cargo deny check
-echo "CI checks passed"
+if [ "$step" = all ] || [ "$step" = test ]; then
+    database
+    s3
+    cargo test --workspace
+fi
+if [ "$step" = all ] || [ "$step" = wasm ]; then
+    cargo build -p theca-common -p theca-client --target wasm32-unknown-unknown
+fi
+if [ "$step" = all ] || [ "$step" = deny ]; then
+    cargo deny check
+fi
+echo "CI checks passed ($step)"

@@ -1,5 +1,11 @@
+# Every branch (dev and prod included) and pull request, except changes that
+# only touch documentation. Each step is a part of scripts/ci.sh, so a red step
+# says what failed; steps share the workspace (target/ carries over).
 when:
-  - event: [push, pull_request, manual]
+  - event: [push, pull_request]
+    path:
+      exclude: ["roadmap/**", "**/*.md"]
+  - event: manual
 
 services:
   - name: postgres
@@ -15,17 +21,41 @@ services:
   - name: mailpit
     image: axllent/mailpit:v1.31.4
 
-steps:
-  - name: ci
-    # Built and pushed from a dev machine by scripts/ci-image.sh;
-    # tag = the Rust version in rust-toolchain.toml.
+# Built and pushed from a dev machine by scripts/ci-image.sh; tag = the Rust
+# version in rust-toolchain.toml. The tag is reused when tools are added to the
+# image: always fetch the latest.
+variables:
+  - &rust
     image: git.pband.ch/theca/ci-rust:1.98.0
-    # The tag is reused when tools are added to the image: always fetch the latest.
     pull: true
     environment:
       DATABASE_URL: postgres://theca:theca@postgres:5432/theca
       # Builds use the committed .sqlx/ metadata, never the live database.
       SQLX_OFFLINE: "true"
       MAILPIT_TEST_HOST: mailpit
+
+steps:
+  # Licenses and advisories: no build, so it runs alongside the others.
+  - name: deny
+    <<: *rust
+    depends_on: []
     commands:
-      - scripts/ci.sh
+      - scripts/ci.sh deny
+
+  - name: lint
+    <<: *rust
+    depends_on: []
+    commands:
+      - scripts/ci.sh lint
+
+  - name: test
+    <<: *rust
+    depends_on: [lint]
+    commands:
+      - scripts/ci.sh test
+
+  - name: wasm
+    <<: *rust
+    depends_on: [test]
+    commands:
+      - scripts/ci.sh wasm
