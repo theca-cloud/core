@@ -337,6 +337,39 @@ fn now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
+/// A `storage` row's implementation and details.
+pub fn details(backend: &theca_common::api::StorageBackend) -> (&'static str, serde_json::Value) {
+    let mut details = serde_json::to_value(backend).expect("serializable");
+    let implementation = match backend {
+        theca_common::api::StorageBackend::Filesystem { .. } => "filesystem",
+        theca_common::api::StorageBackend::S3 { .. } => "s3",
+    };
+    details
+        .as_object_mut()
+        .expect("an object")
+        .remove("implementation");
+    (implementation, details)
+}
+
+/// Writes, reads back and deletes a small object: the storage works.
+pub async fn probe(implementation: &str, details: &serde_json::Value) -> Result<(), String> {
+    let backend = Backend::new(implementation, details).map_err(|e| e.to_string())?;
+    let mut id = [0u8; 16];
+    getrandom::fill(&mut id).expect("system randomness");
+    let key = Uuid::from_bytes(id);
+    let data = b"theca storage probe".to_vec();
+    backend
+        .put(key, data.clone())
+        .await
+        .map_err(|e| e.to_string())?;
+    let read = backend.get(key).await.map_err(|e| e.to_string());
+    backend.delete(key).await.map_err(|e| e.to_string())?;
+    if read? != data {
+        return Err("read back different bytes".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

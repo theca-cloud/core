@@ -61,7 +61,10 @@ CREATE TABLE organization (
     -- Personal organization of this account ("My files"; created at
     -- self-registration and OIDC sign-up), NULL for a company one. Its owner is
     -- that account (FK below), and it never has another member (trigger).
-    personal_of bigint UNIQUE  -- FK to account added below (account is created after)
+    personal_of bigint UNIQUE,  -- FK to account added below (account is created after)
+    -- Suspended (e.g. unpaid): nothing of it is reachable (organization_access);
+    -- its members still log in and see it suspended.
+    suspended_at timestamptz
 );
 
 ALTER TABLE storage
@@ -75,7 +78,9 @@ CREATE TABLE account (
     email text NOT NULL,
     instance_admin boolean NOT NULL DEFAULT false,
     verified boolean NOT NULL DEFAULT false,
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_at timestamptz NOT NULL DEFAULT now(),
+    -- Suspended (abuse): its tokens stop authenticating, it can't log in.
+    suspended_at timestamptz
 );
 CREATE UNIQUE INDEX account_email ON account (lower(email));
 
@@ -90,8 +95,15 @@ CREATE TABLE identity_provider (
     name text NOT NULL,         -- shown on the login screen
     issuer text NOT NULL,       -- discovery: <issuer>/.well-known/openid-configuration
     client_id text NOT NULL,
-    client_secret_file text NOT NULL,  -- a path, never the secret
-    enabled boolean NOT NULL DEFAULT true
+    -- The client secret: a path (instance-wide providers, configured by the
+    -- instance admin), or the value encrypted with the DATA_KEY__FILE key (an
+    -- organization's: a path chosen by an organization's owner would read any
+    -- server file and send it to their own provider).
+    client_secret_file text,
+    client_secret_encrypted text,
+    enabled boolean NOT NULL DEFAULT true,
+    CONSTRAINT identity_provider_secret CHECK ((client_secret_file IS NULL) <> (client_secret_encrypted IS NULL)),
+    CONSTRAINT identity_provider_secret_file CHECK (organization IS NULL OR client_secret_file IS NULL)
 );
 CREATE UNIQUE INDEX identity_provider_name ON identity_provider (organization, lower(name)) NULLS NOT DISTINCT;
 
@@ -237,7 +249,7 @@ CREATE INDEX token_resource ON token (resource);
 -- Authorization). Plain SQL functions: the planner inlines them.
 
 -- The organizations a token acts in: the account's joined memberships, within
--- the token's scope. `library` is the token's library scope (NULL: every
+-- the token's scope, unless suspended. `library` is the token's library scope (NULL: every
 -- library); `can_write` is false for read-only tokens. Revocation and expiry
 -- are checked once per request, when the token is looked up.
 CREATE FUNCTION organization_access(token bigint)
@@ -247,6 +259,7 @@ LANGUAGE sql STABLE AS $$
     FROM token t
     JOIN account a ON a.uuid = t.resource
     JOIN "user" u ON u.account = a.pk AND u.joined_at IS NOT NULL
+    JOIN organization o ON o.pk = u.organization AND o.suspended_at IS NULL
     WHERE t.pk = $1 AND t.usage IN ('session', 'app_password')
       AND (t.organization IS NULL OR u.organization = t.organization)
 $$;

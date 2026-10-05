@@ -9,6 +9,7 @@ pub mod error;
 mod nodes;
 mod oidc;
 mod organizations;
+mod providers;
 mod session;
 pub mod setup;
 mod totp;
@@ -27,14 +28,15 @@ use sqlx::PgPool;
 use utoipa::{OpenApi, ToSchema};
 
 use crate::keys::DataCipher;
-use crate::settings::Settings;
+use crate::settings::LiveSettings;
 use crate::storage::{Backends, UrlSigner};
 
 /// Shared by every handler.
 #[derive(Clone)]
 pub struct AppState {
     pub pool: PgPool,
-    pub settings: Arc<Settings>,
+    /// The instance settings, live (a change through the admin API applies at once).
+    pub settings: LiveSettings,
     /// Signs and verifies the server's own presigned URLs (filesystem backend).
     pub signer: UrlSigner,
     /// Storage backends, built once per storage.
@@ -103,6 +105,24 @@ pub struct AppState {
         organizations::add,
         organizations::remove,
         admin::run_job,
+        admin::settings,
+        admin::change_settings,
+        admin::organizations,
+        admin::create_organization,
+        admin::update_organization,
+        admin::accounts,
+        admin::update_account,
+        admin::storages,
+        admin::add_storage,
+        admin::default_storage,
+        admin::providers,
+        admin::create_provider,
+        admin::update_provider,
+        admin::delete_provider,
+        organizations::providers,
+        organizations::create_provider,
+        organizations::update_provider,
+        organizations::delete_provider,
     ),
     components(schemas(theca_common::api::ApiError, theca_common::api::ChunkState))
 )]
@@ -244,7 +264,7 @@ mod tests {
     }
 
     fn app(pool: PgPool) -> Router {
-        let settings = Arc::new(Settings {
+        let settings = crate::settings::LiveSettings::new(crate::settings::Settings {
             instance_name: "Theca".into(),
             gc_grace_period: Duration::from_secs(1),
             presigned_url_lifetime: Duration::from_secs(60),
@@ -252,9 +272,11 @@ mod tests {
             session_idle_lifetime: Duration::from_secs(3600),
             session_max_lifetime: None,
             oidc_link_by_email: false,
+            oidc_allow_internal_issuers: false,
             trash_retention: Duration::from_secs(0),
             registration_open: false,
             smtp: None,
+            job_intervals: Default::default(),
         });
         router(AppState {
             backends: Backends::new(pool.clone()),

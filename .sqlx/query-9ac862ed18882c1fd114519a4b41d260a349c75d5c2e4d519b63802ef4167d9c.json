@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE account SET instance_admin = coalesce($2, instance_admin),\n             suspended_at = CASE WHEN $3::boolean IS NULL THEN suspended_at\n                                 WHEN $3 THEN coalesce(suspended_at, now()) END\n         WHERE uuid = $1 RETURNING pk",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9ac862ed18882c1fd114519a4b41d260a349c75d5c2e4d519b63802ef4167d9c"
+}

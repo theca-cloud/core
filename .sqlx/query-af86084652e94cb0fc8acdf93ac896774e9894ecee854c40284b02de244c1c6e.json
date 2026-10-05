@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT o.uuid AS organization, o.name, u.joined_at IS NOT NULL AS \"joined!\",\n                  o.personal_of IS NOT NULL AS \"personal!\"\n           FROM \"user\" u JOIN organization o ON o.pk = u.organization\n           WHERE u.account = $1 ORDER BY lower(o.name)",
+  "query": "SELECT o.uuid AS organization, o.name, u.joined_at IS NOT NULL AS \"joined!\",\n                  o.personal_of IS NOT NULL AS \"personal!\", o.suspended_at IS NOT NULL AS \"suspended!\"\n           FROM \"user\" u JOIN organization o ON o.pk = u.organization\n           WHERE u.account = $1 ORDER BY lower(o.name)",
   "describe": {
     "columns": [
       {
@@ -22,6 +22,11 @@
         "ordinal": 3,
         "name": "personal!",
         "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "suspended!",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -33,8 +38,9 @@
       false,
       false,
       null,
+      null,
       null
     ]
   },
-  "hash": "04c942590330dfd30509e14bfba1a490e813ca1ac4dc326436ff3f880cc2edac"
+  "hash": "af86084652e94cb0fc8acdf93ac896774e9894ecee854c40284b02de244c1c6e"
 }

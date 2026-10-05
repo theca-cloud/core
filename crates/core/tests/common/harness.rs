@@ -2,7 +2,7 @@
 // need every item public). A fixture world, logged-in clients, the upload
 // protocol, downloads, anomalies.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use axum::Router;
 use axum::body::{Body, to_bytes};
@@ -117,7 +117,7 @@ async fn app(pool: &PgPool) -> Router {
 async fn state(pool: &PgPool) -> AppState {
     AppState {
         pool: pool.clone(),
-        settings: Arc::new(Settings::load(pool).await.unwrap()),
+        settings: theca_core::settings::LiveSettings::new(Settings::load(pool).await.unwrap()),
         signer: UrlSigner::new([9; 32], PUBLIC_URL),
         backends: Backends::new(pool.clone()),
         cipher: theca_core::keys::DataCipher::new(&[7; 32]),

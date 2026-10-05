@@ -200,7 +200,7 @@ pub async fn store(
                 compression,
                 stored_sha256: Sha256::of(&stored),
             };
-            let lifetime = state.settings.presigned_url_lifetime;
+            let lifetime = state.settings.get().presigned_url_lifetime;
             db::chunk::declare(&state.pool, who, &[declare], lifetime, i64::MAX)
                 .await
                 .map_err(|e| match e {

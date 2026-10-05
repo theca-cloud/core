@@ -248,9 +248,9 @@ async fn leaving_an_organization_drops_its_identities(pool: PgPool) {
     // Account 2 (user 2, organization 1) logs in through organization 1's
     // provider and an instance-wide one.
     sqlx::raw_sql(
-        r#"INSERT INTO identity_provider (pk, organization, name, issuer, client_id, client_secret_file)
-               OVERRIDING SYSTEM VALUE VALUES (1, 1, 'one sso', 'https://one', 'c', '/s'),
-                                              (2, NULL, 'google', 'https://google', 'c', '/s');
+        r#"INSERT INTO identity_provider (pk, organization, name, issuer, client_id, client_secret_file, client_secret_encrypted)
+               OVERRIDING SYSTEM VALUE VALUES (1, 1, 'one sso', 'https://one', 'c', NULL, 'sealed'),
+                                              (2, NULL, 'google', 'https://google', 'c', '/s', NULL);
            INSERT INTO identity (account, kind, provider, details)
                VALUES (2, 'oidc', 1, '{"subject": "s1"}'), (2, 'oidc', 2, '{"subject": "s2"}');"#,
     )
@@ -275,8 +275,8 @@ async fn identity_details(pool: PgPool) {
     // Providers: instance-wide (1) and organization 1's (2); names unique per organization.
     assert_accepted(
         &pool,
-        "INSERT INTO identity_provider (pk, organization, name, issuer, client_id, client_secret_file) \
-         OVERRIDING SYSTEM VALUE VALUES (1, NULL, 'SSO', 'https://i', 'c', '/s'), (2, 1, 'SSO', 'https://j', 'c', '/s')",
+        "INSERT INTO identity_provider (pk, organization, name, issuer, client_id, client_secret_file, client_secret_encrypted) \
+         OVERRIDING SYSTEM VALUE VALUES (1, NULL, 'SSO', 'https://i', 'c', '/s', NULL), (2, 1, 'SSO', 'https://j', 'c', NULL, 'sealed')",
     )
     .await;
     assert_refused(
@@ -284,6 +284,26 @@ async fn identity_details(pool: PgPool) {
         "identity_provider_name",
         "INSERT INTO identity_provider (organization, name, issuer, client_id, client_secret_file) \
          VALUES (NULL, 'sso', 'https://k', 'c', '/s')",
+    )
+    .await;
+    // An organization's provider never reads a server file; a secret either way, not both.
+    let provider = "INSERT INTO identity_provider (organization, name, issuer, client_id, client_secret_file, client_secret_encrypted) VALUES";
+    assert_refused(
+        &pool,
+        "identity_provider_secret_file",
+        &format!("{provider} (1, 'p1', 'https://p', 'c', '/etc/passwd', NULL)"),
+    )
+    .await;
+    assert_refused(
+        &pool,
+        "identity_provider_secret",
+        &format!("{provider} (NULL, 'p2', 'https://p', 'c', '/s', 'sealed')"),
+    )
+    .await;
+    assert_refused(
+        &pool,
+        "identity_provider_secret",
+        &format!("{provider} (NULL, 'p3', 'https://p', 'c', NULL, NULL)"),
     )
     .await;
 

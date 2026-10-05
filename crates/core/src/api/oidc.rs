@@ -95,12 +95,18 @@ async fn begin(
     link: Option<Uuid>,
 ) -> Result<String, &'static str> {
     let provider = load(state, provider).await.ok_or("unknown_provider")?;
-    let (url, flow) = oidc::start(&provider, &redirect_uri(state, &provider), link)
-        .await
-        .map_err(|e| {
-            tracing::warn!(provider = %provider.uuid, error = %e, "OIDC start failed");
-            "oidc_failed"
-        })?;
+    let (url, flow) = oidc::start(
+        &state.cipher,
+        state.settings.get().oidc_allow_internal_issuers,
+        &provider,
+        &redirect_uri(state, &provider),
+        link,
+    )
+    .await
+    .map_err(|e| {
+        tracing::warn!(provider = %provider.uuid, error = %e, "OIDC start failed");
+        "oidc_failed"
+    })?;
     let sealed = state
         .cipher
         .encrypt(&serde_json::to_vec(&flow).expect("serializable"), FLOW_AAD);
@@ -180,12 +186,19 @@ async fn finish(
     let provider = load(state, provider).await.ok_or("unknown_provider")?;
     let code = params.code.ok_or("oidc_failed")?;
     let link = flow.link;
-    let asserted = oidc::finish(&provider, &redirect_uri(state, &provider), flow, code)
-        .await
-        .map_err(|e| {
-            tracing::warn!(provider = %provider.uuid, error = %e, "OIDC callback failed");
-            "oidc_failed"
-        })?;
+    let asserted = oidc::finish(
+        &state.cipher,
+        state.settings.get().oidc_allow_internal_issuers,
+        &provider,
+        &redirect_uri(state, &provider),
+        flow,
+        code,
+    )
+    .await
+    .map_err(|e| {
+        tracing::warn!(provider = %provider.uuid, error = %e, "OIDC callback failed");
+        "oidc_failed"
+    })?;
     let db_error = |e: sqlx::Error| {
         tracing::error!(error = %e, "database error in an OIDC callback");
         "internal"
@@ -239,7 +252,7 @@ async fn link_by_email(
         .as_deref()
         .filter(|_| asserted.email_verified);
     // A verified account with the address the provider verified: linked, if allowed.
-    if let (Some(email), true) = (verified_email, state.settings.oidc_link_by_email) {
+    if let (Some(email), true) = (verified_email, state.settings.get().oidc_link_by_email) {
         let found = db::identity::verified_account_by_email(&state.pool, email)
             .await
             .map_err(|_| "internal")?;
@@ -257,7 +270,7 @@ async fn link_by_email(
     let (Some(email), None, true) = (
         email,
         provider.organization,
-        state.settings.registration_open,
+        state.settings.get().registration_open,
     ) else {
         return Err("unknown_identity");
     };

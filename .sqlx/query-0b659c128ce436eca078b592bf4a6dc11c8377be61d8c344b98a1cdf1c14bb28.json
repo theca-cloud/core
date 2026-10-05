@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT a.pk, a.uuid, i.details->>'hash' AS \"hash?\", a.verified\n           FROM account a LEFT JOIN identity i ON i.account = a.pk AND i.kind = 'password'\n           WHERE lower(a.email) = lower($1)",
+  "query": "SELECT a.pk, a.uuid, i.details->>'hash' AS \"hash?\", a.verified,\n                  a.suspended_at IS NOT NULL AS \"suspended!\"\n           FROM account a LEFT JOIN identity i ON i.account = a.pk AND i.kind = 'password'\n           WHERE lower(a.email) = lower($1)",
   "describe": {
     "columns": [
       {
@@ -22,6 +22,11 @@
         "ordinal": 3,
         "name": "verified",
         "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "suspended!",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -33,8 +38,9 @@
       false,
       false,
       null,
-      false
+      false,
+      null
     ]
   },
-  "hash": "c2a5509e403fc5605cf40c18611b9f48da7c17dd3bf1d4188c980864c3261fe1"
+  "hash": "0b659c128ce436eca078b592bf4a6dc11c8377be61d8c344b98a1cdf1c14bb28"
 }

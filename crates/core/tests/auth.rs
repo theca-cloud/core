@@ -24,6 +24,8 @@ struct World {
     app: Router,
     pool: PgPool,
     organizations: [Uuid; 2],
+    /// The app's settings, reloaded after a test changes them.
+    settings: theca_core::settings::LiveSettings,
     _dir: tempfile::TempDir,
 }
 
@@ -55,10 +57,12 @@ async fn world(pool: PgPool) -> World {
         .fetch_all(&pool)
         .await
         .unwrap();
+    let settings = theca_core::settings::LiveSettings::new(Settings::load(&pool).await.unwrap());
     World {
+        settings: settings.clone(),
         app: router(AppState {
             pool: pool.clone(),
-            settings: Arc::new(Settings::load(&pool).await.unwrap()),
+            settings,
             signer: UrlSigner::new([9; 32], "http://test"),
             backends: Backends::new(pool.clone()),
             cipher: theca_core::keys::DataCipher::new(&[7; 32]),
@@ -945,15 +949,37 @@ fn hs256(claims: &Value) -> String {
 
 impl World {
     /// Registers the fake provider, instance-wide or for an organization (pk).
+    /// An organization's provider gets its secret encrypted (with the test
+    /// world's key) and the instance lets it use internal addresses.
     async fn provider(&self, idp: &FakeIdp, name: &str, organization: Option<i64>) -> Uuid {
+        let (file, sealed) = match organization {
+            None => (
+                Some(idp.secret_file.path().to_str().unwrap().to_owned()),
+                None,
+            ),
+            Some(_) => {
+                sqlx::query("INSERT INTO setting (key, value) VALUES ('oidc_allow_internal_issuers', 'true') ON CONFLICT DO NOTHING")
+                    .execute(&self.pool)
+                    .await
+                    .unwrap();
+                self.settings.set(Settings::load(&self.pool).await.unwrap());
+                let cipher = theca_core::keys::DataCipher::new(&[7; 32]);
+                let secret = std::fs::read(idp.secret_file.path()).unwrap();
+                (
+                    None,
+                    Some(cipher.encrypt(&secret, theca_core::oidc::SECRET_AAD)),
+                )
+            }
+        };
         sqlx::query_scalar(
-            "INSERT INTO identity_provider (organization, name, issuer, client_id, client_secret_file)
-             VALUES ($1, $2, $3, 'theca', $4) RETURNING uuid",
+            "INSERT INTO identity_provider (organization, name, issuer, client_id, client_secret_file, client_secret_encrypted)
+             VALUES ($1, $2, $3, 'theca', $4, $5) RETURNING uuid",
         )
         .bind(organization)
         .bind(name)
         .bind(&idp.issuer)
-        .bind(idp.secret_file.path().to_str().unwrap())
+        .bind(file)
+        .bind(sealed)
         .fetch_one(&self.pool)
         .await
         .unwrap()

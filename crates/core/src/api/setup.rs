@@ -10,8 +10,7 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use theca_common::api::{self, StorageBackend};
-use uuid::Uuid;
+use theca_common::api;
 
 use super::AppState;
 use super::auth::{ClientIp, UserAgent, set_session_cookie};
@@ -19,7 +18,6 @@ use super::error::{ApiJson, HttpError};
 use crate::auth::hash_password;
 use crate::db;
 use crate::db::setup::SetupError;
-use crate::storage::Backend;
 
 /// Whether the instance still has to be set up, and the token it needs.
 #[derive(Debug)]
@@ -141,13 +139,15 @@ pub async fn run(
 
     let mut storages = Vec::new();
     for storage in &req.storages {
-        let (implementation, details) = details(&storage.backend);
-        probe(implementation, &details).await.map_err(|e| {
-            HttpError::bad_request(
-                "storage_unusable",
-                format!("storage {:?}: {e}", storage.name),
-            )
-        })?;
+        let (implementation, details) = crate::storage::details(&storage.backend);
+        crate::storage::probe(implementation, &details)
+            .await
+            .map_err(|e| {
+                HttpError::bad_request(
+                    "storage_unusable",
+                    format!("storage {:?}: {e}", storage.name),
+                )
+            })?;
         storages.push((storage.name.trim().to_owned(), implementation, details));
     }
 
@@ -175,39 +175,6 @@ pub async fn run(
     let mut headers = HeaderMap::new();
     set_session_cookie(&mut headers, &token.token);
     Ok((headers, Json(db::account::me(&state.pool, pk).await?)))
-}
-
-/// A `storage` row's implementation and details.
-fn details(backend: &StorageBackend) -> (&'static str, serde_json::Value) {
-    let mut details = serde_json::to_value(backend).expect("serializable");
-    let implementation = match backend {
-        StorageBackend::Filesystem { .. } => "filesystem",
-        StorageBackend::S3 { .. } => "s3",
-    };
-    details
-        .as_object_mut()
-        .expect("an object")
-        .remove("implementation");
-    (implementation, details)
-}
-
-/// Writes, reads back and deletes a small object: the storage works.
-async fn probe(implementation: &str, details: &serde_json::Value) -> Result<(), String> {
-    let backend = Backend::new(implementation, details).map_err(|e| e.to_string())?;
-    let mut id = [0u8; 16];
-    getrandom::fill(&mut id).expect("system randomness");
-    let key = Uuid::from_bytes(id);
-    let data = b"theca storage probe".to_vec();
-    backend
-        .put(key, data.clone())
-        .await
-        .map_err(|e| e.to_string())?;
-    let read = backend.get(key).await.map_err(|e| e.to_string());
-    backend.delete(key).await.map_err(|e| e.to_string())?;
-    if read? != data {
-        return Err("read back different bytes".into());
-    }
-    Ok(())
 }
 
 fn constraint(e: &sqlx::Error) -> Option<&str> {

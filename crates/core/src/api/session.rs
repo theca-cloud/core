@@ -27,7 +27,7 @@ pub fn router() -> Router<AppState> {
 #[utoipa::path(post, path = "/api/v1/auth/login", request_body = api::Login, responses(
     (status = 200, body = api::Me),
     (status = 401, description = "`invalid_credentials`, `totp_required`, `invalid_totp`", body = api::ApiError),
-    (status = 403, description = "`email_not_verified`", body = api::ApiError),
+    (status = 403, description = "`email_not_verified`, `account_suspended`", body = api::ApiError),
 ))]
 pub async fn login(
     State(state): State<AppState>,
@@ -36,9 +36,11 @@ pub async fn login(
     ApiJson(req): ApiJson<api::Login>,
 ) -> Result<(HeaderMap, Json<api::Me>), HttpError> {
     let found = db::account::password_of(&state.pool, &req.email).await?;
-    let hash = found.as_ref().and_then(|(_, _, hash, _)| hash.as_deref());
+    let hash = found
+        .as_ref()
+        .and_then(|(_, _, hash, _, _)| hash.as_deref());
     if !verify_password(hash, &req.password) {
-        let account = found.map(|(_, uuid, _, _)| uuid);
+        let account = found.map(|(_, uuid, _, _, _)| uuid);
         tracing::warn!(anomaly = "login_failed", ?account, ip = ?ip.0, "failed login");
         return Err(HttpError::new(
             StatusCode::UNAUTHORIZED,
@@ -46,7 +48,12 @@ pub async fn login(
             "wrong email or password",
         ));
     }
-    let (pk, account, _, verified) = found.expect("a password matched");
+    let (pk, account, _, verified, suspended) = found.expect("a password matched");
+    if suspended {
+        return Err(
+            HttpError::forbidden("this account is suspended").into_code("account_suspended")
+        );
+    }
     // Self-registered accounts log in once their address is verified (else a
     // stranger could have registered it first). Checked after the password:
     // only someone who knows it learns the account is unverified.
@@ -117,7 +124,7 @@ pub async fn sessions(
             &state.pool,
             account.account_uuid,
             account.token_uuid,
-            state.settings.session_lifetime(),
+            state.settings.get().session_lifetime(),
         )
         .await?,
     ))

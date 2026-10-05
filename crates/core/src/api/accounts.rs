@@ -81,10 +81,10 @@ pub async fn register(
     State(state): State<AppState>,
     ApiJson(req): ApiJson<api::Register>,
 ) -> Result<StatusCode, HttpError> {
-    if !state.settings.registration_open {
+    if !state.settings.get().registration_open {
         return Err(HttpError::forbidden("registration is closed").into_code("registration_closed"));
     }
-    if state.settings.smtp.is_none() {
+    if state.settings.get().smtp.is_none() {
         return Err(email_unavailable());
     }
     let email = check_email(&req.email)?;

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE storage SET is_default = false WHERE is_default",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "2f95147473db52d68145535dd906ee01b962cc036fce6e6d1918bc3d79b8c6f3"
+}

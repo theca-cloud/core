@@ -19,6 +19,14 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/organizations/{id}/members", get(members).post(add))
         .route("/organizations/{id}/members/{user}", delete(remove))
+        .route(
+            "/organizations/{id}/identity-providers",
+            get(providers).post(create_provider),
+        )
+        .route(
+            "/organizations/{id}/identity-providers/{provider}",
+            axum::routing::patch(update_provider).delete(delete_provider),
+        )
 }
 
 /// The owner, from a full session.
@@ -76,7 +84,7 @@ pub async fn add(
     let mut tx = state.pool.begin().await?;
     let user = match db::organization::add(&mut tx, &organization, &inviter, email).await? {
         Added::Joined(user) => user,
-        Added::Invited(_) if state.settings.smtp.is_none() => return Err(email_unavailable()),
+        Added::Invited(_) if state.settings.get().smtp.is_none() => return Err(email_unavailable()),
         Added::Invited(user) => user,
         Added::AlreadyMember => {
             return Err(HttpError::conflict("already_member", "already a member"));
@@ -121,4 +129,70 @@ pub async fn remove(
     }
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// The organization's identity providers (the owner).
+#[utoipa::path(get, path = "/api/v1/organizations/{id}/identity-providers", params(("id" = Uuid, Path)), responses(
+    (status = 200, body = Vec<api::ProviderInfo>),
+    (status = 404, body = api::ApiError),
+))]
+pub async fn providers(
+    State(state): State<AppState>,
+    account: CurrentAccount,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<api::ProviderInfo>>, HttpError> {
+    let organization = owned(&state, &account, id).await?;
+    Ok(Json(
+        db::admin::providers(&state.pool, Some(organization.pk)).await?,
+    ))
+}
+
+/// Add an identity provider for the organization (the owner): its logins open
+/// sessions restricted to the organization. `https` issuers on public
+/// addresses only; the secret as a value (stored encrypted).
+#[utoipa::path(post, path = "/api/v1/organizations/{id}/identity-providers", params(("id" = Uuid, Path)), request_body = api::ProviderRequest, responses(
+    (status = 201, body = api::ProviderInfo),
+    (status = 400, description = "`invalid_provider`, `issuer_refused`", body = api::ApiError),
+))]
+pub async fn create_provider(
+    State(state): State<AppState>,
+    account: CurrentAccount,
+    Path(id): Path<Uuid>,
+    ApiJson(request): ApiJson<api::ProviderRequest>,
+) -> Result<(StatusCode, Json<api::ProviderInfo>), HttpError> {
+    let organization = owned(&state, &account, id).await?;
+    let created = super::providers::create(&state, Some(organization.pk), &request).await?;
+    Ok((StatusCode::CREATED, Json(created)))
+}
+
+/// Change one of the organization's identity providers (the owner).
+#[utoipa::path(patch, path = "/api/v1/organizations/{id}/identity-providers/{provider}", params(("id" = Uuid, Path), ("provider" = Uuid, Path)), request_body = api::ProviderRequest, responses(
+    (status = 200, body = api::ProviderInfo),
+    (status = 404, body = api::ApiError),
+))]
+pub async fn update_provider(
+    State(state): State<AppState>,
+    account: CurrentAccount,
+    Path((id, provider)): Path<(Uuid, Uuid)>,
+    ApiJson(request): ApiJson<api::ProviderRequest>,
+) -> Result<Json<api::ProviderInfo>, HttpError> {
+    let organization = owned(&state, &account, id).await?;
+    Ok(Json(
+        super::providers::update(&state, Some(organization.pk), provider, &request).await?,
+    ))
+}
+
+/// Delete one of the organization's identity providers, and the identities
+/// linked through it (the owner).
+#[utoipa::path(delete, path = "/api/v1/organizations/{id}/identity-providers/{provider}", params(("id" = Uuid, Path), ("provider" = Uuid, Path)), responses(
+    (status = 204),
+    (status = 404, body = api::ApiError),
+))]
+pub async fn delete_provider(
+    State(state): State<AppState>,
+    account: CurrentAccount,
+    Path((id, provider)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, HttpError> {
+    let organization = owned(&state, &account, id).await?;
+    super::providers::delete(&state, Some(organization.pk), provider).await
 }

@@ -39,6 +39,254 @@
         }
       }
     },
+    "/api/v1/admin/accounts": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Accounts (at most 200).",
+        "operationId": "accounts",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "path",
+            "description": "Part of a name or email.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AdminAccount"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/accounts/{id}": {
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Make or unmake an instance admin, suspend or lift (never leaving the\ninstance without an active admin).",
+        "operationId": "update_account",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAccount"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAccount"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`last_admin`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/identity-providers": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The instance-wide identity providers.",
+        "operationId": "providers",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProviderInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Add an instance-wide identity provider (full sessions for its logins).",
+        "operationId": "create_provider",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_provider`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/identity-providers/{id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete an instance-wide identity provider, and the identities linked through it.",
+        "operationId": "delete_provider",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Change an instance-wide identity provider.",
+        "operationId": "update_provider",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/jobs": {
       "get": {
         "tags": [
@@ -113,6 +361,318 @@
           },
           "409": {
             "description": "`job_running`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/organizations": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Organizations (at most 200), with their owner, members, quota, usage.",
+        "operationId": "organizations",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "path",
+            "description": "Part of a name or email.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AdminOrganization"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create an organization owned by an existing account.",
+        "operationId": "create_organization",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrganization"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOrganization"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No account with that email",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/organizations/{id}": {
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Rename, set the quota, suspend or lift, set the default storage.",
+        "operationId": "update_organization",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOrganization"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOrganization"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/settings": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Every setting: its stored value (or none: the default), default, description.",
+        "operationId": "settings",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SettingInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Change settings (`null`: back to the default), all or none: the result is\nvalidated as a whole, then applied at once (no restart).",
+        "operationId": "change_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "propertyNames": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SettingInfo"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`unknown_setting`, `invalid_setting`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/storages": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The shared storages, with their usage.",
+        "operationId": "storages",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StorageInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Add a shared storage, tested first (write, read back, delete).",
+        "operationId": "add_storage",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewStorage"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`storage_unusable`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`storage_name_taken`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/storages/{id}/default": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Make a shared storage the instance default (new libraries go there).",
+        "operationId": "default_storage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
             "content": {
               "application/json": {
                 "schema": {
@@ -380,7 +940,7 @@
             }
           },
           "403": {
-            "description": "`email_not_verified`",
+            "description": "`email_not_verified`, `account_suspended`",
             "content": {
               "application/json": {
                 "schema": {
@@ -1966,6 +2526,204 @@
         }
       }
     },
+    "/api/v1/organizations/{id}/identity-providers": {
+      "get": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "The organization's identity providers (the owner).",
+        "operationId": "providers",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProviderInfo"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Add an identity provider for the organization (the owner): its logins open\nsessions restricted to the organization. `https` issuers on public\naddresses only; the secret as a value (stored encrypted).",
+        "operationId": "create_provider",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_provider`, `issuer_refused`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{id}/identity-providers/{provider}": {
+      "delete": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Delete one of the organization's identity providers, and the identities\nlinked through it (the owner).",
+        "operationId": "delete_provider",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Change one of the organization's identity providers (the owner).",
+        "operationId": "update_provider",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organizations/{id}/members": {
       "get": {
         "tags": [
@@ -2308,6 +3066,107 @@
           }
         }
       },
+      "AdminAccount": {
+        "type": "object",
+        "description": "An account, for the instance admin.",
+        "required": [
+          "id",
+          "email",
+          "verified",
+          "instance_admin",
+          "suspended",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "When it was created."
+          },
+          "email": {
+            "type": "string",
+            "description": "Its email."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The account."
+          },
+          "instance_admin": {
+            "type": "boolean",
+            "description": "An instance admin."
+          },
+          "suspended": {
+            "type": "boolean",
+            "description": "Suspended: it can't log in, its tokens are refused."
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "Its email is verified."
+          }
+        }
+      },
+      "AdminOrganization": {
+        "type": "object",
+        "description": "An organization, for the instance admin.",
+        "required": [
+          "id",
+          "name",
+          "owner",
+          "personal",
+          "members",
+          "used",
+          "suspended"
+        ],
+        "properties": {
+          "default_storage": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Its default storage (none: the instance's)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The organization."
+          },
+          "members": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Joined members and pending invitations."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Its owner's email."
+          },
+          "personal": {
+            "type": "boolean",
+            "description": "An account's personal organization."
+          },
+          "quota": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Its quota in bytes (none: unlimited)."
+          },
+          "suspended": {
+            "type": "boolean",
+            "description": "Suspended: nothing in it is reachable."
+          },
+          "used": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes it stores (the quota's measure)."
+          }
+        }
+      },
       "ApiError": {
         "type": "object",
         "description": "An API error: a stable machine-readable `code` and a human message.",
@@ -2618,6 +3477,24 @@
             "type": "string",
             "format": "uuid",
             "description": "The organization that will own it (the account must be a member)."
+          }
+        }
+      },
+      "CreateOrganization": {
+        "type": "object",
+        "description": "`POST /admin/organizations`.",
+        "required": [
+          "name",
+          "owner"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "owner": {
+            "type": "string",
+            "description": "The email of an existing account, its owner."
           }
         }
       },
@@ -3083,7 +3960,8 @@
           "organization",
           "name",
           "joined",
-          "personal"
+          "personal",
+          "suspended"
         ],
         "properties": {
           "joined": {
@@ -3102,6 +3980,10 @@
           "personal": {
             "type": "boolean",
             "description": "The account's personal organization (shown as \"My files\")."
+          },
+          "suspended": {
+            "type": "boolean",
+            "description": "Suspended by the instance admin: nothing in it is reachable."
           }
         }
       },
@@ -3236,6 +4118,103 @@
           "url": {
             "type": "string",
             "description": "The provider's authorization URL."
+          }
+        }
+      },
+      "ProviderInfo": {
+        "type": "object",
+        "description": "An OIDC identity provider (never its secret).",
+        "required": [
+          "id",
+          "name",
+          "issuer",
+          "client_id",
+          "enabled"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "description": "The client ID registered there."
+          },
+          "client_secret_file": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The client secret's file (instance-wide providers using one)."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Offered for logins."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The provider: its login starts at `/api/v1/auth/oidc/{id}/start`."
+          },
+          "issuer": {
+            "type": "string",
+            "description": "The issuer (its discovery document is under it)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Shown on the login screen."
+          },
+          "organization": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Its organization (none: instance-wide)."
+          }
+        }
+      },
+      "ProviderRequest": {
+        "type": "object",
+        "description": "Creates or changes an OIDC identity provider (changes: only the fields given).",
+        "properties": {
+          "client_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The client ID registered there."
+          },
+          "client_secret": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The client secret's value (stored encrypted). An organization's\nprovider takes only this."
+          },
+          "client_secret_file": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A path to a file holding the client secret (instance-wide only)."
+          },
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Offered for logins."
+          },
+          "issuer": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The issuer URL (an organization's: `https`, public addresses only)."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Shown on the login screen."
           }
         }
       },
@@ -3410,6 +4389,36 @@
           }
         }
       },
+      "SettingInfo": {
+        "type": "object",
+        "description": "An instance setting (admin).",
+        "required": [
+          "key",
+          "default",
+          "description"
+        ],
+        "properties": {
+          "default": {
+            "type": "string",
+            "description": "Its default."
+          },
+          "description": {
+            "type": "string",
+            "description": "What it does."
+          },
+          "key": {
+            "type": "string",
+            "description": "The key."
+          },
+          "value": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its stored value (none: the default applies)."
+          }
+        }
+      },
       "Setup": {
         "type": "object",
         "description": "Sets up a fresh instance: its admin, first organization and storages.",
@@ -3528,6 +4537,47 @@
         ],
         "description": "A storage implementation and its settings."
       },
+      "StorageInfo": {
+        "type": "object",
+        "description": "A storage backend, for the instance admin.",
+        "required": [
+          "id",
+          "name",
+          "implementation",
+          "default",
+          "chunks",
+          "used"
+        ],
+        "properties": {
+          "chunks": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Chunks stored there."
+          },
+          "default": {
+            "type": "boolean",
+            "description": "The instance default (new libraries go there)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The storage."
+          },
+          "implementation": {
+            "type": "string",
+            "description": "`filesystem` or `s3`."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "used": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes stored there."
+          }
+        }
+      },
       "TotpCode": {
         "type": "object",
         "description": "A TOTP code (6 digits), or a recovery code where accepted.",
@@ -3593,6 +4643,26 @@
           }
         }
       },
+      "UpdateAccount": {
+        "type": "object",
+        "description": "`PATCH /admin/accounts/{id}`: only the fields given change.",
+        "properties": {
+          "instance_admin": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Make or unmake an instance admin (never the last one)."
+          },
+          "suspended": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Suspend or lift the suspension."
+          }
+        }
+      },
       "UpdateNode": {
         "type": "object",
         "description": "`PATCH /nodes/{id}`: rename and/or move.",
@@ -3611,6 +4681,42 @@
             ],
             "format": "uuid",
             "description": "The new folder (in any library of the same organization)."
+          }
+        }
+      },
+      "UpdateOrganization": {
+        "type": "object",
+        "description": "`PATCH /admin/organizations/{id}`: only the fields given change.",
+        "properties": {
+          "default_storage": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "A default storage, or `null` for the instance's."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A new name."
+          },
+          "quota": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "A quota in bytes, or `null` for unlimited."
+          },
+          "suspended": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Suspend or lift the suspension."
           }
         }
       },

@@ -25,7 +25,7 @@ A test (`tests/configuration.rs`) fails if a variable or a setting read by the c
 
 ## Instance settings
 
-Stored as strings in the `setting` table and typed by the server. A missing key takes its default; an invalid value stops the server at startup; an unknown key is logged as a warning.
+Changed through the admin API (`PATCH /api/v1/admin/settings`), which validates them and applies them at once, without a restart. Stored as strings in the `setting` table and typed by the server. A missing key takes its default; an invalid value is refused by the API (and stops the server at startup if written to the database by hand); an unknown key is logged as a warning.
 
 | Key | Default | Description |
 |---|---|---|
@@ -40,9 +40,15 @@ Stored as strings in the `setting` table and typed by the server. A missing key 
 | `smtp_username` | | Login, if the server needs one. |
 | `smtp_password_file` | | Path to a file holding the SMTP password (never the password itself). |
 | `smtp_from` | | The sender, e.g. `Theca <noreply@example.com>`. Required with `smtp_host`. |
+| `job_chunk_gc_interval_secs` | `3600` (1 h) | How often unreferenced chunks are collected. |
+| `job_trash_purge_interval_secs` | `3600` (1 h) | How often the trash past its retention is purged. |
+| `job_cleanup_interval_secs` | `86400` (24 h) | How often expired tokens, invitations, unverified accounts, old emails and job history are cleaned. |
+| `job_orphan_check_interval_secs` | `86400` (24 h) | How often storage backends are checked for objects without a row. |
+| `job_email_send_interval_secs` | `30` | How often queued emails are sent. |
 | `trash_retention_secs` | `2592000` (30 days) | How long trashed files and folders stay restorable; then the hourly purge deletes them for good (their chunks follow with the garbage collection). `0`: purged at the next run. |
 | `session_idle_lifetime_secs` | `604800` (7 days) | A session expires after this long without being used (each use extends it). At least `600`. Applies to existing sessions at once. |
 | `oidc_link_by_email` | `false` | Logging in through an OIDC provider with an identity not linked yet links it to the account with the same email, if the provider says that email is verified. Off: identities are only linked by their owner, from a session. Turn on only if you trust every provider's email verification (an organization's provider still only opens sessions restricted to that organization). |
+| `oidc_allow_internal_issuers` | `false` | Organizations' identity providers may use `http` and internal addresses (private networks, localhost). Off, an organization's issuer must be `https` and resolve to public addresses only, so an organization's owner can't make the server call into its own network. Turn on only when every organization on the instance is trusted (e.g. a single company's install with its Keycloak inside). Instance-wide providers are never restricted. |
 | `session_max_lifetime_secs` | `0` (no cap) | A session expires this long after login, even if used every day (users log in again). At least `600`, or `0` for no cap. |
 
 ## Storage backends

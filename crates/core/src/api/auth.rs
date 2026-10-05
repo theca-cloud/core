@@ -89,7 +89,7 @@ pub async fn authenticate(
             &state.pool,
             prefix,
             &hash,
-            state.settings.session_lifetime(),
+            state.settings.get().session_lifetime(),
         )
         .await
         {

@@ -152,8 +152,8 @@ async fn upload_urls(
     ApiJson(req): ApiJson<Vec<api::Declare>>,
 ) -> Result<Json<Vec<api::ChunkUrl>>, HttpError> {
     use db::chunk::DeclareError;
-    let lifetime = state.settings.presigned_url_lifetime;
-    let max_uploads = state.settings.max_pending_uploads;
+    let lifetime = state.settings.get().presigned_url_lifetime;
+    let max_uploads = state.settings.get().max_pending_uploads;
     let declared = db::chunk::declare(&state.pool, &user, &req, lifetime, max_uploads)
         .await
         .map_err(|e| match e {
@@ -370,7 +370,7 @@ async fn download(
     }
     .ok_or_else(|| HttpError::not_found("version"))?;
     let (version, chunks) = db::file::version_chunks(&state.pool, version).await?;
-    let lifetime = state.settings.presigned_url_lifetime;
+    let lifetime = state.settings.get().presigned_url_lifetime;
     let mut out = Vec::with_capacity(chunks.len());
     for c in chunks {
         let url = backend(&state, c.storage)

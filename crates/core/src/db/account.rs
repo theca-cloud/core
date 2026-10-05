@@ -27,6 +27,8 @@ pub struct Credential {
     pub organization: Option<i64>,
     /// The only library it acts on, if scoped (app password).
     pub library: Option<i64>,
+    /// An app password that only reads.
+    pub read_only: bool,
 }
 
 impl Credential {
@@ -64,7 +66,7 @@ pub async fn authenticate(
     let (idle, max) = lifetime.secs();
     let row = sqlx::query!(
         r#"WITH t AS (
-               SELECT pk, uuid, usage, organization, library, resource, last_seen FROM token
+               SELECT pk, uuid, usage, organization, library, read_only, resource, last_seen FROM token
                WHERE prefix = $1 AND hash = $2 AND usage IN ('session', 'app_password')
                  AND revoked_at IS NULL
                  AND (usage <> 'session' OR (last_seen > now() - make_interval(secs => $3)
@@ -75,8 +77,8 @@ pub async fn authenticate(
                  AND (t.last_seen IS NULL OR t.last_seen < now() - make_interval(secs => $4))
            )
            SELECT t.pk AS "pk!", t.uuid AS "uuid!", t.usage = 'session' AS "session!",
-                  t.organization, t.library, a.pk AS account, a.uuid AS account_uuid
-           FROM t JOIN account a ON a.uuid = t.resource"#,
+                  t.organization, t.library, t.read_only AS "read_only!", a.pk AS account, a.uuid AS account_uuid
+           FROM t JOIN account a ON a.uuid = t.resource AND a.suspended_at IS NULL"#,
         prefix,
         &hash[..],
         idle,
@@ -93,6 +95,7 @@ pub async fn authenticate(
         session: r.session,
         organization: r.organization,
         library: r.library,
+        read_only: r.read_only,
     }))
 }
 
@@ -178,16 +181,17 @@ pub async fn by_email(pool: &PgPool, email: &str) -> sqlx::Result<Option<(Uuid, 
 pub async fn password_of(
     pool: &PgPool,
     email: &str,
-) -> sqlx::Result<Option<(i64, Uuid, Option<String>, bool)>> {
+) -> sqlx::Result<Option<(i64, Uuid, Option<String>, bool, bool)>> {
     let row = sqlx::query!(
-        r#"SELECT a.pk, a.uuid, i.details->>'hash' AS "hash?", a.verified
+        r#"SELECT a.pk, a.uuid, i.details->>'hash' AS "hash?", a.verified,
+                  a.suspended_at IS NOT NULL AS "suspended!"
            FROM account a LEFT JOIN identity i ON i.account = a.pk AND i.kind = 'password'
            WHERE lower(a.email) = lower($1)"#,
         email
     )
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(|r| (r.pk, r.uuid, r.hash, r.verified)))
+    Ok(row.map(|r| (r.pk, r.uuid, r.hash, r.verified, r.suspended)))
 }
 
 /// Opens a session: a refresh token (returned once), its row, and its uuid.
@@ -290,7 +294,7 @@ pub async fn me(pool: &PgPool, account: i64) -> sqlx::Result<api::Me> {
     let organizations = sqlx::query_as!(
         api::Membership,
         r#"SELECT o.uuid AS organization, o.name, u.joined_at IS NOT NULL AS "joined!",
-                  o.personal_of IS NOT NULL AS "personal!"
+                  o.personal_of IS NOT NULL AS "personal!", o.suspended_at IS NOT NULL AS "suspended!"
            FROM "user" u JOIN organization o ON o.pk = u.organization
            WHERE u.account = $1 ORDER BY lower(o.name)"#,
         account

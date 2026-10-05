@@ -1,9 +1,12 @@
 //! Instance settings: a string-to-string table in the DB, typed here.
 //!
-//! Each field has a key, a default and a parser. Missing key → default;
-//! unparsable value → startup error; unknown key → warning.
+//! Each setting has a key, a default and a description ([`DEFINITIONS`]), and
+//! a parser. Missing key → default; unparsable value → startup error (or a
+//! refused change); unknown key → warning. The server holds them in memory
+//! ([`LiveSettings`]): a change through the admin API applies at once.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::PgPool;
@@ -29,6 +32,9 @@ pub struct Settings {
     /// An OIDC login with an unknown identity is linked to the account with
     /// the same email, if the provider says the email is verified.
     pub oidc_link_by_email: bool,
+    /// Organizations' providers may use `http` and internal addresses (the SSRF
+    /// guard off): only when every organization on the instance is trusted.
+    pub oidc_allow_internal_issuers: bool,
     /// How long trashed files stay restorable before the purge (`0`: purged at
     /// its next run).
     pub trash_retention: Duration,
@@ -36,6 +42,143 @@ pub struct Settings {
     pub registration_open: bool,
     /// Where emails go out. `None` (no `smtp_host`): emails stay queued.
     pub smtp: Option<Smtp>,
+    /// Each background job's interval, by job name.
+    pub job_intervals: HashMap<String, Duration>,
+}
+
+/// A setting: its key, its default, and what it does.
+pub struct Definition {
+    pub key: &'static str,
+    pub default: &'static str,
+    pub description: &'static str,
+}
+
+const fn def(key: &'static str, default: &'static str, description: &'static str) -> Definition {
+    Definition {
+        key,
+        default,
+        description,
+    }
+}
+
+/// Every setting (CONFIGURATION.md says more).
+pub const DEFINITIONS: &[Definition] = &[
+    def("instance_name", "Theca", "Shown in emails and the web app."),
+    def(
+        "registration",
+        "closed",
+        "open: anyone can create an account (needs SMTP); closed: invitations only.",
+    ),
+    def(
+        "gc_grace_period_secs",
+        "86400",
+        "How long an unreferenced, untouched chunk is kept before deletion.",
+    ),
+    def(
+        "presigned_url_lifetime_secs",
+        "900",
+        "How long presigned upload and download URLs stay valid.",
+    ),
+    def(
+        "max_pending_uploads",
+        "15",
+        "Most chunks an account may be uploading at once.",
+    ),
+    def(
+        "session_idle_lifetime_secs",
+        "604800",
+        "Sessions expire after this long without use (at least 600).",
+    ),
+    def(
+        "session_max_lifetime_secs",
+        "0",
+        "Sessions expire this long after login (0: never; else at least 600).",
+    ),
+    def(
+        "oidc_link_by_email",
+        "false",
+        "Link an unknown OIDC identity to the verified account with its email.",
+    ),
+    def(
+        "oidc_allow_internal_issuers",
+        "false",
+        "Organizations' providers may use http and internal addresses (trusted organizations only).",
+    ),
+    def(
+        "trash_retention_secs",
+        "2592000",
+        "How long trashed files stay restorable (0: purged at the next run).",
+    ),
+    def(
+        "smtp_host",
+        "",
+        "The SMTP server (unset: emails stay queued).",
+    ),
+    def("smtp_port", "587", "Its port."),
+    def("smtp_tls", "starttls", "starttls, tls or none."),
+    def("smtp_username", "", "Login, if needed."),
+    def(
+        "smtp_password_file",
+        "",
+        "Path to a file holding the SMTP password.",
+    ),
+    def(
+        "smtp_from",
+        "",
+        "The sender, e.g. Theca <noreply@example.com> (required with smtp_host).",
+    ),
+    def(
+        "job_chunk_gc_interval_secs",
+        "3600",
+        "How often unreferenced chunks are collected.",
+    ),
+    def(
+        "job_trash_purge_interval_secs",
+        "3600",
+        "How often the trash past its retention is purged.",
+    ),
+    def(
+        "job_cleanup_interval_secs",
+        "86400",
+        "How often expired tokens, invitations, accounts and history are cleaned.",
+    ),
+    def(
+        "job_orphan_check_interval_secs",
+        "86400",
+        "How often backends are checked for objects without a row.",
+    ),
+    def(
+        "job_email_send_interval_secs",
+        "30",
+        "How often queued emails are sent.",
+    ),
+];
+
+/// The settings in memory, swapped whole when they change; whoever waits on
+/// them (the jobs' loops) is woken up.
+#[derive(Debug, Clone)]
+pub struct LiveSettings(Arc<tokio::sync::watch::Sender<Arc<Settings>>>);
+
+impl LiveSettings {
+    pub fn new(settings: Settings) -> Self {
+        Self(Arc::new(tokio::sync::watch::Sender::new(Arc::new(
+            settings,
+        ))))
+    }
+
+    /// The current settings (a snapshot: a change later doesn't affect it).
+    pub fn get(&self) -> Arc<Settings> {
+        self.0.borrow().clone()
+    }
+
+    pub fn set(&self, settings: Settings) {
+        self.0.send_replace(Arc::new(settings));
+    }
+
+    /// Notified at each change.
+    pub fn subscribe(&self) -> tokio::sync::watch::Receiver<Arc<Settings>> {
+        self.0.subscribe()
+    }
 }
 
 /// The SMTP server (settings `smtp_*`).
@@ -74,59 +217,79 @@ impl Settings {
         }
     }
 
-    /// Loads and validates every setting.
-    pub async fn load(pool: &PgPool) -> Result<Self, Error> {
-        let mut values: HashMap<String, String> = sqlx::query!("SELECT key, value FROM setting")
+    /// The stored values (only those set).
+    pub async fn stored(pool: &PgPool) -> Result<HashMap<String, String>, Error> {
+        Ok(sqlx::query!("SELECT key, value FROM setting")
             .fetch_all(pool)
             .await?
             .into_iter()
             .map(|row| (row.key, row.value))
-            .collect();
+            .collect())
+    }
 
-        let settings = Self {
-            instance_name: take(&mut values, "instance_name", "Theca", |v| Ok(v.to_owned()))?,
-            gc_grace_period: take(&mut values, "gc_grace_period_secs", "86400", seconds)?,
-            presigned_url_lifetime: take(
-                &mut values,
-                "presigned_url_lifetime_secs",
-                "900",
-                seconds,
-            )?,
-            max_pending_uploads: take(&mut values, "max_pending_uploads", "15", |v| {
-                v.parse::<u32>().map(i64::from).map_err(|e| format!("{e}"))
-            })?,
-            session_idle_lifetime: take(
-                &mut values,
-                "session_idle_lifetime_secs",
-                "604800",
-                session_lifetime,
-            )?,
-            session_max_lifetime: take(&mut values, "session_max_lifetime_secs", "0", |v| {
-                // 0: no cap.
-                match seconds(v)? {
-                    Duration::ZERO => Ok(None),
-                    d => session_lifetime(v).map(|_| Some(d)),
-                }
-            })?,
-            registration_open: take(&mut values, "registration", "closed", |v| match v {
-                "open" => Ok(true),
-                "closed" => Ok(false),
-                _ => Err("open or closed".into()),
-            })?,
-            smtp: smtp(&mut values)?,
-            trash_retention: take(&mut values, "trash_retention_secs", "2592000", seconds)?,
-            oidc_link_by_email: take(&mut values, "oidc_link_by_email", "false", |v| {
-                v.parse::<bool>().map_err(|e| format!("{e}"))
-            })?,
-        };
-
-        for key in values.keys() {
+    /// Loads and validates every setting.
+    pub async fn load(pool: &PgPool) -> Result<Self, Error> {
+        let (settings, unknown) = Self::parse(Self::stored(pool).await?)?;
+        for key in unknown {
             tracing::warn!(
                 key,
                 "unknown setting ignored (typo, or left by another version?)"
             );
         }
         Ok(settings)
+    }
+
+    /// Parses stored values (missing ones take their defaults). Also returns
+    /// the keys no setting has.
+    pub fn parse(mut values: HashMap<String, String>) -> Result<(Self, Vec<String>), Error> {
+        let values = &mut values;
+        let job_intervals = DEFINITIONS
+            .iter()
+            .filter_map(|d| {
+                Some((
+                    d.key,
+                    d.key.strip_prefix("job_")?.strip_suffix("_interval_secs")?,
+                ))
+            })
+            .map(|(key, job)| {
+                let interval = take(values, key, |v| match seconds(v)? {
+                    Duration::ZERO => Err("at least 1 second".into()),
+                    d => Ok(d),
+                })?;
+                Ok((job.to_owned(), interval))
+            })
+            .collect::<Result<_, Error>>()?;
+        let settings = Self {
+            instance_name: take(values, "instance_name", |v| Ok(v.to_owned()))?,
+            gc_grace_period: take(values, "gc_grace_period_secs", seconds)?,
+            presigned_url_lifetime: take(values, "presigned_url_lifetime_secs", seconds)?,
+            max_pending_uploads: take(values, "max_pending_uploads", |v| {
+                v.parse::<u32>().map(i64::from).map_err(|e| format!("{e}"))
+            })?,
+            session_idle_lifetime: take(values, "session_idle_lifetime_secs", session_lifetime)?,
+            session_max_lifetime: take(values, "session_max_lifetime_secs", |v| {
+                // 0: no cap.
+                match seconds(v)? {
+                    Duration::ZERO => Ok(None),
+                    d => session_lifetime(v).map(|_| Some(d)),
+                }
+            })?,
+            registration_open: take(values, "registration", |v| match v {
+                "open" => Ok(true),
+                "closed" => Ok(false),
+                _ => Err("open or closed".into()),
+            })?,
+            smtp: smtp(values)?,
+            trash_retention: take(values, "trash_retention_secs", seconds)?,
+            oidc_link_by_email: take(values, "oidc_link_by_email", |v| {
+                v.parse::<bool>().map_err(|e| format!("{e}"))
+            })?,
+            oidc_allow_internal_issuers: take(values, "oidc_allow_internal_issuers", |v| {
+                v.parse::<bool>().map_err(|e| format!("{e}"))
+            })?,
+            job_intervals,
+        };
+        Ok((settings, values.keys().cloned().collect()))
     }
 }
 
@@ -136,10 +299,10 @@ fn smtp(values: &mut HashMap<String, String>) -> Result<Option<Smtp>, Error> {
         values.remove(key).filter(|v| !v.is_empty())
     };
     let host = optional(values, "smtp_host");
-    let port = take(values, "smtp_port", "587", |v| {
+    let port = take(values, "smtp_port", |v| {
         v.parse::<u16>().map_err(|e| format!("{e}"))
     })?;
-    let tls = take(values, "smtp_tls", "starttls", |v| match v {
+    let tls = take(values, "smtp_tls", |v| match v {
         "starttls" => Ok(SmtpTls::StartTls),
         "tls" => Ok(SmtpTls::Tls),
         "none" => Ok(SmtpTls::None),
@@ -182,12 +345,17 @@ fn session_lifetime(v: &str) -> Result<Duration, String> {
     Ok(d)
 }
 
+/// A setting's value (its default if unset), parsed.
 fn take<T>(
     values: &mut HashMap<String, String>,
     key: &'static str,
-    default: &str,
     parse: impl Fn(&str) -> Result<T, String>,
 ) -> Result<T, Error> {
+    let default = DEFINITIONS
+        .iter()
+        .find(|d| d.key == key)
+        .map(|d| d.default)
+        .expect("every setting is in DEFINITIONS");
     let raw = values.remove(key);
     parse(raw.as_deref().unwrap_or(default)).map_err(|reason| Error::InvalidSetting { key, reason })
 }

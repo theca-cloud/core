@@ -3,6 +3,7 @@
 //! errors in `api::error`.
 
 pub mod account;
+pub mod admin;
 pub mod chunk;
 pub mod file;
 pub mod identity;

@@ -160,9 +160,7 @@ pub async fn enqueue(db: &mut PgConnection, recipient: &str, email: &Email) -> s
 /// The `email_send` job: sends the due emails, oldest first. Reads the SMTP
 /// settings from the database at each run, so changes apply without a restart.
 pub async fn send_due(state: &AppState) -> Result<i64, JobError> {
-    let settings = Settings::load(&state.pool)
-        .await
-        .map_err(|e| JobError::Other(e.to_string()))?;
+    let settings = state.settings.get();
     let Some(smtp) = &settings.smtp else {
         return Ok(0); // no SMTP: emails stay queued
     };

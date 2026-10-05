@@ -19,7 +19,6 @@ pub mod storage;
 pub mod stream;
 pub mod totp;
 
-use std::sync::Arc;
 use std::time::Duration;
 
 pub use error::Error;
@@ -45,7 +44,7 @@ pub async fn run() -> Result<(), Error> {
     let signer =
         storage::UrlSigner::new(server_key.derive("theca blob url v1"), &config.public_url);
     let pool = db::connect(&config.database_url).await?;
-    let settings = Arc::new(Settings::load(&pool).await?);
+    let settings = settings::LiveSettings::new(Settings::load(&pool).await?);
 
     // Only listen once the database is migrated and settings are loaded, so the
     // health probe fails during startup.

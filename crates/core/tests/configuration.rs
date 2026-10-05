@@ -3,7 +3,6 @@
 
 const DOC: &str = include_str!("../../../CONFIGURATION.md");
 const CONFIG: &str = include_str!("../src/config.rs");
-const SETTINGS: &str = include_str!("../src/settings.rs");
 
 /// String literals of `source` (between double quotes), outside its tests.
 fn literals(source: &str) -> Vec<&str> {
@@ -31,20 +30,11 @@ fn every_environment_variable_is_documented() {
 
 #[test]
 fn every_setting_is_documented() {
-    // Keys are the string literals right after `&mut values,` in Settings::load.
-    let keys: Vec<&str> = SETTINGS
-        .split("&mut values,")
-        .skip(1)
-        .filter_map(|after| after.split('"').nth(1))
-        .collect();
-    assert!(
-        keys.contains(&"presigned_url_lifetime_secs"),
-        "the parser still finds settings"
-    );
-    for key in keys {
+    for setting in theca_core::settings::DEFINITIONS {
         assert!(
-            DOC.contains(&format!("`{key}`")),
-            "setting {key} is not documented in CONFIGURATION.md"
+            DOC.contains(&format!("`{}`", setting.key)),
+            "setting {} is not documented in CONFIGURATION.md",
+            setting.key
         );
     }
 }

@@ -14,14 +14,16 @@ pub struct Provider {
     pub organization: Option<i64>,
     pub issuer: String,
     pub client_id: String,
-    pub client_secret_file: String,
+    /// A path (instance-wide providers) or the encrypted value (an organization's).
+    pub client_secret_file: Option<String>,
+    pub client_secret_encrypted: Option<String>,
 }
 
 /// An enabled provider.
 pub async fn provider(pool: &PgPool, uuid: Uuid) -> sqlx::Result<Option<Provider>> {
     sqlx::query_as!(
         Provider,
-        "SELECT pk, uuid, organization, issuer, client_id, client_secret_file
+        "SELECT pk, uuid, organization, issuer, client_id, client_secret_file, client_secret_encrypted
          FROM identity_provider WHERE uuid = $1 AND enabled",
         uuid
     )

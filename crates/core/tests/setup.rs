@@ -1,7 +1,5 @@
 //! The first-run setup, through the router, on a fresh database.
 
-use std::sync::Arc;
-
 use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
@@ -18,7 +16,7 @@ const TOKEN: &str = "0123456789abcdef0123456789abcdef";
 async fn app(pool: &PgPool, token: Option<&str>) -> Router {
     router(AppState {
         pool: pool.clone(),
-        settings: Arc::new(Settings::load(pool).await.unwrap()),
+        settings: theca_core::settings::LiveSettings::new(Settings::load(pool).await.unwrap()),
         signer: UrlSigner::new([9; 32], "http://test"),
         backends: Backends::new(pool.clone()),
         cipher: theca_core::keys::DataCipher::new(&[7; 32]),

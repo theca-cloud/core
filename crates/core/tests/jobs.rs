@@ -313,14 +313,18 @@ async fn runner(pool: PgPool) {
     assert_eq!(jobs::mark_interrupted(&pool).await.unwrap(), 1);
     assert_eq!(status(pool.clone(), run.1).await.0, "interrupted");
     assert_eq!(
-        jobs::next_wait(&pool, Job::ChunkGc).await.unwrap(),
+        jobs::next_wait(&pool, Job::ChunkGc, std::time::Duration::from_secs(3600))
+            .await
+            .unwrap(),
         Duration::ZERO
     );
     sqlx::query("INSERT INTO job_run (job, started_at, finished_at, status) VALUES ('chunk_gc', now() - interval '10 minutes', now(), 'success')")
         .execute(&pool)
         .await
         .unwrap();
-    let wait = jobs::next_wait(&pool, Job::ChunkGc).await.unwrap();
+    let wait = jobs::next_wait(&pool, Job::ChunkGc, std::time::Duration::from_secs(3600))
+        .await
+        .unwrap();
     assert!((49 * 60..=50 * 60).contains(&wait.as_secs()), "{wait:?}");
 
     // Three failures in a row: reported by the health check.

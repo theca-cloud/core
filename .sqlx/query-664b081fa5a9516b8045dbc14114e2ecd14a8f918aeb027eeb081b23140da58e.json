@@ -1,0 +1,68 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH t AS (\n               SELECT pk, uuid, usage, organization, library, read_only, resource, last_seen FROM token\n               WHERE prefix = $1 AND hash = $2 AND usage IN ('session', 'app_password')\n                 AND revoked_at IS NULL\n                 AND (usage <> 'session' OR (last_seen > now() - make_interval(secs => $3)\n                      AND ($5::float8 IS NULL OR created_at > now() - make_interval(secs => $5))))\n           ), touched AS (\n               UPDATE token SET last_seen = now() FROM t\n               WHERE token.pk = t.pk\n                 AND (t.last_seen IS NULL OR t.last_seen < now() - make_interval(secs => $4))\n           )\n           SELECT t.pk AS \"pk!\", t.uuid AS \"uuid!\", t.usage = 'session' AS \"session!\",\n                  t.organization, t.library, t.read_only AS \"read_only!\", a.pk AS account, a.uuid AS account_uuid\n           FROM t JOIN account a ON a.uuid = t.resource AND a.suspended_at IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "uuid!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "session!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "organization",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "library",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "read_only!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "account",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "account_uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bytea",
+        "Float8",
+        "Float8",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "664b081fa5a9516b8045dbc14114e2ecd14a8f918aeb027eeb081b23140da58e"
+}

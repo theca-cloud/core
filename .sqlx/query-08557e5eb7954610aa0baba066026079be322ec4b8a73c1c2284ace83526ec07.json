@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT o.uuid AS id, o.name, a.email AS owner, o.personal_of IS NOT NULL AS \"personal!\",\n                  (SELECT count(*) FROM \"user\" m WHERE m.organization = o.pk) AS \"members!\",\n                  o.quota,\n                  (SELECT coalesce(sum(c.stored_size), 0)::bigint FROM chunk c WHERE c.organization = o.pk) AS \"used!\",\n                  o.suspended_at IS NOT NULL AS \"suspended!\",\n                  s.uuid AS \"default_storage?\"\n           FROM organization o\n           JOIN \"user\" u ON u.pk = o.owner JOIN account a ON a.pk = u.account\n           LEFT JOIN storage s ON s.pk = o.default_storage\n           WHERE $1::text IS NULL OR o.name ILIKE '%' || $1 || '%' OR a.email ILIKE '%' || $1 || '%'\n           ORDER BY lower(o.name) LIMIT 200",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "owner",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "personal!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "members!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "quota",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "used!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "suspended!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "default_storage?",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      null,
+      true,
+      null,
+      null,
+      false
+    ]
+  },
+  "hash": "08557e5eb7954610aa0baba066026079be322ec4b8a73c1c2284ace83526ec07"
+}

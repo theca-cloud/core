@@ -259,6 +259,8 @@ pub struct Membership {
     pub joined: bool,
     /// The account's personal organization (shown as "My files").
     pub personal: bool,
+    /// Suspended by the instance admin: nothing in it is reachable.
+    pub suspended: bool,
 }
 
 /// A live session of the account.
@@ -662,4 +664,174 @@ pub struct SetPassword {
     /// invitation for an account that can already log in.
     #[serde(default)]
     pub password: Option<String>,
+}
+
+/// `Some(None)` for an explicit `null` (clear), `None` when absent (keep).
+fn double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
+/// An instance setting (admin).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SettingInfo {
+    /// The key.
+    pub key: String,
+    /// Its stored value (none: the default applies).
+    pub value: Option<String>,
+    /// Its default.
+    pub default: String,
+    /// What it does.
+    pub description: String,
+}
+
+/// An organization, for the instance admin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AdminOrganization {
+    /// The organization.
+    pub id: Uuid,
+    /// Its name.
+    pub name: String,
+    /// Its owner's email.
+    pub owner: String,
+    /// An account's personal organization.
+    pub personal: bool,
+    /// Joined members and pending invitations.
+    pub members: i64,
+    /// Its quota in bytes (none: unlimited).
+    pub quota: Option<i64>,
+    /// Bytes it stores (the quota's measure).
+    pub used: i64,
+    /// Suspended: nothing in it is reachable.
+    pub suspended: bool,
+    /// Its default storage (none: the instance's).
+    pub default_storage: Option<Uuid>,
+}
+
+/// `POST /admin/organizations`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CreateOrganization {
+    /// Its name.
+    pub name: String,
+    /// The email of an existing account, its owner.
+    pub owner: String,
+}
+
+/// `PATCH /admin/organizations/{id}`: only the fields given change.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UpdateOrganization {
+    /// A new name.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// A quota in bytes, or `null` for unlimited.
+    #[serde(default, deserialize_with = "double_option")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<i64>))]
+    pub quota: Option<Option<i64>>,
+    /// Suspend or lift the suspension.
+    #[serde(default)]
+    pub suspended: Option<bool>,
+    /// A default storage, or `null` for the instance's.
+    #[serde(default, deserialize_with = "double_option")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<Uuid>))]
+    pub default_storage: Option<Option<Uuid>>,
+}
+
+/// An account, for the instance admin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AdminAccount {
+    /// The account.
+    pub id: Uuid,
+    /// Its email.
+    pub email: String,
+    /// Its email is verified.
+    pub verified: bool,
+    /// An instance admin.
+    pub instance_admin: bool,
+    /// Suspended: it can't log in, its tokens are refused.
+    pub suspended: bool,
+    /// When it was created.
+    pub created_at: String,
+}
+
+/// `PATCH /admin/accounts/{id}`: only the fields given change.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UpdateAccount {
+    /// Make or unmake an instance admin (never the last one).
+    #[serde(default)]
+    pub instance_admin: Option<bool>,
+    /// Suspend or lift the suspension.
+    #[serde(default)]
+    pub suspended: Option<bool>,
+}
+
+/// A storage backend, for the instance admin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct StorageInfo {
+    /// The storage.
+    pub id: Uuid,
+    /// Its name.
+    pub name: String,
+    /// `filesystem` or `s3`.
+    pub implementation: String,
+    /// The instance default (new libraries go there).
+    pub default: bool,
+    /// Chunks stored there.
+    pub chunks: i64,
+    /// Bytes stored there.
+    pub used: i64,
+}
+
+/// An OIDC identity provider (never its secret).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ProviderInfo {
+    /// The provider: its login starts at `/api/v1/auth/oidc/{id}/start`.
+    pub id: Uuid,
+    /// Its organization (none: instance-wide).
+    pub organization: Option<Uuid>,
+    /// Shown on the login screen.
+    pub name: String,
+    /// The issuer (its discovery document is under it).
+    pub issuer: String,
+    /// The client ID registered there.
+    pub client_id: String,
+    /// The client secret's file (instance-wide providers using one).
+    pub client_secret_file: Option<String>,
+    /// Offered for logins.
+    pub enabled: bool,
+}
+
+/// Creates or changes an OIDC identity provider (changes: only the fields given).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ProviderRequest {
+    /// Shown on the login screen.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// The issuer URL (an organization's: `https`, public addresses only).
+    #[serde(default)]
+    pub issuer: Option<String>,
+    /// The client ID registered there.
+    #[serde(default)]
+    pub client_id: Option<String>,
+    /// The client secret's value (stored encrypted). An organization's
+    /// provider takes only this.
+    #[serde(default)]
+    pub client_secret: Option<String>,
+    /// A path to a file holding the client secret (instance-wide only).
+    #[serde(default)]
+    pub client_secret_file: Option<String>,
+    /// Offered for logins.
+    #[serde(default)]
+    pub enabled: Option<bool>,
 }

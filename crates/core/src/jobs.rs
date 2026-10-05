@@ -17,6 +17,7 @@ use tokio::sync::watch;
 use uuid::Uuid;
 
 use crate::api::AppState;
+use crate::settings::Settings;
 use crate::storage::{BackendError, chunk_of};
 
 /// The jobs.
@@ -35,7 +36,6 @@ pub enum Job {
 }
 
 const HOUR: Duration = Duration::from_secs(3600);
-const DAY: Duration = Duration::from_secs(24 * 3600);
 
 /// Rows (chunks, nodes, keys) handled per batch.
 const BATCH: i64 = 1000;
@@ -63,13 +63,13 @@ impl Job {
         Self::ALL.into_iter().find(|j| j.name() == name)
     }
 
-    // ponytail: constants; settings once they can be reloaded (step 13).
-    pub fn interval(self) -> Duration {
-        match self {
-            Job::ChunkGc | Job::TrashPurge => HOUR,
-            Job::Cleanup | Job::OrphanCheck => DAY,
-            Job::EmailSend => Duration::from_secs(30),
-        }
+    /// Its interval (settings `job_<name>_interval_secs`).
+    pub fn interval(self, settings: &Settings) -> Duration {
+        settings
+            .job_intervals
+            .get(self.name())
+            .copied()
+            .unwrap_or(HOUR)
     }
 
     fn timeout(self) -> Duration {
@@ -123,8 +123,10 @@ pub fn spawn_all(state: AppState, shutdown: watch::Receiver<bool>) -> tokio::tas
 }
 
 async fn run_forever(state: AppState, job: Job, mut shutdown: watch::Receiver<bool>) {
+    let mut settings = state.settings.subscribe();
     loop {
-        let wait = match next_wait(&state.pool, job).await {
+        let interval = job.interval(&state.settings.get());
+        let wait = match next_wait(&state.pool, job, interval).await {
             Ok(wait) => wait,
             Err(e) => {
                 tracing::warn!(job = job.name(), error = %e, "cannot read the job history; retrying");
@@ -134,6 +136,8 @@ async fn run_forever(state: AppState, job: Job, mut shutdown: watch::Receiver<bo
         tokio::select! {
             () = tokio::time::sleep(wait) => {}
             _ = shutdown.changed() => {}
+            // The interval may have changed: compute the wait again.
+            _ = settings.changed() => continue,
         }
         if *shutdown.borrow() {
             return;
@@ -150,13 +154,13 @@ async fn run_forever(state: AppState, job: Job, mut shutdown: watch::Receiver<bo
 
 /// How long until the job is due: an interval after the last finished run
 /// (success or failure; interrupted runs don't count), at once if none.
-pub async fn next_wait(pool: &PgPool, job: Job) -> sqlx::Result<Duration> {
+pub async fn next_wait(pool: &PgPool, job: Job, interval: Duration) -> sqlx::Result<Duration> {
     let secs = sqlx::query_scalar!(
         r#"SELECT greatest(0, extract(epoch FROM max(started_at) + make_interval(secs => $2) - now()))::float8
            AS "secs"
            FROM job_run WHERE job = $1 AND status IN ('success', 'failure')"#,
         job.name(),
-        job.interval().as_secs_f64()
+        interval.as_secs_f64()
     )
     .fetch_one(pool)
     .await?;
@@ -243,7 +247,7 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 /// and refuses a commit referencing a marked chunk. A concurrent commit either
 /// keeps its chunk or gets `chunk_missing`; it never points to a deleted object.
 async fn chunk_gc(state: &AppState) -> Result<i64, JobError> {
-    let grace = state.settings.gc_grace_period.as_secs_f64();
+    let grace = state.settings.get().gc_grace_period.as_secs_f64();
     let mut deleted = 0;
     let mut skipped: HashSet<i64> = HashSet::new();
     loop {
@@ -328,7 +332,7 @@ fn is_constraint(e: &sqlx::Error, name: &str) -> bool {
 /// Trashed nodes past the retention go for good (subtree, versions, chunk
 /// references), one transaction each; their chunks follow with the GC.
 async fn trash_purge(state: &AppState) -> Result<i64, JobError> {
-    let retention = state.settings.trash_retention.as_secs_f64();
+    let retention = state.settings.get().trash_retention.as_secs_f64();
     let mut purged = 0;
     loop {
         let nodes: Vec<i64> = sqlx::query_scalar!(
@@ -355,7 +359,7 @@ async fn trash_purge(state: &AppState) -> Result<i64, JobError> {
 /// Revoked tokens and expired sessions, job history and emails older than 30
 /// days, expired invitations, never verified accounts.
 async fn cleanup(state: &AppState) -> Result<i64, JobError> {
-    let lifetime = state.settings.session_lifetime();
+    let lifetime = state.settings.get().session_lifetime();
     let tokens = sqlx::query!(
         "DELETE FROM token
          WHERE revoked_at IS NOT NULL
@@ -435,7 +439,7 @@ async fn delete_unverified(pool: &PgPool, account: i64) -> sqlx::Result<()> {
 /// and logged as anomalies. Keys that aren't chunks are left alone.
 async fn orphan_check(state: &AppState) -> Result<i64, JobError> {
     // An hour of margin past the longest URL (clock skew, slow uploads).
-    let cutoff = unix_now() - state.settings.presigned_url_lifetime.as_secs() as i64 - 3600;
+    let cutoff = unix_now() - state.settings.get().presigned_url_lifetime.as_secs() as i64 - 3600;
     let storages: Vec<i64> = sqlx::query_scalar!("SELECT pk FROM storage ORDER BY pk")
         .fetch_all(&state.pool)
         .await?;

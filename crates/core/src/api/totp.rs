@@ -86,7 +86,7 @@ pub async fn start(
         return Err(HttpError::conflict("totp_enabled", "TOTP is already on"));
     }
     let me = db::account::me(&state.pool, account.account).await?;
-    let (secret, uri) = totp::setup(&secret, &state.settings.instance_name, &me.email);
+    let (secret, uri) = totp::setup(&secret, &state.settings.get().instance_name, &me.email);
     Ok(Json(api::TotpSetup { secret, uri }))
 }
 
