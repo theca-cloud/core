@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT uuid, email, verified, created_at::text AS \"created_at!\",\n                  EXISTS (SELECT 1 FROM identity WHERE account = $1 AND kind = 'totp'\n                          AND details->>'confirmed' = 'true') AS \"totp!\"\n           FROM account WHERE pk = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "totp!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "fd1b04ac61f276c424a5ce12a18568f17bb25e88d46aab1a3f8a5b20a3c2c539"
+}

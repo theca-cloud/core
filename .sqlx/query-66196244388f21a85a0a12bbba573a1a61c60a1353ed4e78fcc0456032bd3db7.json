@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM token\n         WHERE revoked_at IS NOT NULL\n            OR (usage = 'session' AND (last_seen < now() - make_interval(secs => $1)\n                OR ($2::float8 IS NOT NULL AND created_at < now() - make_interval(secs => $2))))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Float8",
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "66196244388f21a85a0a12bbba573a1a61c60a1353ed4e78fcc0456032bd3db7"
+}

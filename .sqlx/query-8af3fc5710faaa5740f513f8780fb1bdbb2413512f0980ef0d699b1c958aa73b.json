@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE chunk SET uploaded_at = now(), touched_at = now() WHERE uuid = $1 AND uploaded_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8af3fc5710faaa5740f513f8780fb1bdbb2413512f0980ef0d699b1c958aa73b"
+}

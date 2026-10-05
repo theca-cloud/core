@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE chunk c SET deleting_at = now()\n         WHERE pk = ANY($1) AND deleting_at IS NULL\n           AND NOT EXISTS (SELECT 1 FROM chunk_in_version WHERE chunk = c.pk)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3083bc8a117587ded133927c2a3c941837456570e4675399dcd1a5cc0fafe8fe"
+}

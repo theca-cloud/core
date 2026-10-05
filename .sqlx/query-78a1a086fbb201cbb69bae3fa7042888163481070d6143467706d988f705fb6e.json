@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT job AS \"job!\" FROM (\n               SELECT job, status, row_number() OVER (PARTITION BY job ORDER BY started_at DESC) AS n\n               FROM job_run WHERE status IN ('success', 'failure')\n           ) last WHERE n <= 3\n           GROUP BY job HAVING count(*) = 3 AND bool_and(status = 'failure')\n           ORDER BY job",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "job!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "78a1a086fbb201cbb69bae3fa7042888163481070d6143467706d988f705fb6e"
+}

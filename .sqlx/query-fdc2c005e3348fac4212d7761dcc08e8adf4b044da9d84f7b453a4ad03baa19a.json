@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT i.uuid AS id, i.kind, p.uuid AS \"provider?\", p.name AS \"provider_name?\"\n           FROM identity i LEFT JOIN identity_provider p ON p.pk = i.provider\n           WHERE i.account = $1 AND i.kind IN ('password', 'oidc')\n           ORDER BY i.kind DESC, lower(p.name)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "provider?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "provider_name?",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "fdc2c005e3348fac4212d7761dcc08e8adf4b044da9d84f7b453a4ad03baa19a"
+}

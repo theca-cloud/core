@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO job_run (job) SELECT $1\n         WHERE NOT EXISTS (SELECT 1 FROM job_run WHERE job = $1 AND status = 'running')\n         RETURNING pk, uuid",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "4182e95174d167c7819358c3391dc4c5425ef288d65c0e4b79c688ababe498a2"
+}

@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.pk, a.uuid FROM identity i JOIN account a ON a.pk = i.account\n         WHERE i.kind = 'oidc' AND i.provider = $1 AND i.details->>'subject' = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "45f27288e5971eaac446f5b1d0a2c863342e9779a341fae6a5712843395270d2"
+}

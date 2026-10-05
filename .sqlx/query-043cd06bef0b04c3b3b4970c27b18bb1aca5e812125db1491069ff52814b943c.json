@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM job_run WHERE finished_at < now() - interval '30 days'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "043cd06bef0b04c3b3b4970c27b18bb1aca5e812125db1491069ff52814b943c"
+}

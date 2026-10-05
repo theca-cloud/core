@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE chunk SET deleting_at = coalesce(deleting_at, now()) WHERE organization = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5ccdf2c9e2386f14219fe15305cc1b6fb8df8871baa52f05612d05e23ba8abaf"
+}

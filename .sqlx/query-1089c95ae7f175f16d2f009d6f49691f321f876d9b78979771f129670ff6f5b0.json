@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.organization AS \"organization!\" FROM organization_access($1) a\n           JOIN organization o ON o.pk = a.organization WHERE o.uuid = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "organization!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "1089c95ae7f175f16d2f009d6f49691f321f876d9b78979771f129670ff6f5b0"
+}

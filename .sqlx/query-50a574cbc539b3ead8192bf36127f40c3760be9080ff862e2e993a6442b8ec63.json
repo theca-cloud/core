@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE email SET attempts = attempts + 1, last_error = $2,\n             next_attempt_at = now() + make_interval(secs => coalesce($3::float8, 0)),\n             given_up_at = CASE WHEN $3::float8 IS NULL THEN now() END\n         WHERE pk = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "50a574cbc539b3ead8192bf36127f40c3760be9080ff862e2e993a6442b8ec63"
+}

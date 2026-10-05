@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT n.pk, n.parent, n.is_file, n.current_version, l.pk AS library, l.owner, l.storage,\n                  a.\"user\" AS \"user!\", a.can_write AS \"can_write!\"\n           FROM node n\n           JOIN library l ON l.pk = n.library\n           JOIN library_access($1) a ON a.library = l.pk\n           WHERE n.uuid = $2 AND node_reachable(n.pk)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "parent",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "is_file",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "current_version",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "library",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "owner",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "storage",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "user!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "can_write!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "483f35b7b81691beca5d637cffb09aa9f1098a139722bb7b5cd926bd25ad77b3"
+}

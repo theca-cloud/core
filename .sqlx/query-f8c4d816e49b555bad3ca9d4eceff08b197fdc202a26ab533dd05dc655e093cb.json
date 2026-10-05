@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE \"user\" SET joined_at = now(), invited_at = NULL WHERE pk = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f8c4d816e49b555bad3ca9d4eceff08b197fdc202a26ab533dd05dc655e093cb"
+}

@@ -1,0 +1,49 @@
+# cargo-deny: dependencies must be usable both in the AGPL edition and in a
+# proprietary EE build, so only permissive (and file-level copyleft) licenses.
+
+[graph]
+all-features = true
+
+[advisories]
+yanked = "deny"
+ignore = [
+    # Marvin (RSA decryption timing, private keys): `rsa` comes with openidconnect,
+    # which only verifies ID token signatures with providers' public keys.
+    { id = "RUSTSEC-2023-0071", reason = "rsa only verifies signatures (public keys)" },
+]
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "MPL-2.0",
+    # Permissive data license: the root certificates list (webpki-root-certs, via reqwest).
+    "CDLA-Permissive-2.0",
+    # BSD without even the attribution condition (quoted_printable, via lettre).
+    "0BSD",
+]
+confidence-threshold = 0.9
+# The list anticipates future dependencies; no warning for licenses not used yet.
+unused-allowed-license = "allow"
+# Our own crates are AGPL (we own the copyright); third-party AGPL/GPL stays denied.
+exceptions = [
+    { allow = ["AGPL-3.0-only"], crate = "theca-common" },
+    { allow = ["AGPL-3.0-only"], crate = "theca-core" },
+    { allow = ["AGPL-3.0-only"], crate = "theca-client" },
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

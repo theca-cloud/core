@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO identity (account, kind, details)\n         VALUES ($1, 'totp', jsonb_build_object('secret', $2::text, 'confirmed', false, 'last_step', 0))\n         ON CONFLICT (account) WHERE kind = 'totp'\n         DO UPDATE SET details = excluded.details WHERE identity.details->>'confirmed' = 'false'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "76ec79f62789b5da607c73b56e0c20c35557b578fa5779d474fb132928dc2069"
+}

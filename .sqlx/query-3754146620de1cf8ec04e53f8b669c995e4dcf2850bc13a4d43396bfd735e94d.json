@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM token WHERE resource = (SELECT uuid FROM account WHERE pk = $1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3754146620de1cf8ec04e53f8b669c995e4dcf2850bc13a4d43396bfd735e94d"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM organization WHERE personal_of = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "62f29b3938a683cd17a48a9d4ed9247ca82374bcfcfa2cbcac7ce436ea9d8ce8"
+}

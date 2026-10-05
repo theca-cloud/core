@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE node SET deleted_at = now() WHERE pk = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "de78bd3ca8cf615364218360f956e05453a33b1684c8d57dfaf8b5a53036f8f8"
+}

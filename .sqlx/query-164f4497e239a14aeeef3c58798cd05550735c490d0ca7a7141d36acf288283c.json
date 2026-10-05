@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM account a WHERE a.pk = $1\n             AND NOT EXISTS (SELECT 1 FROM identity WHERE account = a.pk)\n             AND NOT EXISTS (SELECT 1 FROM \"user\" WHERE account = a.pk)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "164f4497e239a14aeeef3c58798cd05550735c490d0ca7a7141d36acf288283c"
+}

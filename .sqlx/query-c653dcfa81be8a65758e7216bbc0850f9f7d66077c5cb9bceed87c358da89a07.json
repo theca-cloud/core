@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT pk, details->>'secret' AS \"secret!\", (details->>'confirmed')::boolean AS \"confirmed!\"\n           FROM identity WHERE account = $1 AND kind = 'totp'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "secret!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "confirmed!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "c653dcfa81be8a65758e7216bbc0850f9f7d66077c5cb9bceed87c358da89a07"
+}

@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.library AS \"library!\", a.organization AS \"organization!\", o.uuid\n               FROM library_access($1) a\n               JOIN library l ON l.pk = a.library\n               JOIN organization o ON o.pk = a.organization\n               WHERE l.uuid = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "library!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "organization!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      false
+    ]
+  },
+  "hash": "fd4fb32dbe51b2d1bcf462cea160d99f4118b8088c2741027946707a710edc8b"
+}

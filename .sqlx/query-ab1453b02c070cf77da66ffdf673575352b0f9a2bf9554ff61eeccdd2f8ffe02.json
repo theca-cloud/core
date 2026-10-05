@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE chunk SET touched_at = now() WHERE pk = ANY($1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ab1453b02c070cf77da66ffdf673575352b0f9a2bf9554ff61eeccdd2f8ffe02"
+}

@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO chunk (organization, library, hash, storage, plain_size)\n         SELECT $1, $2, h, $3, s FROM unnest($4::bytea[], $5::bigint[]) AS t (h, s)\n         RETURNING uuid, hash",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "hash",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "ByteaArray",
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "03dd100a508e1ef74dd3a408e8f4b3aa23046d9bb71144fd4f0cba1ac97e73bf"
+}

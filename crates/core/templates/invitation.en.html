@@ -1,0 +1,6 @@
+{% extends "layout.en.html" %}
+{% block content %}
+<p>{{ e.inviter }} invites you to join <strong>{{ e.organization }}</strong>.</p>
+<p style="margin:24px 0"><a href="{{ e.link }}" style="display:inline-block;background:#18181b;color:#ffffff;text-decoration:none;padding:10px 16px;border-radius:6px">Join {{ e.organization }}</a></p>
+<p style="font-size:14px;color:#52525b">You'll choose a password. The link works for 14 days.</p>
+{% endblock %}

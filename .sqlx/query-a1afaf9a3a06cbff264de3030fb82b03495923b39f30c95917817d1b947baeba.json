@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO identity (account, kind, details) VALUES ($1, 'password', jsonb_build_object('hash', $2::text))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a1afaf9a3a06cbff264de3030fb82b03495923b39f30c95917817d1b947baeba"
+}

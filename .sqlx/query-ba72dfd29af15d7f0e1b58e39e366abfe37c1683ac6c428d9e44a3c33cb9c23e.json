@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE identity SET details = jsonb_set(details, '{last_step}', to_jsonb($2::bigint))\n         WHERE pk = $1 AND (details->>'last_step')::bigint < $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ba72dfd29af15d7f0e1b58e39e366abfe37c1683ac6c428d9e44a3c33cb9c23e"
+}

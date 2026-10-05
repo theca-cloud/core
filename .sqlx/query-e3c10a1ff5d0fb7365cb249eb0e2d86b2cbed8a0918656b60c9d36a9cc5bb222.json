@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE organization o SET owner = u.pk\n           FROM \"user\" u\n           WHERE o.pk = $1 AND u.uuid = $2 AND u.organization = o.pk AND u.joined_at IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e3c10a1ff5d0fb7365cb249eb0e2d86b2cbed8a0918656b60c9d36a9cc5bb222"
+}

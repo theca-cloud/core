@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT pk, uuid, organization, issuer, client_id, client_secret_file, client_secret_encrypted\n         FROM identity_provider WHERE uuid = $1 AND enabled",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "organization",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "issuer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "client_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "client_secret_file",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "client_secret_encrypted",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "77615a527c8219c890a94814db45ebee396673bf9c0521c5cf4a42102fb1c799"
+}

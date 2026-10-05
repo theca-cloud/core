@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO chunk_in_version (organization, version, chunk, position)\n                 SELECT organization, $2, chunk, position FROM chunk_in_version WHERE version = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4772637c8a5d71a917ba2ac59332635e9ab97fce7f26a67a77d5e325c8ff3ed3"
+}

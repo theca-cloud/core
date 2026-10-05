@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE token SET revoked_at = now(), revocation_reason = 'used'\n         WHERE prefix = $1 AND hash = $2 AND usage = $3 AND revoked_at IS NULL\n           AND created_at > now() - make_interval(secs => $4)\n         RETURNING resource",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "resource",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bytea",
+        "Text",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "93f1239b769aec9f5794295f8974b9fc7d7317d58da560921fe285fa6c1bc4cb"
+}

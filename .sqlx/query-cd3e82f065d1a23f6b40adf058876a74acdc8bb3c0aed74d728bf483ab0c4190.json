@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT uuid, email, EXISTS (\n               SELECT 1 FROM identity WHERE account = $1 AND kind = 'totp' AND details->>'confirmed' = 'true'\n           ) AS \"totp!\" FROM account WHERE pk = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "totp!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "cd3e82f065d1a23f6b40adf058876a74acdc8bb3c0aed74d728bf483ab0c4190"
+}

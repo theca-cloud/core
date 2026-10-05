@@ -1,0 +1,55 @@
+# Release candidates (dev) and releases (prod), once the checks passed. The
+# version is Cargo.toml's, written by scripts/release.sh (see the release
+# process in docs/CONTRIBUTING.md).
+when:
+  - event: [push, manual]
+    branch: [dev, prod]
+
+depends_on: [ci]
+
+variables:
+  - &rust
+    image: git.pband.ch/theca/ci-rust:1.98.0
+    pull: true
+
+steps:
+  # The image tags; on prod, refuses a version already released.
+  - name: tags
+    <<: *rust
+    environment:
+      GITEA_TOKEN:
+        from_secret: gitea_token
+    commands:
+      - scripts/release-ci.sh tags
+
+  - name: binaries
+    <<: *rust
+    environment:
+      SQLX_OFFLINE: "true"
+    commands:
+      - scripts/release-ci.sh binaries
+
+  - name: image
+    image: woodpeckerci/plugin-docker-buildx:5.0.0
+    settings:
+      registry: git.pband.ch
+      repo: git.pband.ch/theca/core
+      platforms: linux/amd64,linux/arm64
+      dockerfile: Dockerfile
+      tags_file: .tags
+      username:
+        from_secret: gitea_user
+      password:
+        from_secret: gitea_token
+
+  # Crates, browser package, tag and Gitea release.
+  - name: publish
+    <<: *rust
+    when:
+      - branch: prod
+    environment:
+      SQLX_OFFLINE: "true"
+      GITEA_TOKEN:
+        from_secret: gitea_token
+    commands:
+      - scripts/release-ci.sh publish

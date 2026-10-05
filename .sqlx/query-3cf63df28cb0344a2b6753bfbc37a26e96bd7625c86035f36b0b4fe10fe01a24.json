@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT l.name, n.uuid AS root FROM library_access($1) a\n             JOIN library l ON l.pk = a.library\n             JOIN node n ON n.library = l.pk AND n.parent IS NULL\n             WHERE l.owner = $2 ORDER BY lower(l.name)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "root",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "3cf63df28cb0344a2b6753bfbc37a26e96bd7625c86035f36b0b4fe10fe01a24"
+}

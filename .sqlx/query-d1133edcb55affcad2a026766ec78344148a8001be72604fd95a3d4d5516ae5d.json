@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE node SET current_version = $2 WHERE pk = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d1133edcb55affcad2a026766ec78344148a8001be72604fd95a3d4d5516ae5d"
+}

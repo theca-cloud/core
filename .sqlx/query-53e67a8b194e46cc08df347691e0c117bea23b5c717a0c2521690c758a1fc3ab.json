@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.pk, EXISTS (SELECT 1 FROM identity i WHERE i.account = a.pk) AS \"can_log_in!\",\n                  u.uuid AS \"user?\", u.joined_at IS NOT NULL AS \"joined?\"\n           FROM account a LEFT JOIN \"user\" u ON u.account = a.pk AND u.organization = $2\n           WHERE lower(a.email) = lower($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "can_log_in!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "user?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "joined?",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      false,
+      null
+    ]
+  },
+  "hash": "53e67a8b194e46cc08df347691e0c117bea23b5c717a0c2521690c758a1fc3ab"
+}

@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT u.pk, a.pk AS account, a.uuid AS account_uuid,\n                  EXISTS (SELECT 1 FROM identity WHERE account = a.pk) AS \"can_log_in!\"\n           FROM \"user\" u JOIN account a ON a.pk = u.account WHERE u.uuid = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "account",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "account_uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "can_log_in!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "157ed63df3f2db10ada11558aa37dfa5fb46d92e46582b618aceb0bf537ef6e2"
+}

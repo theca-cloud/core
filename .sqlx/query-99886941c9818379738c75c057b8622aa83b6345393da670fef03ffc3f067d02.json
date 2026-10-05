@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT storage, stored_sha256 AS \"sha!\" FROM chunk\n           WHERE uuid = $1 AND uploaded_at IS NULL AND deleting_at IS NULL AND stored_sha256 IS NOT NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "storage",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "sha!",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "99886941c9818379738c75c057b8622aa83b6345393da670fef03ffc3f067d02"
+}

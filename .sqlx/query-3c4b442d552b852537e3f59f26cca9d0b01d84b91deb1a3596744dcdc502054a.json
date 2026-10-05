@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT n.uuid AS id, l.uuid AS library, n.name, n.is_file, p.uuid AS \"parent?\",\n                  node_path(n.pk) AS \"path!\", v.uuid AS \"current_version?\"\n           FROM node n\n           JOIN library l ON l.pk = n.library\n           LEFT JOIN node p ON p.pk = n.parent\n           LEFT JOIN version v ON v.pk = n.current_version\n           WHERE n.pk = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "library",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "is_file",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "parent?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "path!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "current_version?",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      false
+    ]
+  },
+  "hash": "3c4b442d552b852537e3f59f26cca9d0b01d84b91deb1a3596744dcdc502054a"
+}

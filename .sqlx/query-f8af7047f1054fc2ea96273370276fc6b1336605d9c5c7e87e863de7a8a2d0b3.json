@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.uuid, a.verified,\n                  EXISTS (SELECT 1 FROM identity WHERE account = a.pk AND kind = 'password') AS \"password!\"\n           FROM account a WHERE lower(a.email) = lower($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "password!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "f8af7047f1054fc2ea96273370276fc6b1336605d9c5c7e87e863de7a8a2d0b3"
+}

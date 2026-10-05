@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM namespace WHERE organization = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7765363668d5f50e456e4087621e7ca6537be6995c3dbfe6230c4f1f3f9a5219"
+}

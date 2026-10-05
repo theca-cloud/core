@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO token (usage, resource, name, prefix, hash, organization, library, read_only)\n         VALUES ('app_password', $1, $2, $3, $4, $5, $6, $7) RETURNING uuid",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Bytea",
+        "Int8",
+        "Int8",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bdce80aad69f4fd9b40e7d92f4d9ef929efd1b11370f9cd97102ece7b4e826fe"
+}

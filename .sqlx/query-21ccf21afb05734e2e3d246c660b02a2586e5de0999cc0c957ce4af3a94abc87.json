@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT p.uuid AS id, o.uuid AS \"organization?\", p.name, p.issuer, p.client_id,\n                  p.client_secret_file, p.enabled\n           FROM identity_provider p LEFT JOIN organization o ON o.pk = p.organization\n           WHERE p.organization IS NOT DISTINCT FROM $1 ORDER BY lower(p.name)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "organization?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "issuer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "client_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "client_secret_file",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "enabled",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "21ccf21afb05734e2e3d246c660b02a2586e5de0999cc0c957ce4af3a94abc87"
+}

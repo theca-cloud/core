@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO identity_provider (organization, name, issuer, client_id, client_secret_file, client_secret_encrypted, enabled)\n         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING uuid",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6b541174e159f46f8118828d755f4b722bbba8a8e0789df122b6be2e14c859bf"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM organization o WHERE o.deleted_at IS NOT NULL\n           AND NOT EXISTS (SELECT 1 FROM chunk c WHERE c.organization = o.pk)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "b0bcb4d4839f387a11e66cef2f90c7a5c1f11dee795998f347033a932f0fbcf5"
+}

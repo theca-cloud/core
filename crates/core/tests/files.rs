@@ -1,0 +1,508 @@
+//! File operations through the router: folders, renames, moves, copies, the
+//! trash, versions and search (filesystem backend; storage is irrelevant here).
+
+#![allow(dead_code, unused_imports)] // the shared harness has more than these tests use
+
+include!("common/harness.rs");
+
+async fn fs_world(pool: PgPool) -> World {
+    world(Kind::Filesystem, pool).await
+}
+
+impl Client {
+    async fn mkdir(&self, parent: Uuid, name: &str) -> Uuid {
+        let node: api::Node = self
+            .json(
+                "POST",
+                &format!("/api/v1/nodes/{parent}/folders"),
+                &json!({ "name": name }),
+            )
+            .await
+            .unwrap();
+        node.id
+    }
+
+    async fn info(&self, node: Uuid) -> Result<api::NodeInfo, Failure> {
+        self.get(&format!("/api/v1/nodes/{node}")).await
+    }
+
+    async fn patch(&self, node: Uuid, body: Value) -> Result<api::NodeInfo, Failure> {
+        self.json("PATCH", &format!("/api/v1/nodes/{node}"), &body)
+            .await
+    }
+
+    async fn delete(&self, path: &str) -> StatusCode {
+        self.call("DELETE", path, None, true).await.0
+    }
+
+    async fn trash(&self, node: Uuid) {
+        assert_eq!(
+            self.delete(&format!("/api/v1/nodes/{node}")).await,
+            StatusCode::NO_CONTENT
+        );
+    }
+
+    async fn restore(&self, node: Uuid) -> Result<api::Restored, Failure> {
+        self.json("POST", &format!("/api/v1/nodes/{node}/restore"), &json!({}))
+            .await
+    }
+
+    async fn children(&self, folder: Uuid) -> Vec<String> {
+        let nodes: Vec<api::Node> = self
+            .get(&format!("/api/v1/nodes/{folder}/children"))
+            .await
+            .unwrap();
+        nodes.into_iter().map(|n| n.name).collect()
+    }
+
+    async fn file(
+        &mut self,
+        library: &api::Library,
+        parent: Uuid,
+        name: &str,
+        data: &[u8],
+    ) -> Uuid {
+        let target = json!({ "parent": parent, "name": name });
+        self.upload(library, target, data).await.unwrap().file
+    }
+
+    async fn versions(&self, file: Uuid) -> Vec<api::Version> {
+        self.get(&format!("/api/v1/files/{file}/versions"))
+            .await
+            .unwrap()
+    }
+
+    async fn search(&self, q: &str) -> Result<Vec<String>, Failure> {
+        let q = q.replace('%', "%25").replace(' ', "%20");
+        let found: Vec<api::SearchResult> = self.get(&format!("/api/v1/search?q={q}")).await?;
+        Ok(found.into_iter().map(|r| r.path).collect())
+    }
+}
+
+fn code(failure: Failure) -> (StatusCode, String) {
+    (
+        failure.0,
+        failure.1["code"].as_str().unwrap_or_default().to_owned(),
+    )
+}
+
+#[sqlx::test]
+async fn folders_renames_moves(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let mut alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    let a = alice.mkdir(docs.root, "A").await;
+    let b = alice.mkdir(docs.root, "B").await;
+    let taken = alice
+        .json::<Value>(
+            "POST",
+            &format!("/api/v1/nodes/{}/folders", docs.root),
+            &json!({ "name": "a" }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(code(taken), (StatusCode::CONFLICT, "name_taken".into()));
+    let f = alice.file(&docs, a, "x.txt", &data(1000, 1)).await;
+
+    // Rename, then move a folder: its contents follow.
+    assert_eq!(
+        alice
+            .patch(f, json!({ "name": "y.txt" }))
+            .await
+            .unwrap()
+            .path,
+        "/A/y.txt"
+    );
+    assert_eq!(
+        alice.patch(a, json!({ "parent": b })).await.unwrap().path,
+        "/B/A"
+    );
+    assert_eq!(alice.info(f).await.unwrap().path, "/B/A/y.txt");
+    let cycle = alice.patch(b, json!({ "parent": a })).await.unwrap_err();
+    assert_eq!(
+        code(cycle),
+        (StatusCode::CONFLICT, "move_into_itself".into())
+    );
+    let root = alice
+        .patch(docs.root, json!({ "name": "x" }))
+        .await
+        .unwrap_err();
+    assert_eq!(code(root), (StatusCode::BAD_REQUEST, "root".into()));
+    assert_eq!(
+        alice.delete(&format!("/api/v1/nodes/{}", docs.root)).await,
+        StatusCode::BAD_REQUEST
+    );
+
+    // Members only; read-only members can't change anything.
+    let bob = w.as_user(2).await;
+    assert_eq!(bob.info(a).await.unwrap_err().0, StatusCode::NOT_FOUND);
+    w.add_member(docs.id, 2, "read").await;
+    assert_eq!(bob.info(a).await.unwrap().path, "/B/A");
+    assert_eq!(
+        bob.patch(a, json!({ "name": "Z" })).await.unwrap_err().0,
+        StatusCode::FORBIDDEN
+    );
+
+    // To another library: the subtree and its history follow.
+    let other = alice.create_library("Other").await;
+    let moved = alice
+        .patch(a, json!({ "parent": other.root }))
+        .await
+        .unwrap();
+    assert_eq!((moved.library, moved.path.as_str()), (other.id, "/A"));
+    let file = alice.info(f).await.unwrap();
+    assert_eq!((file.library, file.path.as_str()), (other.id, "/A/y.txt"));
+    assert_eq!(alice.download(f).await.unwrap(), data(1000, 1));
+    assert_eq!(alice.versions(f).await.len(), 1);
+    assert!(alice.children(b).await.is_empty());
+
+    // Never to another organization.
+    w.sql(r#"INSERT INTO "user" (pk, account, organization, joined_at) OVERRIDING SYSTEM VALUE VALUES (4, 1, 2, now())"#)
+        .await;
+    let theirs: api::Library = alice
+        .json(
+            "POST",
+            "/api/v1/libraries",
+            &json!({ "name": "Theirs", "organization": w.organizations[1] }),
+        )
+        .await
+        .unwrap();
+    let away = alice
+        .patch(a, json!({ "parent": theirs.root }))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        code(away),
+        (StatusCode::CONFLICT, "other_organization".into())
+    );
+    let copy = alice
+        .json::<Value>(
+            "POST",
+            &format!("/api/v1/nodes/{a}/copy"),
+            &json!({ "parent": theirs.root }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        code(copy),
+        (StatusCode::CONFLICT, "other_organization".into())
+    );
+}
+
+#[sqlx::test]
+async fn copies_share_chunks(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let mut alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    let src = alice.mkdir(docs.root, "src").await;
+    let sub = alice.mkdir(src, "sub").await;
+    let big = data(3 * MIB, 2);
+    alice.file(&docs, src, "big.bin", &big).await;
+    alice.file(&docs, sub, "small.txt", &data(100, 3)).await;
+    let gone = alice.file(&docs, src, "gone.txt", &data(100, 4)).await;
+    alice.trash(gone).await;
+    let chunks = |w: &World| {
+        let pool = w.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM chunk")
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    let before = chunks(&w).await;
+
+    let other = alice.create_library("Other").await;
+    let copy: api::NodeInfo = alice
+        .json(
+            "POST",
+            &format!("/api/v1/nodes/{src}/copy"),
+            &json!({ "parent": other.root, "name": "dst" }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(copy.path, "/dst");
+    assert_eq!(chunks(&w).await, before, "no chunk duplicated");
+    assert_eq!(
+        alice.children(copy.id).await,
+        ["sub", "big.bin"],
+        "trashed files skipped"
+    );
+    let copied: Vec<api::Node> = alice
+        .get(&format!("/api/v1/nodes/{}/children", copy.id))
+        .await
+        .unwrap();
+    let copied_big = copied.iter().find(|n| n.name == "big.bin").unwrap().id;
+    assert_eq!(alice.download(copied_big).await.unwrap(), big);
+    assert_eq!(alice.versions(copied_big).await.len(), 1, "a fresh history");
+
+    // Into its own subtree: a snapshot, so it terminates.
+    let nested: api::NodeInfo = alice
+        .json(
+            "POST",
+            &format!("/api/v1/nodes/{src}/copy"),
+            &json!({ "parent": sub }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(nested.path, "/src/sub/src");
+    assert_eq!(alice.children(nested.id).await, ["sub", "big.bin"]);
+
+    // Not into a library the user only reads.
+    w.add_member(other.id, 2, "write").await;
+    let bob = w.as_user(2).await;
+    w.add_member(docs.id, 2, "read").await;
+    let refused = bob
+        .json::<Value>(
+            "POST",
+            &format!("/api/v1/nodes/{}/copy", other.root),
+            &json!({ "parent": docs.root }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(refused.0, StatusCode::BAD_REQUEST, "the root isn't copied");
+    let refused = bob
+        .json::<Value>(
+            "POST",
+            &format!("/api/v1/nodes/{}/copy", copy.id),
+            &json!({ "parent": docs.root }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(refused.0, StatusCode::FORBIDDEN);
+}
+
+#[sqlx::test]
+async fn trash(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let mut alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    let t = alice.mkdir(docs.root, "T").await;
+    let sub = alice.mkdir(t, "sub").await;
+    let a = alice.file(&docs, t, "a.txt", &data(100, 1)).await;
+    let b = alice.file(&docs, sub, "b.txt", &data(100, 2)).await;
+
+    // b first, then its ancestor T: the whole subtree is unreachable.
+    alice.trash(b).await;
+    alice.trash(t).await;
+    assert!(alice.children(docs.root).await.is_empty());
+    assert_eq!(alice.info(a).await.unwrap_err().0, StatusCode::NOT_FOUND);
+    assert_eq!(
+        alice.download(a).await.unwrap_err().0,
+        StatusCode::NOT_FOUND
+    );
+    let edit = alice
+        .upload(&docs, json!({ "file": a }), &data(100, 9))
+        .await
+        .unwrap_err();
+    assert_eq!(edit.0, StatusCode::NOT_FOUND);
+    let inside = alice
+        .json::<Value>(
+            "POST",
+            &format!("/api/v1/nodes/{sub}/folders"),
+            &json!({ "name": "x" }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(inside.0, StatusCode::NOT_FOUND);
+    assert!(alice.search("a.txt").await.unwrap().is_empty());
+    let listed: Vec<api::TrashEntry> = alice
+        .get(&format!("/api/v1/libraries/{}/trash", docs.id))
+        .await
+        .unwrap();
+    let mut paths: Vec<&str> = listed.iter().map(|e| e.path.as_str()).collect();
+    paths.sort();
+    assert_eq!(paths, ["/T", "/T/sub/b.txt"]);
+
+    // Its name is free again; restoring T renames it, and brings back what
+    // was trashed with it, not b (trashed earlier).
+    alice.mkdir(docs.root, "T").await;
+    let restored = alice.restore(t).await.unwrap();
+    assert_eq!(
+        (restored.name.as_str(), restored.path.as_str()),
+        ("T (restored)", "/T (restored)")
+    );
+    assert_eq!(alice.info(a).await.unwrap().path, "/T (restored)/a.txt");
+    assert_eq!(alice.info(b).await.unwrap_err().0, StatusCode::NOT_FOUND);
+    assert_eq!(
+        alice.restore(b).await.unwrap().path,
+        "/T (restored)/sub/b.txt"
+    );
+
+    // A node whose folder is trashed comes back into the root.
+    alice.trash(b).await;
+    alice.trash(sub).await;
+    let back = alice.restore(b).await.unwrap();
+    assert_eq!((back.parent, back.path.as_str()), (docs.root, "/b.txt"));
+    assert_eq!(
+        alice.restore(b).await.unwrap_err().0,
+        StatusCode::NOT_FOUND,
+        "not in the trash"
+    );
+
+    // Deleted for good: only from the trash; nodes and history go, chunks stay (GC).
+    let tr = format!("/api/v1/nodes/{t}?permanent=true");
+    assert_eq!(alice.delete(&tr).await, StatusCode::NOT_FOUND);
+    alice.trash(t).await;
+    assert_eq!(alice.delete(&tr).await, StatusCode::NO_CONTENT);
+    let count = |sql: &'static str| {
+        let pool = w.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(sql)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(
+        count("SELECT count(*) FROM node WHERE name IN ('a.txt', 'sub', 'T (restored)')").await,
+        0
+    );
+    assert_eq!(
+        count("SELECT count(*) FROM version").await,
+        1,
+        "only b.txt's"
+    );
+    // b.txt's, a.txt's, and the pending one of the refused edit.
+    assert_eq!(count("SELECT count(*) FROM chunk").await, 3);
+}
+
+#[sqlx::test]
+async fn versions(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let mut alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    let (one, two, three) = (data(500, 1), data(500, 2), data(500, 3));
+    let c1 = alice
+        .upload(&docs, new_file(&docs, "f.txt"), &one)
+        .await
+        .unwrap();
+    let f = c1.file;
+    let c2 = alice
+        .upload(
+            &docs,
+            json!({ "file": f, "base_version": c1.version }),
+            &two,
+        )
+        .await
+        .unwrap();
+    let c3 = alice
+        .upload(
+            &docs,
+            json!({ "file": f, "base_version": c1.version }),
+            &three,
+        )
+        .await
+        .unwrap();
+    assert!(c3.conflict);
+
+    let tree = alice.versions(f).await;
+    let parent = |v: Uuid| tree.iter().find(|x| x.id == v).unwrap().parent;
+    assert_eq!(
+        (parent(c1.version), parent(c2.version), parent(c3.version)),
+        (None, Some(c1.version), Some(c1.version))
+    );
+    assert!(tree.iter().find(|x| x.id == c3.version).unwrap().current);
+    assert!(tree.iter().all(|v| v.author.as_deref() == Some("a@x.ch")));
+    let old: api::Download = alice
+        .get(&format!(
+            "/api/v1/files/{f}/download?version={}",
+            c1.version
+        ))
+        .await
+        .unwrap();
+    assert_eq!(old.version, c1.version);
+
+    // Restoring only moves the current version; the next commit branches from it.
+    let restore = format!("/api/v1/files/{f}/versions/{}/restore", c2.version);
+    let (status, _) = alice
+        .call("POST", &restore, Some(b"{}".to_vec()), true)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(alice.download(f).await.unwrap(), two);
+    assert_eq!(alice.versions(f).await.len(), 3, "nothing created");
+    let c4 = alice
+        .upload(
+            &docs,
+            json!({ "file": f, "base_version": c2.version }),
+            &one,
+        )
+        .await
+        .unwrap();
+    assert!(!c4.conflict);
+    assert_eq!(
+        alice
+            .versions(f)
+            .await
+            .iter()
+            .find(|v| v.id == c4.version)
+            .unwrap()
+            .parent,
+        Some(c2.version)
+    );
+
+    // Another file's version: unknown here.
+    let g = alice
+        .upload(&docs, new_file(&docs, "g.txt"), &one)
+        .await
+        .unwrap();
+    let wrong = format!("/api/v1/files/{f}/versions/{}/restore", g.version);
+    assert_eq!(
+        alice
+            .call("POST", &wrong, Some(b"{}".to_vec()), true)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    let wrong = format!("/api/v1/files/{f}/download?version={}", g.version);
+    assert_eq!(
+        alice.call("GET", &wrong, None, true).await.0,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[sqlx::test]
+async fn search(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let mut alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    let reports = alice.mkdir(docs.root, "Reports").await;
+    for name in ["Q1 report.pdf", "100% done.txt", "notes.txt"] {
+        alice.file(&docs, reports, name, &data(10, 1)).await;
+    }
+    let old = alice
+        .file(&docs, docs.root, "old report.txt", &data(10, 2))
+        .await;
+    alice.trash(old).await;
+    let mut carol = w.as_user(3).await;
+    let theirs = carol.create_library("Theirs").await;
+    carol
+        .file(&theirs, theirs.root, "secret report.txt", &data(10, 3))
+        .await;
+
+    assert_eq!(
+        alice.search("REPORT").await.unwrap(),
+        ["/Reports/Q1 report.pdf", "/Reports"]
+    );
+    assert_eq!(
+        alice.search("100%").await.unwrap(),
+        ["/Reports/100% done.txt"]
+    );
+    assert_eq!(
+        alice.search("0% d").await.unwrap(),
+        ["/Reports/100% done.txt"]
+    );
+    assert_eq!(
+        alice.search("_._").await.unwrap(),
+        Vec::<String>::new(),
+        "wildcards are literal"
+    );
+    assert_eq!(
+        carol.search("report").await.unwrap(),
+        ["/secret report.txt"]
+    );
+    assert_eq!(
+        code(alice.search("ab").await.unwrap_err()),
+        (StatusCode::BAD_REQUEST, "query_too_short".into())
+    );
+}

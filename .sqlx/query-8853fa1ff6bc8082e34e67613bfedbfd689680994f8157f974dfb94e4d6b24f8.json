@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO library_member (organization, library, \"user\", role) VALUES ($1, $2, $3, 'write')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8853fa1ff6bc8082e34e67613bfedbfd689680994f8157f974dfb94e4d6b24f8"
+}

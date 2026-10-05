@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO \"user\" (account, organization, joined_at) VALUES ($1, $2, now())\n                   ON CONFLICT (account, organization) DO UPDATE SET joined_at = now()\n                   RETURNING uuid",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3341fd537ba93743696713de03e6e60a1050e97acf945978d8ed4b7dda992177"
+}

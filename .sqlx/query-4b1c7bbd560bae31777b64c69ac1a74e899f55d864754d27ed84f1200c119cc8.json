@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(\n               (SELECT default_storage FROM organization WHERE pk = $1),\n               (SELECT pk FROM storage WHERE is_default)\n           ) AS \"storage?\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "storage?",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "4b1c7bbd560bae31777b64c69ac1a74e899f55d864754d27ed84f1200c119cc8"
+}

@@ -1,0 +1,60 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT t.uuid, t.name, t.user_agent, host(t.ip) AS \"ip?\", t.created_at::text AS \"created_at!\",\n                  t.last_seen::text AS \"last_seen?\", o.uuid AS \"organization?\"\n           FROM token t LEFT JOIN organization o ON o.pk = t.organization\n           WHERE t.resource = $1 AND t.usage = 'session' AND t.revoked_at IS NULL\n             AND t.last_seen > now() - make_interval(secs => $2)\n             AND ($3::float8 IS NULL OR t.created_at > now() - make_interval(secs => $3))\n           ORDER BY t.last_seen DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_agent",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "ip?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "last_seen?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "organization?",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Float8",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      null,
+      null,
+      null,
+      false
+    ]
+  },
+  "hash": "81e099edda183e382f3307466dfc863a0ad005634ef36cea009877b2d6a25099"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM chunk WHERE pk = $1 AND deleting_at IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c534825d35b53a9a8f7f31cb9c5371c2e0f3bfb43d75e356747c47298ae27d92"
+}
