@@ -14,7 +14,7 @@ futures.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-theca-common = { path = "../common" }
+theca-common.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 # Instant on both platforms (std's panics in the browser).

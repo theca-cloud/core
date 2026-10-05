@@ -20,6 +20,7 @@ pub mod storage;
 pub mod stream;
 pub mod telemetry;
 pub mod totp;
+pub mod web;
 
 use std::time::Duration;
 
@@ -99,6 +100,10 @@ pub async fn run() -> Result<(), Error> {
         );
     }
     let app = api::router(state);
+    let app = match &config.web_dir {
+        Some(dir) => web::serve(app, dir),
+        None => app,
+    };
     // Connect info: the client's IP, logged with anomalies.
     axum::serve(
         listener,

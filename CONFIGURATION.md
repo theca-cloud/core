@@ -21,6 +21,7 @@ A test (`tests/configuration.rs`) fails if a variable or a setting read by the c
 | `SETUP_OPEN` | no | `false` | `true`: a fresh instance's setup needs no token (the first visitor sets it up). Otherwise the server prints the setup URL, token included, in its logs at startup. |
 | `TRUSTED_PROXIES` | no | | Comma-separated addresses or CIDRs of the reverse proxies in front of the server (e.g. `172.17.0.1, 10.0.0.0/8`). Their `X-Forwarded-For` gives the client's address. Unset: the peer is the client, so behind an undeclared proxy every client shares the proxy's address (and its rate limits). |
 | `METRICS_ADDR` | no | | Where Prometheus metrics are served (`/metrics`), e.g. `127.0.0.1:9090` or an internal address. Unset: no metrics. Never the public port. |
+| `WEB_DIR` | no | | A directory of static files served for every path the API doesn't use (the web app's build; `index.html` for unknown paths, as a single-page app needs). Unknown `/api/` and `/dav/` paths stay `404`. Set by the CE image. |
 | `PUBLIC_URL` | yes | | The URL clients reach the server at, e.g. `https://cloud.example.com`. Used in links and in the server's own presigned URLs. |
 | `LISTEN_ADDR` | no | `0.0.0.0:8080` | Address and port the server listens on. |
 | `RUST_LOG` | no | `info` | Log filter (`tracing` syntax), e.g. `info,theca_core=debug`. |

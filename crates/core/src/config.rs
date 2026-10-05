@@ -25,6 +25,8 @@ pub struct Config {
     pub trusted_proxies: Vec<IpNetwork>,
     /// `METRICS_ADDR`: where Prometheus metrics are served (never the public port).
     pub metrics_addr: Option<SocketAddr>,
+    /// `WEB_DIR`: the web app's files, served for paths the API doesn't know.
+    pub web_dir: Option<PathBuf>,
 }
 
 impl Config {
@@ -38,6 +40,7 @@ impl Config {
             data_key_file: required("DATA_KEY__FILE")?.into(),
             setup_open: setup_open()?,
             trusted_proxies: trusted_proxies()?,
+            web_dir: env::var("WEB_DIR").ok().map(PathBuf::from),
             metrics_addr: match env::var("METRICS_ADDR") {
                 Err(_) => None,
                 Ok(v) => Some(v.parse().map_err(|e| Error::InvalidEnv {

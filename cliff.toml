@@ -1,0 +1,37 @@
+# git-cliff: the changelog and the next version, from Conventional Commits
+# (docs/CONTRIBUTING.md). Used by scripts/release.sh.
+
+[changelog]
+header = "# Changelog\n\nEvery release of `core`: the server image, the crates, the browser package, `openapi.json`.\n"
+body = """
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim }}
+{% for commit in commits %}
+- {% if commit.scope %}**{{ commit.scope }}**: {% endif %}{{ commit.message | upper_first }}{% if commit.breaking %} (**breaking**){% endif %}
+{%- endfor %}
+{% endfor %}
+"""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+tag_pattern = "v[0-9]*"
+commit_parsers = [
+    { message = "^chore\\(release\\)", skip = true },
+    { message = "^docs\\(roadmap\\)", skip = true },
+    { message = "^feat", group = "<!-- 0 -->Features" },
+    { message = "^fix", group = "<!-- 1 -->Fixes" },
+    { message = "^perf", group = "<!-- 2 -->Performance" },
+    { message = "^refactor", group = "<!-- 3 -->Refactoring" },
+    { message = "^docs", group = "<!-- 4 -->Documentation" },
+    { message = "^(build|ci)", group = "<!-- 5 -->Build and CI" },
+    { message = "^(test|chore)", skip = true },
+]
+
+[bump]
+# 0.x (beta): features and breaking changes bump the minor version.
+features_always_bump_minor = true
+breaking_always_bump_major = false
+initial_tag = "v0.1.0"

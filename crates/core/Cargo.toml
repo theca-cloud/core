@@ -26,7 +26,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sqlx.workspace = true
-theca-common = { path = "../common", features = ["openapi"] }
+theca-common = { workspace = true, features = ["openapi"] }
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
@@ -42,10 +42,12 @@ dav-server.workspace = true
 tempfile.workspace = true
 metrics.workspace = true
 metrics-exporter-prometheus.workspace = true
+tower.workspace = true
+tower-http.workspace = true
 
 [dev-dependencies]
 # The end-to-end smoke test drives the real server binary through the client.
-theca-client = { path = "../client" }
+theca-client.workspace = true
 # Computes TOTP codes like an authenticator app.
 totp-rs.workspace = true
 # Sign the fake OIDC provider's ID tokens (HS256).
@@ -54,7 +56,6 @@ sha2.workspace = true
 # v7: random test IDs (native only; WASM would need a randomness source).
 uuid = { workspace = true, features = ["v7"] }
 tracing-subscriber.workspace = true
-tower.workspace = true
 
 [lints]
 workspace = true

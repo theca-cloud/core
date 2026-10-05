@@ -59,11 +59,28 @@ s3() {
         S3_TEST_SECRET_KEY_FILE=/tmp/garage/secrets/s3_secret_key
 }
 
+# openapi.json against the last release's: no breaking change to /api/v1 (a
+# client built against any 1.x keeps working).
+api_compatibility() {
+    if ! command -v oasdiff >/dev/null 2>&1; then
+        echo "oasdiff missing: API compatibility not checked here (the CI checks it)"
+        return
+    fi
+    git fetch -q --tags origin 2>/dev/null || true
+    last=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null) || {
+        echo "no release yet: no API to stay compatible with"
+        return
+    }
+    git show "$last:openapi.json" >target/released-openapi.json
+    oasdiff breaking target/released-openapi.json openapi.json --fail-on ERR
+}
+
 if [ "$step" = all ] || [ "$step" = lint ]; then
     database
     cargo fmt --all --check
     cargo sqlx prepare --workspace --check -- --all-targets
     cargo clippy --workspace --all-targets -- -D warnings
+    api_compatibility
 fi
 if [ "$step" = all ] || [ "$step" = test ]; then
     database

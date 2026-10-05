@@ -28,6 +28,7 @@ sqlx database reset -y -f --source crates/core/migrations   # after editing the 
 scripts/ci.sh [lint|test|wasm|deny]   # every CI check natively, or one step
 scripts/ci-docker.sh           # the real Woodpecker pipeline, in Docker (needs woodpecker-cli)
 scripts/install-hooks.sh       # run scripts/ci.sh before every push (bypass: git push --no-verify)
+scripts/release.sh --dry-run   # the next version and its changelog (releases: see CONTRIBUTING.md)
 cargo fmt --all                # fix formatting
 ```
 
@@ -36,5 +37,7 @@ Dev explorers: database (pgweb, no login) http://localhost:8081, S3 (garage-webu
 Start over: `rm -rf data/ .env`, then `scripts/dev.sh`.
 
 CI runs in `git.pband.ch/theca/ci-rust`, built from `ci/Dockerfile` and pushed by `scripts/ci-image.sh` (after `docker login git.pband.ch`). Bumping Rust: update `rust-toolchain.toml`, run `scripts/ci-image.sh`, then update the image tag in `.woodpecker/ci.yaml`.
+
+Releases: `scripts/release.sh` on `dev`, then a merge into `prod` publishes the server image (`git.pband.ch/theca/core`, amd64 and arm64), the crates and `@theca/client` on the Gitea registries, and the Gitea release (see the release process in CONTRIBUTING.md).
 
 License: AGPL-3.0.
