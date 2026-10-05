@@ -39,6 +39,684 @@
         }
       }
     },
+    "/api/v1/auth/app-passwords": {
+      "get": {
+        "tags": [
+          "app_password"
+        ],
+        "summary": "The account's app passwords.",
+        "operationId": "list",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AppPassword"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`session_required`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "app_password"
+        ],
+        "summary": "Create an app password, within what this session reaches (a restricted\nsession: inside its organization). The password is shown only once.",
+        "operationId": "create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAppPassword"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewAppPassword"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_name`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`session_required`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Organization or library not reachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/app-passwords/{id}": {
+      "delete": {
+        "tags": [
+          "app_password"
+        ],
+        "summary": "Revoke an app password: refused at once.",
+        "operationId": "revoke",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": "`session_required`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/identities": {
+      "get": {
+        "tags": [
+          "oidc"
+        ],
+        "summary": "The account's ways to log in.",
+        "operationId": "identities",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Identity"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`full_session_required`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/identities/{id}": {
+      "delete": {
+        "tags": [
+          "oidc"
+        ],
+        "summary": "Remove one of the account's ways to log in (never the last one).",
+        "operationId": "unlink",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`last_identity`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": [
+          "session"
+        ],
+        "summary": "Log in with email and password. Sets the session cookie. Unknown email and\nwrong password give the same error, in the same time.",
+        "operationId": "login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Login"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`invalid_credentials`, `totp_required`, `invalid_totp`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "session"
+        ],
+        "summary": "Log out: revokes this session (at once) and clears the cookie.",
+        "operationId": "logout",
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/auth/oidc/providers": {
+      "get": {
+        "tags": [
+          "oidc"
+        ],
+        "summary": "The instance-wide providers, for the login page. An organization's\nprovider isn't listed: the organization shares its start link.",
+        "operationId": "providers",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IdentityProvider"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/oidc/{provider}/callback": {
+      "get": {
+        "tags": [
+          "oidc"
+        ],
+        "summary": "The provider sends the user back here: opens a session (or links the\nidentity), then redirects to the web app.",
+        "operationId": "callback",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "state",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "error",
+            "in": "path",
+            "description": "Set by the provider when the user refused, or on errors.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "To `/`, or to `/login?error=...`"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/oidc/{provider}/link": {
+      "post": {
+        "tags": [
+          "oidc"
+        ],
+        "summary": "Start linking a provider's identity to this account: returns the URL to\nsend the browser to. A POST (CSRF-protected), not a link: another site must\nnot be able to start a linking flow in the user's browser.",
+        "operationId": "link",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcRedirect"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`full_session_required`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/oidc/{provider}/start": {
+      "get": {
+        "tags": [
+          "oidc"
+        ],
+        "summary": "Start logging in with a provider: redirects to it.",
+        "operationId": "start",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "To the provider, or to `/login?error=...`"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/sessions": {
+      "get": {
+        "tags": [
+          "session"
+        ],
+        "summary": "The account's live sessions.",
+        "operationId": "sessions",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Session"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/sessions/{id}": {
+      "delete": {
+        "tags": [
+          "session"
+        ],
+        "summary": "Revoke one of the account's sessions (e.g. a lost device).",
+        "operationId": "revoke",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/totp": {
+      "post": {
+        "tags": [
+          "totp"
+        ],
+        "summary": "Start setting up TOTP: a new secret, not required at login until\nconfirmed. Starting again replaces an unconfirmed secret.",
+        "operationId": "start",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TotpSetup"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`full_session_required`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`totp_enabled`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/totp/confirm": {
+      "post": {
+        "tags": [
+          "totp"
+        ],
+        "summary": "Confirm TOTP with a first code: from now on, password logins ask for a\ncode. Returns the recovery codes (shown only now).",
+        "operationId": "confirm",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TotpCode"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryCodes"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`invalid_totp`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No TOTP being set up",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/totp/disable": {
+      "post": {
+        "tags": [
+          "totp"
+        ],
+        "summary": "Turn TOTP off, with a current code (or a recovery code).",
+        "operationId": "disable",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TotpCode"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": "`invalid_totp`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "TOTP is off",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/totp/recovery-codes": {
+      "post": {
+        "tags": [
+          "totp"
+        ],
+        "summary": "New recovery codes, with a current code (or a recovery code): the\nprevious ones stop working.",
+        "operationId": "recovery_codes",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TotpCode"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryCodes"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`invalid_totp`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "TOTP is off",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/chunks/announce": {
       "post": {
         "tags": [
@@ -371,6 +1049,27 @@
         }
       }
     },
+    "/api/v1/me": {
+      "get": {
+        "tags": [
+          "session"
+        ],
+        "summary": "The logged-in account and its organizations.",
+        "operationId": "me",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/nodes/{id}/children": {
       "get": {
         "tags": [
@@ -461,6 +1160,58 @@
           "message": {
             "type": "string",
             "description": "Explanation for humans."
+          }
+        }
+      },
+      "AppPassword": {
+        "type": "object",
+        "description": "An app password (never the secret itself, except once at creation).",
+        "required": [
+          "id",
+          "name",
+          "read_only",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "When it was created."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The app password."
+          },
+          "last_seen": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Last used (precise to a few minutes), if ever."
+          },
+          "library": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The library it's limited to, if any."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "organization": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The organization it's limited to, if any."
+          },
+          "read_only": {
+            "type": "boolean",
+            "description": "Read only."
           }
         }
       },
@@ -605,10 +1356,44 @@
           }
         }
       },
+      "CreateAppPassword": {
+        "type": "object",
+        "description": "Create an app password (CLI, API clients, WebDAV): data access only.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "library": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Limit it to one library (its organization implied)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Shown in lists, e.g. \"laptop CLI\" (1 to 200 characters)."
+          },
+          "organization": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Limit it to one organization (none: the whole account; a restricted\nsession: always its own organization)."
+          },
+          "read_only": {
+            "type": "boolean",
+            "description": "Read only, whatever the account's role in the libraries."
+          }
+        }
+      },
       "CreateLibrary": {
         "type": "object",
         "description": "`POST /libraries`.",
         "required": [
+          "organization",
           "name"
         ],
         "properties": {
@@ -623,6 +1408,11 @@
               "format": "uuid"
             },
             "description": "Existing namespaces of the organization to put the library in. Empty:\nthe library only dedups with itself."
+          },
+          "organization": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The organization that will own it (the account must be a member)."
           }
         }
       },
@@ -739,11 +1529,65 @@
           }
         }
       },
+      "Identity": {
+        "type": "object",
+        "description": "One of the account's ways to log in.",
+        "required": [
+          "id",
+          "kind"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The identity."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`password` or `oidc`."
+          },
+          "provider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The OIDC provider."
+          },
+          "provider_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The OIDC provider's name."
+          }
+        }
+      },
+      "IdentityProvider": {
+        "type": "object",
+        "description": "An OIDC provider users can log in with.",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The provider: log in at `/api/v1/auth/oidc/{id}/start`."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name, e.g. \"Google\"."
+          }
+        }
+      },
       "Library": {
         "type": "object",
         "description": "A library.",
         "required": [
           "id",
+          "organization",
           "name",
           "root"
         ],
@@ -757,10 +1601,40 @@
             "type": "string",
             "description": "Its name."
           },
+          "organization": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The organization owning it."
+          },
           "root": {
             "type": "string",
             "format": "uuid",
             "description": "Its root folder."
+          }
+        }
+      },
+      "Login": {
+        "type": "object",
+        "description": "`POST /auth/login`.",
+        "required": [
+          "email",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "The account's email."
+          },
+          "password": {
+            "type": "string",
+            "description": "Its password."
+          },
+          "totp": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The current TOTP code (or a recovery code), if TOTP is on. Without it,\na right password gets `totp_required`: ask for the code, send again."
           }
         }
       },
@@ -830,6 +1704,80 @@
           }
         }
       },
+      "Me": {
+        "type": "object",
+        "description": "The logged-in account and its organizations.",
+        "required": [
+          "account",
+          "email",
+          "totp",
+          "organizations"
+        ],
+        "properties": {
+          "account": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The account."
+          },
+          "email": {
+            "type": "string",
+            "description": "Its email."
+          },
+          "organizations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Membership"
+            },
+            "description": "Its memberships."
+          },
+          "totp": {
+            "type": "boolean",
+            "description": "Whether logging in with the password also asks for a TOTP code."
+          }
+        }
+      },
+      "Membership": {
+        "type": "object",
+        "description": "An account's membership in an organization.",
+        "required": [
+          "organization",
+          "name",
+          "joined"
+        ],
+        "properties": {
+          "joined": {
+            "type": "boolean",
+            "description": "False while it's an invitation not accepted yet."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "organization": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The organization."
+          }
+        }
+      },
+      "NewAppPassword": {
+        "type": "object",
+        "description": "A new app password: the secret is shown only this once.",
+        "required": [
+          "password",
+          "app_password"
+        ],
+        "properties": {
+          "app_password": {
+            "$ref": "#/components/schemas/AppPassword",
+            "description": "What it is."
+          },
+          "password": {
+            "type": "string",
+            "description": "Send it as `Authorization: Bearer <password>` (or WebDAV Basic auth)."
+          }
+        }
+      },
       "Node": {
         "type": "object",
         "description": "A file or folder.",
@@ -851,6 +1799,124 @@
           "name": {
             "type": "string",
             "description": "Its name."
+          }
+        }
+      },
+      "OidcRedirect": {
+        "type": "object",
+        "description": "Where to send the browser to continue with an OIDC provider.",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The provider's authorization URL."
+          }
+        }
+      },
+      "RecoveryCodes": {
+        "type": "object",
+        "description": "One-time recovery codes, each usable once instead of a TOTP code. Shown\nonly now: the server only keeps their hashes.",
+        "required": [
+          "codes"
+        ],
+        "properties": {
+          "codes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The codes."
+          }
+        }
+      },
+      "Session": {
+        "type": "object",
+        "description": "A live session of the account.",
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "current"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "When it was opened."
+          },
+          "current": {
+            "type": "boolean",
+            "description": "This session."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The session."
+          },
+          "ip": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The address it was opened from."
+          },
+          "last_seen": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When it was last used."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name (from the user agent)."
+          },
+          "restricted_to": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The organization it is restricted to, if opened through an organization's identity provider."
+          },
+          "user_agent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The browser or client that opened it."
+          }
+        }
+      },
+      "TotpCode": {
+        "type": "object",
+        "description": "A TOTP code (6 digits), or a recovery code where accepted.",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The code."
+          }
+        }
+      },
+      "TotpSetup": {
+        "type": "object",
+        "description": "A TOTP secret being set up (not required at login until confirmed).",
+        "required": [
+          "secret",
+          "uri"
+        ],
+        "properties": {
+          "secret": {
+            "type": "string",
+            "description": "The secret in base32, to type into an authenticator app."
+          },
+          "uri": {
+            "type": "string",
+            "description": "The `otpauth://` URI, to show as a QR code."
           }
         }
       },

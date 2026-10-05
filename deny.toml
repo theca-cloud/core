@@ -6,6 +6,11 @@ all-features = true
 
 [advisories]
 yanked = "deny"
+ignore = [
+    # Marvin (RSA decryption timing, private keys): `rsa` comes with openidconnect,
+    # which only verifies ID token signatures with providers' public keys.
+    { id = "RUSTSEC-2023-0071", reason = "rsa only verifies signatures (public keys)" },
+]
 
 [licenses]
 allow = [

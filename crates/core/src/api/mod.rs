@@ -1,7 +1,11 @@
 //! HTTP API. Unversioned probes (`/api/health`, `/api/version`) and `/api/v1`.
 
+mod app_password;
 pub mod auth;
 pub mod error;
+mod oidc;
+mod session;
+mod totp;
 mod v1;
 
 use std::collections::BTreeMap;
@@ -16,6 +20,7 @@ use serde::Serialize;
 use sqlx::PgPool;
 use utoipa::{OpenApi, ToSchema};
 
+use crate::keys::DataCipher;
 use crate::settings::Settings;
 use crate::storage::{Backends, UrlSigner};
 
@@ -28,6 +33,8 @@ pub struct AppState {
     pub signer: UrlSigner,
     /// Storage backends, built once per storage.
     pub backends: Backends,
+    /// Encrypts secrets stored in the database.
+    pub cipher: DataCipher,
 }
 
 /// The OpenAPI description of the API, committed as `openapi.json`.
@@ -37,6 +44,24 @@ pub struct AppState {
     paths(
         health,
         version,
+        session::login,
+        session::logout,
+        session::sessions,
+        session::revoke,
+        session::me,
+        app_password::create,
+        app_password::list,
+        app_password::revoke,
+        totp::start,
+        totp::confirm,
+        totp::disable,
+        totp::recovery_codes,
+        oidc::providers,
+        oidc::start,
+        oidc::link,
+        oidc::callback,
+        oidc::identities,
+        oidc::unlink,
         v1::create_library,
         v1::list_libraries,
         v1::children,
@@ -56,7 +81,18 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .route("/api/version", get(version))
-        .nest("/api/v1", v1::router())
+        .nest(
+            "/api/v1",
+            v1::router()
+                .merge(session::router())
+                .merge(app_password::router())
+                .merge(totp::router())
+                .merge(oidc::router())
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    auth::authenticate,
+                )),
+        )
         .with_state(state)
 }
 
@@ -145,12 +181,16 @@ mod tests {
             gc_grace_period: Duration::from_secs(1),
             presigned_url_lifetime: Duration::from_secs(60),
             max_pending_uploads: 100,
+            session_idle_lifetime: Duration::from_secs(3600),
+            session_max_lifetime: None,
+            oidc_link_by_email: false,
         });
         router(AppState {
             backends: Backends::new(pool.clone()),
             pool,
             settings,
             signer: UrlSigner::new([0; 32], "http://test"),
+            cipher: DataCipher::new(&[0; 32]),
         })
     }
 

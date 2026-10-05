@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.pk, a.uuid, i.details->>'hash' AS \"hash?\"\n           FROM account a LEFT JOIN identity i ON i.account = a.pk AND i.kind = 'password'\n           WHERE lower(a.email) = lower($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "hash?",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "f57254fd133284999aa651bb129b88a7094b62d5bf66e03e14f426facefdba45"
+}

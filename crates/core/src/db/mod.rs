@@ -2,10 +2,11 @@
 //! (handlers never write SQL). Refusals by named constraints are mapped to API
 //! errors in `api::error`.
 
+pub mod account;
 pub mod chunk;
 pub mod file;
+pub mod identity;
 pub mod library;
-pub mod user;
 
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;

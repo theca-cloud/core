@@ -73,27 +73,52 @@ CREATE TABLE account (
 );
 CREATE UNIQUE INDEX account_email ON account (lower(email));
 
--- identity : account, kind, details?
+-- identity_provider : OIDC providers. Instance-wide (organization NULL,
+-- configured by the instance admin) or an organization's. A provider can assert
+-- any subject or email, so trust follows who controls it: logging in through an
+-- organization's provider opens a session restricted to that organization.
+CREATE TABLE identity_provider (
+    pk bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    uuid uuid NOT NULL UNIQUE DEFAULT uuidv7(),
+    organization bigint REFERENCES organization ON DELETE CASCADE,
+    name text NOT NULL,         -- shown on the login screen
+    issuer text NOT NULL,       -- discovery: <issuer>/.well-known/openid-configuration
+    client_id text NOT NULL,
+    client_secret_file text NOT NULL,  -- a path, never the secret
+    enabled boolean NOT NULL DEFAULT true
+);
+CREATE UNIQUE INDEX identity_provider_name ON identity_provider (organization, lower(name)) NULLS NOT DISTINCT;
+
+-- identity : how an account logs in.
+--   password: details.hash (Argon2id PHC string)
+--   oidc:     provider + details.subject
+--   totp:     second factor of the password: details.secret (encrypted with the
+--             DATA_KEY__FILE key, the account as associated data), details.confirmed
+--             (required at login once a first code was given), details.last_step
+--             (the last time step used: codes can't be replayed)
 CREATE TABLE identity (
     pk bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     uuid uuid NOT NULL UNIQUE DEFAULT uuidv7(),
-    account bigint NOT NULL REFERENCES account,
-    kind text NOT NULL CHECK (kind IN ('password', 'oidc')),
+    account bigint NOT NULL REFERENCES account ON DELETE CASCADE,
+    kind text NOT NULL CHECK (kind IN ('password', 'oidc', 'totp')),
+    provider bigint REFERENCES identity_provider ON DELETE CASCADE,
     -- Kind-specific data; each kind's required keys are checked below.
     -- IS NOT DISTINCT FROM: a missing key gives NULL, and a CHECK evaluating to NULL passes.
     details jsonb NOT NULL,
+    CONSTRAINT identity_provider_oidc CHECK ((kind = 'oidc') = (provider IS NOT NULL)),
     CONSTRAINT identity_password_details CHECK (kind <> 'password' OR jsonb_typeof(details->'hash') IS NOT DISTINCT FROM 'string'),
-    CONSTRAINT identity_oidc_details CHECK (kind <> 'oidc' OR (
-        jsonb_typeof(details->'issuer') IS NOT DISTINCT FROM 'string'
-        AND jsonb_typeof(details->'subject') IS NOT DISTINCT FROM 'string'
-    ))
+    CONSTRAINT identity_oidc_details CHECK (kind <> 'oidc' OR jsonb_typeof(details->'subject') IS NOT DISTINCT FROM 'string'),
+    CONSTRAINT identity_totp_details CHECK (kind <> 'totp' OR (
+        jsonb_typeof(details->'secret') IS NOT DISTINCT FROM 'string'
+        AND jsonb_typeof(details->'confirmed') IS NOT DISTINCT FROM 'boolean'
+        AND jsonb_typeof(details->'last_step') IS NOT DISTINCT FROM 'number'))
 );
 CREATE INDEX identity_account ON identity (account);
--- At most one password per account.
+-- At most one password and one TOTP per account.
 CREATE UNIQUE INDEX identity_password ON identity (account) WHERE kind = 'password';
--- An external account (issuer + subject) belongs to at most one account here.
-CREATE UNIQUE INDEX identity_oidc ON identity ((details->>'issuer'), (details->>'subject'))
-    WHERE kind = 'oidc';
+CREATE UNIQUE INDEX identity_totp ON identity (account) WHERE kind = 'totp';
+-- An external account (provider + subject) belongs to at most one account here.
+CREATE UNIQUE INDEX identity_oidc ON identity (provider, (details->>'subject')) WHERE kind = 'oidc';
 
 -- user : account, organization, joined_at (NULLABLE for invites) (unique(acc, org))
 -- NOTE: "user" is a reserved word in Postgres: it must be quoted everywhere.
@@ -117,33 +142,6 @@ CREATE TABLE "user" (
 ALTER TABLE organization
     ADD CONSTRAINT organization_owner FOREIGN KEY (pk, owner, owner_joined) REFERENCES "user" (organization, pk, joined)
     DEFERRABLE INITIALLY DEFERRED;
-
--- token : usage, resource, prefix, hash, user_agent, ip, location, created_at, last_seen, revoked_at, revocation_reason
--- NOTE: resource is the target entity's uuid (no FK, by design).
-CREATE TABLE token (
-    pk bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    uuid uuid NOT NULL UNIQUE DEFAULT uuidv7(),
-    usage text NOT NULL CHECK (usage IN (
-        'session',
-        'email_verification',
-        'invitation',
-        'password_reset',
-        'password_setup',
-        'app_password'
-    )),
-    resource uuid NOT NULL,
-    prefix text NOT NULL UNIQUE,
-    hash bytea NOT NULL CHECK (length(hash) = 32),  -- SHA-256
-    user_agent text,
-    ip inet,
-    location text,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    last_seen timestamptz,
-    revoked_at timestamptz,
-    revocation_reason text,
-    CONSTRAINT token_revocation_reason CHECK ((revoked_at IS NULL) = (revocation_reason IS NULL))
-);
-CREATE INDEX token_resource ON token (resource);
 
 -- library : name, owner, storage (nullable)
 -- NOTE: UNIQUE (owner, lower(name)) from decisions.md (Library names).
@@ -178,6 +176,79 @@ CREATE TABLE library_member (
     CONSTRAINT library_member_user FOREIGN KEY (organization, "user") REFERENCES "user" (organization, pk) ON DELETE CASCADE
 );
 CREATE INDEX library_member_user ON library_member ("user");
+
+-- token : usage, resource, prefix, hash, user_agent, ip, location, created_at, last_seen, revoked_at, revocation_reason
+-- NOTE: resource is the target entity's uuid (no FK, by design).
+CREATE TABLE token (
+    pk bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    uuid uuid NOT NULL UNIQUE DEFAULT uuidv7(),
+    usage text NOT NULL CHECK (usage IN (
+        'session',
+        'email_verification',
+        'invitation',
+        'password_reset',
+        'password_setup',
+        'app_password',
+        'recovery_code'
+    )),
+    resource uuid NOT NULL,
+    prefix text NOT NULL UNIQUE,
+    hash bytea NOT NULL CHECK (length(hash) = 32),  -- SHA-256
+    user_agent text,
+    ip inet,
+    location text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    last_seen timestamptz,
+    revoked_at timestamptz,
+    revocation_reason text,
+    -- Shown in lists: given by the user (app passwords) or by the server.
+    name text NOT NULL CHECK (length(name) BETWEEN 1 AND 200),
+    -- Scope (see organization_access): a session opened through an
+    -- organization's identity provider, or an app password limited to an
+    -- organization, only acts on that organization (NULL: the whole account).
+    organization bigint REFERENCES organization ON DELETE CASCADE,
+    -- An app password limited to one library (of `organization`).
+    library bigint,
+    -- An app password that can only read (a cap on the membership's role).
+    read_only boolean NOT NULL DEFAULT false,
+    CONSTRAINT token_revocation_reason CHECK ((revoked_at IS NULL) = (revocation_reason IS NULL)),
+    CONSTRAINT token_organization_scope CHECK (organization IS NULL OR usage IN ('session', 'app_password')),
+    CONSTRAINT token_library_scope CHECK (library IS NULL OR (usage = 'app_password' AND organization IS NOT NULL)),
+    CONSTRAINT token_read_only CHECK (NOT read_only OR usage = 'app_password'),
+    CONSTRAINT token_library FOREIGN KEY (organization, library) REFERENCES library (owner, pk) ON DELETE CASCADE
+);
+CREATE INDEX token_resource ON token (resource);
+
+-- Authorization: what a credential (a session or app password `token` row)
+-- reaches. Every query that touches an organization's or a library's data joins
+-- these; no access join is written by hand elsewhere (docs/decisions.md,
+-- Authorization). Plain SQL functions: the planner inlines them.
+
+-- The organizations a token acts in: the account's joined memberships, within
+-- the token's scope. `library` is the token's library scope (NULL: every
+-- library); `can_write` is false for read-only tokens. Revocation and expiry
+-- are checked once per request, when the token is looked up.
+CREATE FUNCTION organization_access(token bigint)
+RETURNS TABLE (organization bigint, "user" bigint, library bigint, can_write boolean)
+LANGUAGE sql STABLE AS $$
+    SELECT u.organization, u.pk, t.library, NOT t.read_only
+    FROM token t
+    JOIN account a ON a.uuid = t.resource
+    JOIN "user" u ON u.account = a.pk AND u.joined_at IS NOT NULL
+    WHERE t.pk = $1 AND t.usage IN ('session', 'app_password')
+      AND (t.organization IS NULL OR u.organization = t.organization)
+$$;
+
+-- The libraries a token reaches: library memberships within its scope.
+-- `can_write`: the member's role is `write` and the token isn't read-only.
+CREATE FUNCTION library_access(token bigint)
+RETURNS TABLE (library bigint, organization bigint, "user" bigint, can_write boolean)
+LANGUAGE sql STABLE AS $$
+    SELECT m.library, o.organization, o."user", o.can_write AND m.role = 'write'
+    FROM organization_access($1) o
+    JOIN library_member m ON m."user" = o."user"
+    WHERE o.library IS NULL OR m.library = o.library
+$$;
 
 -- namespace : a dedup boundary, owned by an organization. Libraries in a common
 -- namespace declare that all their members trust each other: an upload into a
@@ -475,3 +546,18 @@ CREATE TRIGGER node_no_cycle
     BEFORE UPDATE OF parent ON node
     FOR EACH ROW WHEN (NEW.parent IS DISTINCT FROM OLD.parent AND NEW.parent IS NOT NULL)
     EXECUTE FUNCTION node_no_cycle();
+
+-- 6. A member leaving an organization loses the identities they logged in
+-- with through that organization's providers: the organization no longer
+-- vouches for them. (Its restricted sessions already reach nothing: access
+-- requires a joined membership.)
+CREATE FUNCTION user_left_identities() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    DELETE FROM identity i USING identity_provider p
+    WHERE i.account = OLD.account AND i.provider = p.pk AND p.organization = OLD.organization;
+    RETURN OLD;
+END;
+$$;
+CREATE TRIGGER user_left_identities
+    AFTER DELETE ON "user"
+    FOR EACH ROW EXECUTE FUNCTION user_left_identities();

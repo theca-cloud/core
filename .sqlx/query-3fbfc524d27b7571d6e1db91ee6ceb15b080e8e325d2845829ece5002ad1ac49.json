@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO token (usage, resource, name, prefix, hash)\n         SELECT 'recovery_code', $1, 'recovery code', p, h FROM unnest($2::text[], $3::bytea[]) AS c(p, h)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "ByteaArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3fbfc524d27b7571d6e1db91ee6ceb15b080e8e325d2845829ece5002ad1ac49"
+}

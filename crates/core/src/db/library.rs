@@ -2,22 +2,34 @@ use sqlx::{PgPool, Postgres, Transaction};
 use theca_common::api;
 use uuid::Uuid;
 
-/// A user's access to a library, through `library_member`.
+use super::account::Credential;
+
+// Access is decided by the SQL functions `library_access(token)` and
+// `organization_access(token)`: the account's joined memberships, within the
+// credential's scope. Never join memberships by hand here.
+
+/// An account's access to a library, through its membership and `library_member`.
 #[derive(Debug, Clone, Copy)]
 pub struct Access {
     pub library: i64,
     pub organization: i64,
     pub storage: i64,
+    /// The account's membership in the library's organization.
+    pub user: i64,
     pub can_write: bool,
 }
 
-/// The user's access to a library, if they're a member.
-pub async fn access(pool: &PgPool, user: i64, library: Uuid) -> sqlx::Result<Option<Access>> {
+/// The account's access to a library, if it's a member.
+pub async fn access(
+    pool: &PgPool,
+    who: &Credential,
+    library: Uuid,
+) -> sqlx::Result<Option<Access>> {
     let row = sqlx::query!(
-        r#"SELECT l.pk, l.owner, l.storage, m.role
-           FROM library l JOIN library_member m ON m.library = l.pk AND m."user" = $1
+        r#"SELECT l.pk, l.owner, l.storage, a."user" AS "user!", a.can_write AS "can_write!"
+           FROM library l JOIN library_access($1) a ON a.library = l.pk
            WHERE l.uuid = $2"#,
-        user,
+        who.token,
         library
     )
     .fetch_optional(pool)
@@ -26,7 +38,8 @@ pub async fn access(pool: &PgPool, user: i64, library: Uuid) -> sqlx::Result<Opt
         library: r.pk,
         organization: r.owner,
         storage: r.storage,
-        can_write: r.role == "write",
+        user: r.user,
+        can_write: r.can_write,
     }))
 }
 
@@ -39,14 +52,19 @@ pub struct NodeAccess {
     pub current_version: Option<i64>,
 }
 
-pub async fn node_access(pool: &PgPool, user: i64, node: Uuid) -> sqlx::Result<Option<NodeAccess>> {
+pub async fn node_access(
+    pool: &PgPool,
+    who: &Credential,
+    node: Uuid,
+) -> sqlx::Result<Option<NodeAccess>> {
     let row = sqlx::query!(
-        r#"SELECT n.pk, n.is_file, n.current_version, l.pk AS library, l.owner, l.storage, m.role
+        r#"SELECT n.pk, n.is_file, n.current_version, l.pk AS library, l.owner, l.storage,
+                  a."user" AS "user!", a.can_write AS "can_write!"
            FROM node n
            JOIN library l ON l.pk = n.library
-           JOIN library_member m ON m.library = l.pk AND m."user" = $1
+           JOIN library_access($1) a ON a.library = l.pk
            WHERE n.uuid = $2 AND n.deleted_at IS NULL"#,
-        user,
+        who.token,
         node
     )
     .fetch_optional(pool)
@@ -56,7 +74,8 @@ pub async fn node_access(pool: &PgPool, user: i64, node: Uuid) -> sqlx::Result<O
             library: r.library,
             organization: r.owner,
             storage: r.storage,
-            can_write: r.role == "write",
+            user: r.user,
+            can_write: r.can_write,
         },
         node: r.pk,
         is_file: r.is_file,
@@ -66,6 +85,9 @@ pub async fn node_access(pool: &PgPool, user: i64, node: Uuid) -> sqlx::Result<O
 
 /// Why a library can't be created (besides database refusals).
 pub enum CreateError {
+    /// Not a (joined) member of the organization, outside the credential's
+    /// scope, or read-only.
+    NotMember,
     NoStorage,
     UnknownNamespaces(Vec<Uuid>),
     Db(sqlx::Error),
@@ -81,11 +103,23 @@ impl From<sqlx::Error> for CreateError {
 /// namespaces. Storage: the organization's default, else the instance default.
 pub async fn create(
     tx: &mut Transaction<'_, Postgres>,
-    organization: i64,
-    creator: i64,
+    who: &Credential,
+    organization: Uuid,
     name: &str,
     namespaces: &[Uuid],
 ) -> Result<api::Library, CreateError> {
+    let member = sqlx::query!(
+        r#"SELECT a."user" AS "pk!", a.organization AS "organization!"
+           FROM organization_access($1) a JOIN organization o ON o.pk = a.organization
+           WHERE o.uuid = $2 AND a.library IS NULL AND a.can_write"#,
+        who.token,
+        organization
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(CreateError::NotMember)?;
+    let (creator, organization_uuid, organization) = (member.pk, organization, member.organization);
+
     let storage = sqlx::query_scalar!(
         r#"SELECT COALESCE(
                (SELECT default_storage FROM organization WHERE pk = $1),
@@ -150,21 +184,24 @@ pub async fn create(
 
     Ok(api::Library {
         id: library.uuid,
+        organization: organization_uuid,
         name: name.to_owned(),
         root,
     })
 }
 
-/// The libraries the user is a member of.
-pub async fn list(pool: &PgPool, user: i64) -> sqlx::Result<Vec<api::Library>> {
+/// The libraries the account is a member of, in every organization it has
+/// joined, within the credential's scope.
+pub async fn list(pool: &PgPool, who: &Credential) -> sqlx::Result<Vec<api::Library>> {
     sqlx::query_as!(
         api::Library,
-        r#"SELECT l.uuid AS id, l.name, n.uuid AS root
-           FROM library l
-           JOIN library_member m ON m.library = l.pk AND m."user" = $1
+        r#"SELECT l.uuid AS id, o.uuid AS organization, l.name, n.uuid AS root
+           FROM library_access($1) a
+           JOIN library l ON l.pk = a.library
+           JOIN organization o ON o.pk = l.owner
            JOIN node n ON n.library = l.pk AND n.parent IS NULL
-           ORDER BY lower(l.name)"#,
-        user
+           ORDER BY lower(o.name), lower(l.name)"#,
+        who.token
     )
     .fetch_all(pool)
     .await

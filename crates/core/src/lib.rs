@@ -4,12 +4,15 @@
 //! enterprise edition) can embed the server.
 
 pub mod api;
+pub mod auth;
 pub mod config;
 pub mod db;
 mod error;
-pub mod jwt;
+pub mod keys;
+pub mod oidc;
 pub mod settings;
 pub mod storage;
+pub mod totp;
 
 use std::sync::Arc;
 
@@ -17,7 +20,7 @@ pub use error::Error;
 
 use crate::api::AppState;
 use crate::config::Config;
-use crate::jwt::JwtKey;
+use crate::keys::{DataCipher, SecretKey};
 use crate::settings::Settings;
 
 /// Installs `ring` as the TLS crypto provider (S3, and later OIDC). Call once
@@ -30,8 +33,11 @@ pub fn install_crypto_provider() {
 /// Starts the server and returns when it stops (SIGTERM or Ctrl-C).
 pub async fn run() -> Result<(), Error> {
     let config = Config::from_env()?;
-    let jwt_key = JwtKey::load_or_generate(&config.jwt_key_file)?;
-    let signer = storage::UrlSigner::new(jwt_key.derive("theca blob url v1"), &config.public_url);
+    let server_key = SecretKey::load_or_generate("SERVER_KEY__FILE", &config.server_key_file)?;
+    let data_key = SecretKey::load_or_generate("DATA_KEY__FILE", &config.data_key_file)?;
+    let cipher = DataCipher::new(&data_key.derive("theca data v1"));
+    let signer =
+        storage::UrlSigner::new(server_key.derive("theca blob url v1"), &config.public_url);
     let pool = db::connect(&config.database_url).await?;
     let settings = Arc::new(Settings::load(&pool).await?);
 
@@ -45,6 +51,7 @@ pub async fn run() -> Result<(), Error> {
         settings,
         signer,
         backends,
+        cipher,
     });
     // Connect info: the client's IP, logged with anomalies.
     axum::serve(

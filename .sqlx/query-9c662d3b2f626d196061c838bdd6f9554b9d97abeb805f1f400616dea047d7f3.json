@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT c.pk, c.uuid, c.storage, c.plain_size, c.stored_size, c.compression, c.stored_sha256\n           FROM chunk c\n           JOIN library_member m ON m.library = c.library AND m.\"user\" = $1 AND m.role = 'write'\n           WHERE c.uuid = ANY($2) AND c.uploaded_at IS NULL AND c.deleting_at IS NULL\n           FOR UPDATE OF c",
+  "query": "SELECT c.pk, c.uuid, c.storage, c.organization, c.plain_size, c.stored_size, c.compression,\n                  c.stored_sha256, a.\"user\" AS \"user!\"\n           FROM chunk c\n           JOIN library_access($1) a ON a.library = c.library AND a.can_write\n           WHERE c.uuid = ANY($2) AND c.uploaded_at IS NULL AND c.deleting_at IS NULL\n           FOR UPDATE OF c",
   "describe": {
     "columns": [
       {
@@ -20,23 +20,33 @@
       },
       {
         "ordinal": 3,
-        "name": "plain_size",
+        "name": "organization",
         "type_info": "Int8"
       },
       {
         "ordinal": 4,
-        "name": "stored_size",
+        "name": "plain_size",
         "type_info": "Int8"
       },
       {
         "ordinal": 5,
+        "name": "stored_size",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
         "name": "compression",
         "type_info": "Text"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "stored_sha256",
         "type_info": "Bytea"
+      },
+      {
+        "ordinal": 8,
+        "name": "user!",
+        "type_info": "Int8"
       }
     ],
     "parameters": {
@@ -50,10 +60,12 @@
       false,
       false,
       false,
+      false,
       true,
       true,
-      true
+      true,
+      null
     ]
   },
-  "hash": "016b55e096a7282e4677ba96a59dffe24c1a0c50e6c865497b02857b12770032"
+  "hash": "9c662d3b2f626d196061c838bdd6f9554b9d97abeb805f1f400616dea047d7f3"
 }

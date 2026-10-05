@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE token SET revoked_at = now(), revocation_reason = $2\n         WHERE resource = $1 AND usage = 'recovery_code' AND revoked_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b88d084c0d2b22e116e3671b34d6057bdf662803b518e79c140ca28f823e5723"
+}

@@ -10,6 +10,7 @@ name = "theca-server"
 path = "src/main.rs"
 
 [dependencies]
+argon2.workspace = true
 axum.workspace = true
 dotenvy.workspace = true
 getrandom.workspace = true
@@ -30,8 +31,16 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 utoipa.workspace = true
 uuid.workspace = true
+totp-rs.workspace = true
+chacha20poly1305.workspace = true
+openidconnect.workspace = true
 
 [dev-dependencies]
+# Computes TOTP codes like an authenticator app.
+totp-rs.workspace = true
+# Sign the fake OIDC provider's ID tokens (HS256).
+hmac.workspace = true
+sha2.workspace = true
 # v7: random test IDs (native only; WASM would need a randomness source).
 uuid = { workspace = true, features = ["v7"] }
 tracing-subscriber.workspace = true

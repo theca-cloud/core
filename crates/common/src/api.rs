@@ -27,6 +27,8 @@ pub struct ApiError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateLibrary {
+    /// The organization that will own it (the account must be a member).
+    pub organization: Uuid,
     /// The library name (same rules as file names).
     #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub name: Name,
@@ -42,6 +44,8 @@ pub struct CreateLibrary {
 pub struct Library {
     /// The library.
     pub id: Uuid,
+    /// The organization owning it.
+    pub organization: Uuid,
     /// Its name.
     pub name: String,
     /// Its root folder.
@@ -211,4 +215,173 @@ pub struct Download {
     pub version: Uuid,
     /// Its chunks, in order.
     pub chunks: Vec<DownloadChunk>,
+}
+
+/// `POST /auth/login`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Login {
+    /// The account's email.
+    pub email: String,
+    /// Its password.
+    pub password: String,
+    /// The current TOTP code (or a recovery code), if TOTP is on. Without it,
+    /// a right password gets `totp_required`: ask for the code, send again.
+    #[serde(default)]
+    pub totp: Option<String>,
+}
+
+/// The logged-in account and its organizations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Me {
+    /// The account.
+    pub account: Uuid,
+    /// Its email.
+    pub email: String,
+    /// Whether logging in with the password also asks for a TOTP code.
+    pub totp: bool,
+    /// Its memberships.
+    pub organizations: Vec<Membership>,
+}
+
+/// An account's membership in an organization.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Membership {
+    /// The organization.
+    pub organization: Uuid,
+    /// Its name.
+    pub name: String,
+    /// False while it's an invitation not accepted yet.
+    pub joined: bool,
+}
+
+/// A live session of the account.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Session {
+    /// The session.
+    pub id: Uuid,
+    /// Its name (from the user agent).
+    pub name: String,
+    /// The browser or client that opened it.
+    pub user_agent: Option<String>,
+    /// The address it was opened from.
+    pub ip: Option<String>,
+    /// When it was opened.
+    pub created_at: String,
+    /// When it was last used.
+    pub last_seen: Option<String>,
+    /// The organization it is restricted to, if opened through an organization's identity provider.
+    pub restricted_to: Option<Uuid>,
+    /// This session.
+    pub current: bool,
+}
+
+/// Create an app password (CLI, API clients, WebDAV): data access only.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CreateAppPassword {
+    /// Shown in lists, e.g. "laptop CLI" (1 to 200 characters).
+    pub name: String,
+    /// Limit it to one organization (none: the whole account; a restricted
+    /// session: always its own organization).
+    #[serde(default)]
+    pub organization: Option<Uuid>,
+    /// Limit it to one library (its organization implied).
+    #[serde(default)]
+    pub library: Option<Uuid>,
+    /// Read only, whatever the account's role in the libraries.
+    #[serde(default)]
+    pub read_only: bool,
+}
+
+/// An app password (never the secret itself, except once at creation).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AppPassword {
+    /// The app password.
+    pub id: Uuid,
+    /// Its name.
+    pub name: String,
+    /// The organization it's limited to, if any.
+    pub organization: Option<Uuid>,
+    /// The library it's limited to, if any.
+    pub library: Option<Uuid>,
+    /// Read only.
+    pub read_only: bool,
+    /// When it was created.
+    pub created_at: String,
+    /// Last used (precise to a few minutes), if ever.
+    pub last_seen: Option<String>,
+}
+
+/// A new app password: the secret is shown only this once.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NewAppPassword {
+    /// Send it as `Authorization: Bearer <password>` (or WebDAV Basic auth).
+    pub password: String,
+    /// What it is.
+    pub app_password: AppPassword,
+}
+
+/// A TOTP secret being set up (not required at login until confirmed).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TotpSetup {
+    /// The secret in base32, to type into an authenticator app.
+    pub secret: String,
+    /// The `otpauth://` URI, to show as a QR code.
+    pub uri: String,
+}
+
+/// A TOTP code (6 digits), or a recovery code where accepted.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TotpCode {
+    /// The code.
+    pub code: String,
+}
+
+/// One-time recovery codes, each usable once instead of a TOTP code. Shown
+/// only now: the server only keeps their hashes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RecoveryCodes {
+    /// The codes.
+    pub codes: Vec<String>,
+}
+
+/// An OIDC provider users can log in with.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct IdentityProvider {
+    /// The provider: log in at `/api/v1/auth/oidc/{id}/start`.
+    pub id: Uuid,
+    /// Its name, e.g. "Google".
+    pub name: String,
+}
+
+/// One of the account's ways to log in.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Identity {
+    /// The identity.
+    pub id: Uuid,
+    /// `password` or `oidc`.
+    pub kind: String,
+    /// The OIDC provider.
+    pub provider: Option<Uuid>,
+    /// The OIDC provider's name.
+    pub provider_name: Option<String>,
+}
+
+/// Where to send the browser to continue with an OIDC provider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct OidcRedirect {
+    /// The provider's authorization URL.
+    pub url: String,
 }

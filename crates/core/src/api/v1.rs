@@ -12,7 +12,7 @@ use theca_common::chunking::MAX_SIZE;
 use uuid::Uuid;
 
 use super::AppState;
-use super::auth::{ClientIp, CurrentUser};
+use super::auth::{ClientIp, CurrentAccount};
 use super::error::{ApiJson, HttpError};
 use crate::db;
 use crate::db::library::Access;
@@ -40,10 +40,10 @@ pub fn router() -> Router<AppState> {
 
 async fn library_access(
     state: &AppState,
-    user: &CurrentUser,
+    user: &CurrentAccount,
     library: Uuid,
 ) -> Result<Access, HttpError> {
-    db::library::access(&state.pool, user.pk, library)
+    db::library::access(&state.pool, user, library)
         .await?
         .ok_or_else(|| HttpError::not_found("library"))
 }
@@ -69,20 +69,21 @@ async fn backend(state: &AppState, storage: i64) -> Result<Backend, HttpError> {
 ))]
 async fn create_library(
     State(state): State<AppState>,
-    user: CurrentUser,
+    user: CurrentAccount,
     ApiJson(req): ApiJson<api::CreateLibrary>,
 ) -> Result<(StatusCode, Json<api::Library>), HttpError> {
     use db::library::CreateError;
     let mut tx = state.pool.begin().await?;
     let library = db::library::create(
         &mut tx,
-        user.organization,
-        user.pk,
+        &user,
+        req.organization,
         req.name.as_str(),
         &req.namespaces,
     )
     .await
     .map_err(|e| match e {
+        CreateError::NotMember => HttpError::not_found("organization"),
         CreateError::NoStorage => {
             HttpError::conflict("no_storage", "no default storage configured")
         }
@@ -97,9 +98,9 @@ async fn create_library(
 #[utoipa::path(get, path = "/api/v1/libraries", responses((status = 200, body = Vec<api::Library>)))]
 async fn list_libraries(
     State(state): State<AppState>,
-    user: CurrentUser,
+    user: CurrentAccount,
 ) -> Result<Json<Vec<api::Library>>, HttpError> {
-    Ok(Json(db::library::list(&state.pool, user.pk).await?))
+    Ok(Json(db::library::list(&state.pool, &user).await?))
 }
 
 /// A folder's children.
@@ -109,10 +110,10 @@ async fn list_libraries(
 ))]
 async fn children(
     State(state): State<AppState>,
-    user: CurrentUser,
+    user: CurrentAccount,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<api::Node>>, HttpError> {
-    let node = db::library::node_access(&state.pool, user.pk, id)
+    let node = db::library::node_access(&state.pool, &user, id)
         .await?
         .filter(|n| !n.is_file)
         .ok_or_else(|| HttpError::not_found("folder"))?;
@@ -126,7 +127,7 @@ async fn children(
 ))]
 async fn lookup(
     State(state): State<AppState>,
-    user: CurrentUser,
+    user: CurrentAccount,
     ApiJson(req): ApiJson<api::Lookup>,
 ) -> Result<Json<Vec<api::LookupEntry>>, HttpError> {
     let access = library_access(&state, &user, req.library).await?;
@@ -147,24 +148,24 @@ async fn lookup(
 ))]
 async fn upload_urls(
     State(state): State<AppState>,
-    user: CurrentUser,
+    user: CurrentAccount,
     ApiJson(req): ApiJson<Vec<api::Declare>>,
 ) -> Result<Json<Vec<api::ChunkUrl>>, HttpError> {
     use db::chunk::DeclareError;
     let lifetime = state.settings.presigned_url_lifetime;
     let max_uploads = state.settings.max_pending_uploads;
-    let declared = db::chunk::declare(&state.pool, user.pk, user.organization, &req, lifetime, max_uploads)
+    let declared = db::chunk::declare(&state.pool, &user, &req, lifetime, max_uploads)
         .await
         .map_err(|e| match e {
             DeclareError::NotAllowed(chunks) => {
-                tracing::warn!(anomaly = "upload_url_not_allowed", user = %user.uuid, ?chunks,
+                tracing::warn!(anomaly = "upload_url_not_allowed", account = %user.account_uuid, ?chunks,
                     "upload URL requested for chunks not pending or not writable");
                 HttpError::forbidden("chunks not pending, or not in a library you can write")
                     .into_code("chunk_not_allowed")
                     .with_chunks(chunks)
             }
             DeclareError::Mismatch(chunks) => {
-                tracing::warn!(anomaly = "declaration_mismatch", user = %user.uuid, ?chunks,
+                tracing::warn!(anomaly = "declaration_mismatch", account = %user.account_uuid, ?chunks,
                     "chunk declared again with another size, compression or checksum");
                 HttpError::conflict(
                     "declaration_mismatch",
@@ -173,7 +174,7 @@ async fn upload_urls(
                 .with_chunks(chunks)
             }
             DeclareError::Invalid(chunks) => {
-                tracing::warn!(anomaly = "invalid_declaration", user = %user.uuid, ?chunks,
+                tracing::warn!(anomaly = "invalid_declaration", account = %user.account_uuid, ?chunks,
                     "stored size above plain size, or unknown compression");
                 HttpError::bad_request(
                     "invalid_declaration",
@@ -191,6 +192,10 @@ async fn upload_urls(
                 format!(
                     "the organization's quota ({quota} bytes) would be exceeded ({needed} bytes)"
                 ),
+            ),
+            DeclareError::MixedOrganizations => HttpError::bad_request(
+                "mixed_organizations",
+                "one request declares chunks of a single organization",
             ),
             DeclareError::Db(e) => e.into(),
         })?;
@@ -218,10 +223,10 @@ async fn upload_urls(
 ))]
 async fn announce(
     State(state): State<AppState>,
-    user: CurrentUser,
+    user: CurrentAccount,
     ApiJson(req): ApiJson<api::Chunks>,
 ) -> Result<Json<api::Chunks>, HttpError> {
-    let allowed = db::chunk::announceable(&state.pool, user.pk, &req.chunks).await?;
+    let allowed = db::chunk::announceable(&state.pool, &user, &req.chunks).await?;
     let refused: Vec<Uuid> = req
         .chunks
         .iter()
@@ -229,7 +234,7 @@ async fn announce(
         .copied()
         .collect();
     if !refused.is_empty() {
-        tracing::warn!(anomaly = "announce_not_allowed", user = %user.uuid, chunks = ?refused,
+        tracing::warn!(anomaly = "announce_not_allowed", account = %user.account_uuid, chunks = ?refused,
             "announce of chunks not pending, not declared, or not writable");
         return Err(
             HttpError::forbidden("chunks not pending, not declared, or not writable")
@@ -246,12 +251,12 @@ async fn announce(
             Some(size) => {
                 // The signed checksum should make this impossible: a backend
                 // ignoring it, or an attempt. The chunk stays pending.
-                tracing::warn!(anomaly = "announce_size_mismatch", user = %user.uuid, %chunk, declared, size,
+                tracing::warn!(anomaly = "announce_size_mismatch", account = %user.account_uuid, %chunk, declared, size,
                     "uploaded object doesn't have the declared size");
                 missing.push(chunk);
             }
             None => {
-                tracing::warn!(anomaly = "announce_missing_object", user = %user.uuid, %chunk,
+                tracing::warn!(anomaly = "announce_missing_object", account = %user.account_uuid, %chunk,
                     "announced chunk has no object");
                 missing.push(chunk);
             }
@@ -265,10 +270,10 @@ async fn announce(
 #[utoipa::path(post, path = "/api/v1/chunks/cancel", request_body = api::Chunks, responses((status = 204)))]
 async fn cancel(
     State(state): State<AppState>,
-    user: CurrentUser,
+    user: CurrentAccount,
     ApiJson(req): ApiJson<api::Chunks>,
 ) -> Result<StatusCode, HttpError> {
-    db::chunk::cancel(&state.pool, user.pk, &req.chunks).await?;
+    db::chunk::cancel(&state.pool, &user, &req.chunks).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -280,7 +285,7 @@ async fn cancel(
 ))]
 async fn commit(
     State(state): State<AppState>,
-    user: CurrentUser,
+    user: CurrentAccount,
     ApiJson(req): ApiJson<api::Commit>,
 ) -> Result<Json<api::Committed>, HttpError> {
     use db::file::{CommitError, Target};
@@ -316,7 +321,7 @@ async fn commit(
         CommitError::ParentNotFound => HttpError::not_found("folder"),
         CommitError::BaseNotFound => HttpError::not_found("base version"),
         CommitError::ChunksNotAllowed(chunks) => {
-            tracing::warn!(anomaly = "commit_chunk_not_allowed", user = %user.uuid, library = %req.library,
+            tracing::warn!(anomaly = "commit_chunk_not_allowed", account = %user.account_uuid, library = %req.library,
                 ?chunks, "commit with chunks outside the library's dedup scope");
             HttpError::forbidden("chunks outside this library's dedup scope")
                 .with_chunks(chunks)
@@ -339,10 +344,10 @@ async fn commit(
 ))]
 async fn download(
     State(state): State<AppState>,
-    user: CurrentUser,
+    user: CurrentAccount,
     Path(id): Path<Uuid>,
 ) -> Result<Json<api::Download>, HttpError> {
-    let node = db::library::node_access(&state.pool, user.pk, id)
+    let node = db::library::node_access(&state.pool, &user, id)
         .await?
         .filter(|n| n.is_file)
         .ok_or_else(|| HttpError::not_found("file"))?;

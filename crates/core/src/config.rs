@@ -15,7 +15,8 @@ pub struct Config {
     pub database_url: String,
     pub listen_addr: SocketAddr,
     pub public_url: String,
-    pub jwt_key_file: PathBuf,
+    pub server_key_file: PathBuf,
+    pub data_key_file: PathBuf,
 }
 
 impl Config {
@@ -25,7 +26,8 @@ impl Config {
             database_url: secret("DATABASE_URL__FILE")?,
             listen_addr: listen_addr()?,
             public_url: required("PUBLIC_URL")?,
-            jwt_key_file: required("JWT_KEY__FILE")?.into(),
+            server_key_file: required("SERVER_KEY__FILE")?.into(),
+            data_key_file: required("DATA_KEY__FILE")?.into(),
         })
     }
 }

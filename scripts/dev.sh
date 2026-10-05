@@ -22,7 +22,8 @@ url="postgres://theca:$password@localhost:5432/theca"
 
 mkdir -p data/secrets data/garage
 printf '%s\n' "$url" > data/secrets/database_url
-[ -f data/secrets/jwt_key ] || : > data/secrets/jwt_key  # empty: the server generates the key
+[ -f data/secrets/server_key ] || : > data/secrets/server_key  # empty: the server generates the key
+[ -f data/secrets/data_key ] || : > data/secrets/data_key
 
 # Garage config, secrets generated once.
 if [ ! -f data/garage/garage.toml ]; then
@@ -54,7 +55,8 @@ POSTGRES_DB=theca
 # Read by sqlx's macros at compile time only; the server reads DATABASE_URL__FILE.
 DATABASE_URL=$url
 DATABASE_URL__FILE=data/secrets/database_url
-JWT_KEY__FILE=data/secrets/jwt_key
+SERVER_KEY__FILE=data/secrets/server_key
+DATA_KEY__FILE=data/secrets/data_key
 PUBLIC_URL=http://localhost:8080
 # S3 backend for tests (Garage).
 S3_TEST_HOST=http://localhost:3900

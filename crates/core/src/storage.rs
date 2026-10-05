@@ -251,6 +251,11 @@ impl UrlSigner {
         }
     }
 
+    /// The URL clients reach the server at, without a trailing `/`.
+    pub fn public_url(&self) -> &str {
+        &self.public_url
+    }
+
     /// A URL allowing `operation` on `chunk` for `lifetime`. Uploads also sign
     /// the SHA-256 of the only bytes they accept.
     pub fn url(

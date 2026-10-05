@@ -14,10 +14,10 @@ pub enum Error {
         path: PathBuf,
         source: io::Error,
     },
-    #[error("the JWT key file {0} is empty and not writable: {1}")]
-    JwtKeyNotWritable(PathBuf, io::Error),
-    #[error("invalid JWT key in {0}: expected 64 hex characters")]
-    InvalidJwtKey(PathBuf),
+    #[error("the key file {1} (from {0}) is empty and not writable: {2}")]
+    KeyNotWritable(&'static str, PathBuf, io::Error),
+    #[error("invalid key in {1} (from {0}): expected 64 hex characters")]
+    InvalidKey(&'static str, PathBuf),
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
     #[error("database migration failed: {0}")]

@@ -206,50 +206,172 @@ async fn account_email_unique_ignoring_case(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn leaving_an_organization_drops_its_identities(pool: PgPool) {
+    fixture(&pool).await;
+    // Account 2 (user 2, organization 1) logs in through organization 1's
+    // provider and an instance-wide one.
+    sqlx::raw_sql(
+        r#"INSERT INTO identity_provider (pk, organization, name, issuer, client_id, client_secret_file)
+               OVERRIDING SYSTEM VALUE VALUES (1, 1, 'one sso', 'https://one', 'c', '/s'),
+                                              (2, NULL, 'google', 'https://google', 'c', '/s');
+           INSERT INTO identity (account, kind, provider, details)
+               VALUES (2, 'oidc', 1, '{"subject": "s1"}'), (2, 'oidc', 2, '{"subject": "s2"}');"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(r#"DELETE FROM "user" WHERE pk = 2"#)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let providers: Vec<i64> =
+        sqlx::query_scalar("SELECT provider FROM identity WHERE account = 2 AND kind = 'oidc'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(providers, [2], "only the instance-wide identity is left");
+}
+
+#[sqlx::test]
 async fn identity_details(pool: PgPool) {
     fixture(&pool).await;
-    let insert = "INSERT INTO identity (account, kind, details) VALUES";
+    // Providers: instance-wide (1) and organization 1's (2); names unique per organization.
     assert_accepted(
         &pool,
-        &format!(r#"{insert} (1, 'password', '{{"hash": "h"}}')"#),
-    )
-    .await;
-    assert_accepted(
-        &pool,
-        &format!(r#"{insert} (1, 'oidc', '{{"issuer": "i", "subject": "s"}}')"#),
+        "INSERT INTO identity_provider (pk, organization, name, issuer, client_id, client_secret_file) \
+         OVERRIDING SYSTEM VALUE VALUES (1, NULL, 'SSO', 'https://i', 'c', '/s'), (2, 1, 'SSO', 'https://j', 'c', '/s')",
     )
     .await;
     assert_refused(
         &pool,
+        "identity_provider_name",
+        "INSERT INTO identity_provider (organization, name, issuer, client_id, client_secret_file) \
+         VALUES (NULL, 'sso', 'https://k', 'c', '/s')",
+    )
+    .await;
+
+    let insert = "INSERT INTO identity (account, kind, provider, details) VALUES";
+    assert_accepted(
+        &pool,
+        &format!(r#"{insert} (1, 'password', NULL, '{{"hash": "h"}}')"#),
+    )
+    .await;
+    assert_accepted(
+        &pool,
+        &format!(r#"{insert} (1, 'oidc', 1, '{{"subject": "s"}}')"#),
+    )
+    .await;
+    assert_accepted(
+        &pool,
+        &format!(
+            r#"{insert} (1, 'totp', NULL, '{{"secret": "x", "confirmed": false, "last_step": 0}}')"#
+        ),
+    )
+    .await;
+    assert_accepted(
+        &pool,
+        &format!(r#"{insert} (2, 'oidc', 2, '{{"subject": "s"}}')"#),
+    )
+    .await; // other provider
+    assert_refused(
+        &pool,
         "identity_password_details",
-        &format!("{insert} (2, 'password', '{{}}')"),
+        &format!("{insert} (2, 'password', NULL, '{{}}')"),
     )
     .await;
     assert_refused(
         &pool,
         "identity_oidc_details",
-        &format!(r#"{insert} (2, 'oidc', '{{"issuer": "i"}}')"#),
+        &format!("{insert} (2, 'oidc', 1, '{{}}')"),
+    )
+    .await;
+    assert_refused(
+        &pool,
+        "identity_totp_details",
+        &format!(r#"{insert} (2, 'totp', NULL, '{{"secret": "x", "last_step": 0}}')"#),
+    )
+    .await;
+    assert_refused(
+        &pool,
+        "identity_provider_oidc",
+        &format!(r#"{insert} (2, 'oidc', NULL, '{{"subject": "t"}}')"#),
+    )
+    .await;
+    assert_refused(
+        &pool,
+        "identity_provider_oidc",
+        &format!(r#"{insert} (2, 'password', 1, '{{"hash": "h"}}')"#),
     )
     .await;
     assert_refused(
         &pool,
         "identity_password",
-        &format!(r#"{insert} (1, 'password', '{{"hash": "other"}}')"#),
+        &format!(r#"{insert} (1, 'password', NULL, '{{"hash": "other"}}')"#),
+    )
+    .await;
+    assert_refused(
+        &pool,
+        "identity_totp",
+        &format!(
+            r#"{insert} (1, 'totp', NULL, '{{"secret": "y", "confirmed": false, "last_step": 0}}')"#
+        ),
     )
     .await;
     assert_refused(
         &pool,
         "identity_oidc",
-        &format!(r#"{insert} (2, 'oidc', '{{"issuer": "i", "subject": "s"}}')"#),
+        &format!(r#"{insert} (2, 'oidc', 1, '{{"subject": "s"}}')"#),
     )
     .await;
 }
 
 #[sqlx::test]
+async fn token_scopes(pool: PgPool) {
+    fixture(&pool).await;
+    let token = |prefix: &str, usage: &str, organization: &str, library: &str, read_only: bool| {
+        format!(
+            "INSERT INTO token (usage, resource, prefix, hash, name, organization, library, read_only) \
+             VALUES ('{usage}', uuidv7(), '{prefix}', decode(repeat('00', 32), 'hex'), 'x', \
+                     {organization}, {library}, {read_only})"
+        )
+    };
+    // Restricted session; app passwords scoped to an organization, a library, read-only.
+    assert_accepted(&pool, &token("s1", "session", "1", "NULL", false)).await;
+    assert_accepted(&pool, &token("a1", "app_password", "1", "NULL", true)).await;
+    assert_accepted(&pool, &token("a2", "app_password", "1", "1", false)).await;
+    let refusals = [
+        (
+            "token_organization_scope",
+            token("i1", "invitation", "1", "NULL", false),
+        ),
+        (
+            "token_library_scope",
+            token("s2", "session", "1", "1", false),
+        ),
+        (
+            "token_library_scope",
+            token("a3", "app_password", "NULL", "1", false),
+        ),
+        (
+            "token_read_only",
+            token("s3", "session", "NULL", "NULL", true),
+        ),
+        // Library 1 belongs to organization 1.
+        (
+            "token_library",
+            token("a4", "app_password", "2", "1", false),
+        ),
+    ];
+    for (constraint, sql) in refusals {
+        assert_refused(&pool, constraint, &sql).await;
+    }
+}
+
+#[sqlx::test]
 async fn token_revocation_has_a_reason(pool: PgPool) {
     fixture(&pool).await;
-    let insert = "INSERT INTO token (usage, resource, prefix, hash, revoked_at, revocation_reason) \
-                  VALUES ('session', uuidv7(), 'p1', '\\x0000000000000000000000000000000000000000000000000000000000000000'";
+    let insert = "INSERT INTO token (usage, resource, name, prefix, hash, revoked_at, revocation_reason) \
+                  VALUES ('session', uuidv7(), 'x', 'p1', '\\x0000000000000000000000000000000000000000000000000000000000000000'";
     assert_refused(
         &pool,
         "token_revocation_reason",
@@ -552,7 +674,7 @@ async fn closed_lists_and_formats(pool: PgPool) {
     fixture(&pool).await;
     let token = |usage: &str, prefix: &str, hash_bytes: usize| {
         format!(
-            "INSERT INTO token (usage, resource, prefix, hash) VALUES ('{usage}', uuidv7(), '{prefix}', '\\x{}')",
+            "INSERT INTO token (usage, resource, name, prefix, hash) VALUES ('{usage}', uuidv7(), 'x', '{prefix}', '\\x{}')",
             "00".repeat(hash_bytes)
         )
     };

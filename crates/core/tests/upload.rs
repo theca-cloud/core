@@ -41,6 +41,7 @@ struct World {
     app: Router,
     pool: PgPool,
     users: [Uuid; 3],
+    organizations: [Uuid; 2],
     _dirs: Vec<tempfile::TempDir>,
 }
 
@@ -73,12 +74,15 @@ fn storage_details(kind: Kind) -> (&'static str, Value, Option<tempfile::TempDir
 
 async fn world(kind: Kind, pool: PgPool) -> World {
     theca_core::install_crypto_provider();
+    let hash = password_hash();
     let (implementation, first, dir1) = storage_details(kind);
     let (_, second, dir2) = storage_details(kind);
     sqlx::raw_sql(&format!(
         r#"
         BEGIN;
         INSERT INTO account (pk, email) OVERRIDING SYSTEM VALUE VALUES (1, 'a@x.ch'), (2, 'b@x.ch'), (3, 'c@x.ch');
+        INSERT INTO identity (account, kind, details)
+            SELECT pk, 'password', jsonb_build_object('hash', '{hash}') FROM account;
         INSERT INTO organization (pk, name, owner) OVERRIDING SYSTEM VALUE VALUES (1, 'one', 1), (2, 'two', 3);
         INSERT INTO "user" (pk, account, organization, joined_at) OVERRIDING SYSTEM VALUE
             VALUES (1, 1, 1, now()), (2, 2, 1, now()), (3, 3, 2, now());
@@ -94,10 +98,15 @@ async fn world(kind: Kind, pool: PgPool) -> World {
         .fetch_all(&pool)
         .await
         .unwrap();
+    let organizations: Vec<Uuid> = sqlx::query_scalar("SELECT uuid FROM organization ORDER BY pk")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
     World {
         app: app(&pool).await,
         pool,
         users: [users[0], users[1], users[2]],
+        organizations: [organizations[0], organizations[1]],
         _dirs: dir1.into_iter().chain(dir2).collect(),
     }
 }
@@ -109,14 +118,49 @@ async fn app(pool: &PgPool) -> Router {
         settings,
         signer: UrlSigner::new([9; 32], PUBLIC_URL),
         backends: Backends::new(pool.clone()),
+        cipher: theca_core::keys::DataCipher::new(&[7; 32]),
     })
 }
 
+/// Every test account's password, hashed once (Argon2 is deliberately slow).
+const PASSWORD: &str = "correct horse battery staple";
+
+fn password_hash() -> &'static str {
+    static HASH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    HASH.get_or_init(|| theca_core::auth::hash_password(PASSWORD))
+}
+
 impl World {
-    fn as_user(&self, n: usize) -> Client {
+    /// Logs in as account `n` (1: a@x.ch in organization one, 2: b@x.ch in
+    /// organization one, 3: c@x.ch in organization two).
+    async fn as_user(&self, n: usize) -> Client {
+        self.as_user_on(self.app.clone(), n).await
+    }
+
+    async fn as_user_on(&self, app: Router, n: usize) -> Client {
+        let email = ["a@x.ch", "b@x.ch", "c@x.ch"][n - 1];
+        let request = Request::post("/api/v1/auth/login")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({ "email": email, "password": PASSWORD }).to_string(),
+            ))
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "login");
+        let cookies: Vec<String> = response
+            .headers()
+            .get_all("set-cookie")
+            .iter()
+            .map(|v| v.to_str().unwrap().split(';').next().unwrap().to_owned())
+            .collect();
+        let me: api::Me =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
         Client {
-            app: self.app.clone(),
-            user: self.users[n - 1],
+            app,
+            account: me.account,
+            org: self.organizations[if n == 3 { 1 } else { 0 }],
+            cookies: cookies.join("; "),
             puts: 0,
         }
     }
@@ -172,10 +216,13 @@ impl World {
     }
 }
 
-/// A test client acting as one user. Counts uploads (`puts`).
+/// A test client logged in as one account (session cookies). Counts uploads (`puts`).
 struct Client {
     app: Router,
-    user: Uuid,
+    account: Uuid,
+    /// The organization its libraries are created in.
+    org: Uuid,
+    cookies: String,
     puts: usize,
 }
 
@@ -200,7 +247,7 @@ impl Client {
             .uri(path)
             .header("content-type", "application/json");
         if auth {
-            request = request.header("x-theca-user", self.user.to_string());
+            request = request.header("cookie", &self.cookies);
         }
         let response = self
             .app
@@ -311,9 +358,13 @@ impl Client {
     }
 
     async fn create_library(&self, name: &str) -> api::Library {
-        self.json("POST", "/api/v1/libraries", &json!({ "name": name }))
-            .await
-            .unwrap()
+        self.json(
+            "POST",
+            "/api/v1/libraries",
+            &json!({ "name": name, "organization": self.org }),
+        )
+        .await
+        .unwrap()
     }
 
     async fn lookup(
@@ -592,7 +643,7 @@ on_both_backends!(
 
 async fn upload_then_download_identical(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let mut alice = w.as_user(1);
+    let mut alice = w.as_user(1).await;
     let lib = alice.create_library("photos").await;
     let content = data(6 * MIB, 1);
     let committed = alice
@@ -612,7 +663,7 @@ async fn upload_then_download_identical(kind: Kind, pool: PgPool) {
 
 async fn reupload_uploads_nothing(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let mut alice = w.as_user(1);
+    let mut alice = w.as_user(1).await;
     let lib = alice.create_library("photos").await;
     let content = data(4 * MIB, 2);
     alice
@@ -629,7 +680,7 @@ async fn reupload_uploads_nothing(kind: Kind, pool: PgPool) {
 
 async fn edit_uploads_only_new_chunks(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let mut alice = w.as_user(1);
+    let mut alice = w.as_user(1).await;
     let lib = alice.create_library("docs").await;
     let mut content = data(8 * MIB, 3);
     let v1 = alice
@@ -666,7 +717,7 @@ async fn edit_uploads_only_new_chunks(kind: Kind, pool: PgPool) {
 
 async fn concurrent_edits_conflict(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let mut alice = w.as_user(1);
+    let mut alice = w.as_user(1).await;
     let lib = alice.create_library("docs").await;
     let v1 = alice
         .upload(&lib, new_file(&lib, "doc.bin"), &data(MIB, 4))
@@ -692,7 +743,7 @@ async fn concurrent_edits_conflict(kind: Kind, pool: PgPool) {
 
 async fn empty_file(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let mut alice = w.as_user(1);
+    let mut alice = w.as_user(1).await;
     let lib = alice.create_library("misc").await;
     let committed = alice
         .upload(&lib, new_file(&lib, "empty.txt"), &[])
@@ -709,7 +760,7 @@ async fn empty_file(kind: Kind, pool: PgPool) {
 /// The upload URL only accepts exactly the declared bytes.
 async fn other_bytes_are_refused(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let alice = w.as_user(1);
+    let alice = w.as_user(1).await;
     let lib = alice.create_library("misc").await;
     let (prepared, url) = alice.pending(lib.id, &data(1000, 7)).await;
 
@@ -764,7 +815,7 @@ async fn other_bytes_are_refused(kind: Kind, pool: PgPool) {
 /// The declaration is fixed: no URL can ever carry other bytes for a chunk.
 async fn declarations_are_fixed(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let alice = w.as_user(1);
+    let alice = w.as_user(1).await;
     let lib = alice.create_library("misc").await;
     let anomalies = Anomalies::capture();
     let (prepared, url) = alice.pending(lib.id, &data(1000, 9)).await;
@@ -780,7 +831,7 @@ async fn declarations_are_fixed(kind: Kind, pool: PgPool) {
         (status, error["code"].as_str()),
         (StatusCode::CONFLICT, Some("declaration_mismatch"))
     );
-    assert!(anomalies.logged("declaration_mismatch", alice.user));
+    assert!(anomalies.logged("declaration_mismatch", alice.account));
 
     // Upload, announce, then try to overwrite with other bytes through a still valid URL.
     assert!(
@@ -807,12 +858,12 @@ async fn declarations_are_fixed(kind: Kind, pool: PgPool) {
         alice.upload_urls(&[prepared.declare]).await.unwrap_err().0,
         StatusCode::FORBIDDEN
     );
-    assert!(anomalies.logged("upload_url_not_allowed", alice.user));
+    assert!(anomalies.logged("upload_url_not_allowed", alice.account));
 }
 
 async fn announce_checks_the_object(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let alice = w.as_user(1);
+    let alice = w.as_user(1).await;
     let lib = alice.create_library("misc").await;
     let anomalies = Anomalies::capture();
     let (prepared, url) = alice.pending(lib.id, &data(500, 11)).await;
@@ -841,7 +892,7 @@ async fn announce_checks_the_object(kind: Kind, pool: PgPool) {
 
 async fn sizes_are_bounded(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let alice = w.as_user(1);
+    let alice = w.as_user(1).await;
     let lib = alice.create_library("misc").await;
     let (status, error) = alice
         .lookup(lib.id, &[(ChunkHash::of(b"huge"), 8 * MIB + 1)])
@@ -864,7 +915,7 @@ async fn sizes_are_bounded(kind: Kind, pool: PgPool) {
 
 async fn cancel_tombstones(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let mut alice = w.as_user(1);
+    let mut alice = w.as_user(1).await;
     let lib = alice.create_library("misc").await;
     let committed = alice
         .upload(&lib, new_file(&lib, "kept.bin"), &data(MIB, 12))
@@ -904,7 +955,7 @@ async fn cancel_tombstones(kind: Kind, pool: PgPool) {
 
 async fn quota(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let mut alice = w.as_user(1);
+    let mut alice = w.as_user(1).await;
     let lib = alice.create_library("misc").await;
     w.sql("UPDATE organization SET quota = 3000 WHERE pk = 1")
         .await;
@@ -937,7 +988,7 @@ async fn quota(kind: Kind, pool: PgPool) {
     w.sql("UPDATE organization SET quota = NULL WHERE pk = 1")
         .await;
     assert!(alice.upload_urls(&[tiny.declare]).await.is_ok());
-    let mut carol = w.as_user(3);
+    let mut carol = w.as_user(3).await;
     let c = carol.create_library("c").await;
     carol
         .upload(&c, new_file(&c, "big.bin"), &data(5000, 17))
@@ -949,11 +1000,7 @@ async fn url_lifetime_setting(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
     w.sql("INSERT INTO setting (key, value) VALUES ('presigned_url_lifetime_secs', '120')")
         .await;
-    let alice = Client {
-        app: app(&w.pool).await,
-        user: w.users[0],
-        puts: 0,
-    };
+    let alice = w.as_user_on(app(&w.pool).await, 1).await;
     let lib = alice.create_library("misc").await;
     let (prepared, _) = alice.pending(lib.id, b"lifetime").await;
     // url_expires_at = now + lifetime (120 s) + margin (60 s).
@@ -968,7 +1015,7 @@ async fn url_lifetime_setting(kind: Kind, pool: PgPool) {
 
 async fn presigned_urls_cannot_be_tampered_with(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let alice = w.as_user(1);
+    let alice = w.as_user(1).await;
     let lib = alice.create_library("misc").await;
     let anomalies = Anomalies::capture();
     let (prepared, url) = alice.pending(lib.id, b"tamper").await;
@@ -994,7 +1041,7 @@ async fn presigned_urls_cannot_be_tampered_with(kind: Kind, pool: PgPool) {
 
 async fn namespaces_decide_who_dedups_with_whom(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let mut alice = w.as_user(1);
+    let mut alice = w.as_user(1).await;
     let a = alice.create_library("a").await;
     let b = alice.create_library("b").await;
     let outside = alice.create_library("outside").await;
@@ -1050,7 +1097,7 @@ async fn namespaces_decide_who_dedups_with_whom(kind: Kind, pool: PgPool) {
 
 async fn pending_chunks_only_match_within_their_library(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let alice = w.as_user(1);
+    let alice = w.as_user(1).await;
     let a = alice.create_library("a").await;
     let b = alice.create_library("b").await;
     w.namespace(&[a.id, b.id]).await;
@@ -1066,7 +1113,7 @@ async fn pending_chunks_only_match_within_their_library(kind: Kind, pool: PgPool
 
 async fn dedup_never_crosses_storages_or_organizations(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let mut alice = w.as_user(1);
+    let mut alice = w.as_user(1).await;
     let a = alice.create_library("a").await;
     let b = alice.create_library("b").await;
     w.namespace(&[a.id, b.id]).await;
@@ -1087,7 +1134,7 @@ async fn dedup_never_crosses_storages_or_organizations(kind: Kind, pool: PgPool)
         .unwrap();
     assert!(alice.puts > before, "no dedup across storages");
 
-    let mut carol = w.as_user(3);
+    let mut carol = w.as_user(3).await;
     let c = carol.create_library("c").await;
     carol
         .upload(&c, new_file(&c, "f.bin"), &content)
@@ -1100,7 +1147,7 @@ async fn dedup_never_crosses_storages_or_organizations(kind: Kind, pool: PgPool)
 
 async fn members_only(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let mut alice = w.as_user(1);
+    let mut alice = w.as_user(1).await;
     let lib = alice.create_library("private").await;
     let file = alice
         .upload(&lib, new_file(&lib, "f.bin"), &data(MIB, 21))
@@ -1108,7 +1155,7 @@ async fn members_only(kind: Kind, pool: PgPool) {
         .unwrap()
         .file;
 
-    let mut bob = w.as_user(2);
+    let mut bob = w.as_user(2).await;
     assert!(
         bob.get::<Vec<api::Library>>("/api/v1/libraries")
             .await
@@ -1157,7 +1204,7 @@ async fn members_only(kind: Kind, pool: PgPool) {
 
 async fn commit_refuses_chunks_outside_the_dedup_scope(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let mut alice = w.as_user(1);
+    let mut alice = w.as_user(1).await;
     let secret = alice.create_library("secret").await;
     let other = alice.create_library("other").await;
     let anomalies = Anomalies::capture();
@@ -1177,12 +1224,12 @@ async fn commit_refuses_chunks_outside_the_dedup_scope(kind: Kind, pool: PgPool)
         (status, error["code"].as_str()),
         (StatusCode::FORBIDDEN, Some("chunk_not_allowed"))
     );
-    assert!(anomalies.logged("commit_chunk_not_allowed", alice.user));
+    assert!(anomalies.logged("commit_chunk_not_allowed", alice.account));
 }
 
 async fn commit_errors(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let mut alice = w.as_user(1);
+    let mut alice = w.as_user(1).await;
     let lib = alice.create_library("misc").await;
     alice
         .upload(&lib, new_file(&lib, "taken.txt"), b"a")
@@ -1219,7 +1266,7 @@ async fn commit_errors(kind: Kind, pool: PgPool) {
         (StatusCode::CONFLICT, Some("chunk_missing"))
     );
 
-    let taken = json!({ "name": "MISC" });
+    let taken = json!({ "name": "MISC", "organization": alice.org });
     let (status, error) = alice
         .json::<api::Library>("POST", "/api/v1/libraries", &taken)
         .await
@@ -1228,7 +1275,7 @@ async fn commit_errors(kind: Kind, pool: PgPool) {
         (status, error["code"].as_str()),
         (StatusCode::CONFLICT, Some("library_name_taken"))
     );
-    let invalid = json!({ "name": "a/b" });
+    let invalid = json!({ "name": "a/b", "organization": alice.org });
     let (status, _) = alice
         .json::<api::Library>("POST", "/api/v1/libraries", &invalid)
         .await
@@ -1251,7 +1298,7 @@ async fn billed(w: &World) -> i64 {
 /// A URL signed for chunk A can't write chunk B's key.
 async fn attack_url_for_another_chunk(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let alice = w.as_user(1);
+    let alice = w.as_user(1).await;
     let lib = alice.create_library("misc").await;
     let (a, url_a) = alice.pending(lib.id, &data(300, 30)).await;
     let (b, _) = alice.pending(lib.id, &data(300, 31)).await;
@@ -1272,7 +1319,7 @@ async fn attack_url_for_another_chunk(kind: Kind, pool: PgPool) {
 /// The PUT signature doesn't allow another method (e.g. starting a multipart upload).
 async fn attack_other_methods(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let alice = w.as_user(1);
+    let alice = w.as_user(1).await;
     let lib = alice.create_library("misc").await;
     let (prepared, url) = alice.pending(lib.id, &data(300, 32)).await;
     let headers: Vec<(&str, &str)> = url
@@ -1305,7 +1352,7 @@ async fn attack_other_methods(kind: Kind, pool: PgPool) {
 /// until the GC deletes the object (once the URL has expired) and then the row.
 async fn attack_upload_after_cancel_is_billed(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let alice = w.as_user(1);
+    let alice = w.as_user(1).await;
     let lib = alice.create_library("misc").await;
     let (prepared, url) = alice.pending(lib.id, &data(700, 33)).await;
     let before = billed(&w).await;
@@ -1319,7 +1366,7 @@ async fn attack_upload_after_cancel_is_billed(kind: Kind, pool: PgPool) {
 /// Two declarations racing for the last bytes of the quota: exactly one wins.
 async fn attack_concurrent_declarations(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let alice = w.as_user(1);
+    let alice = w.as_user(1).await;
     let lib = alice.create_library("misc").await;
     w.sql("UPDATE organization SET quota = 3000 WHERE pk = 1")
         .await;
@@ -1338,7 +1385,7 @@ async fn attack_concurrent_declarations(kind: Kind, pool: PgPool) {
 /// Unsigned headers (metadata, tagging, storage class) can't inflate an object.
 async fn attack_unsigned_headers(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
-    let alice = w.as_user(1);
+    let alice = w.as_user(1).await;
     let lib = alice.create_library("misc").await;
     let (prepared, url) = alice.pending(lib.id, &data(400, 36)).await;
     let junk = "x".repeat(1500);
@@ -1373,16 +1420,8 @@ async fn attack_pending_upload_cap(kind: Kind, pool: PgPool) {
     w.sql("INSERT INTO setting (key, value) VALUES ('max_pending_uploads', '3')")
         .await;
     let app = app(&w.pool).await;
-    let alice = Client {
-        app: app.clone(),
-        user: w.users[0],
-        puts: 0,
-    };
-    let bob = Client {
-        app,
-        user: w.users[1],
-        puts: 0,
-    };
+    let alice = w.as_user_on(app.clone(), 1).await;
+    let bob = w.as_user_on(app, 2).await;
     let lib = alice.create_library("misc").await;
     w.add_member(lib.id, 2, "write").await;
 
@@ -1437,7 +1476,7 @@ async fn attack_pending_upload_cap(kind: Kind, pool: PgPool) {
 /// where the directory can be listed, there is no object without a row).
 async fn every_stored_byte_is_billed(kind: Kind, pool: PgPool) {
     let w = world(kind, pool.clone()).await;
-    let mut alice = w.as_user(1);
+    let mut alice = w.as_user(1).await;
     let lib = alice.create_library("misc").await;
     alice
         .upload(&lib, new_file(&lib, "ok.bin"), &data(3 * MIB, 37))

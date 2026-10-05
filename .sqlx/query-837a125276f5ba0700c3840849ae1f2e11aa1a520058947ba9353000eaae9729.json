@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO identity (account, kind, provider, details)\n         VALUES ($1, 'oidc', $2, jsonb_build_object('subject', $3::text))\n         ON CONFLICT (provider, (details->>'subject')) WHERE kind = 'oidc' DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "837a125276f5ba0700c3840849ae1f2e11aa1a520058947ba9353000eaae9729"
+}

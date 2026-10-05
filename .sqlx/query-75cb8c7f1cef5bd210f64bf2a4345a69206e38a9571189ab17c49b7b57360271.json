@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT pk, organization FROM \"user\" WHERE uuid = $1 AND joined_at IS NOT NULL",
+  "query": "SELECT pk, uuid FROM account WHERE uuid = $1",
   "describe": {
     "columns": [
       {
@@ -10,8 +10,8 @@
       },
       {
         "ordinal": 1,
-        "name": "organization",
-        "type_info": "Int8"
+        "name": "uuid",
+        "type_info": "Uuid"
       }
     ],
     "parameters": {
@@ -24,5 +24,5 @@
       false
     ]
   },
-  "hash": "037d29361cb2b055510ed9b6ea1fe67c75b6d81a3adb98e0cfea3343606f8d79"
+  "hash": "75cb8c7f1cef5bd210f64bf2a4345a69206e38a9571189ab17c49b7b57360271"
 }

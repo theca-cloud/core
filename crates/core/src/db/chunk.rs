@@ -6,6 +6,7 @@ use theca_common::compression::Compression;
 use theca_common::hash::{ChunkHash, Sha256};
 use uuid::Uuid;
 
+use super::account::Credential;
 use super::library::Access;
 
 /// Looks up hashes in the library's dedup scope; creates pending chunks (with
@@ -109,8 +110,10 @@ pub async fn lookup(
 
 /// Why a declaration is refused.
 pub enum DeclareError {
-    /// Not pending, tombstoned, unknown, or not in a library the user can write.
+    /// Not pending, tombstoned, unknown, or not in a library the account can write.
     NotAllowed(Vec<Uuid>),
+    /// Chunks of several organizations in one request (one file, one library).
+    MixedOrganizations,
     /// Already declared with other values (size, compression or checksum).
     Mismatch(Vec<Uuid>),
     /// `stored_size` above `plain_size`, or an unknown compression.
@@ -157,30 +160,21 @@ fn compression_str(c: Compression) -> Option<&'static str> {
 /// All or nothing.
 pub async fn declare(
     pool: &PgPool,
-    user: i64,
-    organization: i64,
+    who: &Credential,
     declarations: &[Declare],
     url_lifetime: Duration,
     max_uploads: i64,
 ) -> Result<Vec<Declared>, DeclareError> {
     let mut tx = pool.begin().await?;
-    // Serializes declarations within the organization, so two concurrent
-    // uploads can't both fit under the quota.
-    let quota = sqlx::query_scalar!(
-        "SELECT quota FROM organization WHERE pk = $1 FOR NO KEY UPDATE",
-        organization
-    )
-    .fetch_one(&mut *tx)
-    .await?;
-
     let ids: Vec<Uuid> = declarations.iter().map(|d| d.chunk).collect();
     let rows = sqlx::query!(
-        r#"SELECT c.pk, c.uuid, c.storage, c.plain_size, c.stored_size, c.compression, c.stored_sha256
+        r#"SELECT c.pk, c.uuid, c.storage, c.organization, c.plain_size, c.stored_size, c.compression,
+                  c.stored_sha256, a."user" AS "user!"
            FROM chunk c
-           JOIN library_member m ON m.library = c.library AND m."user" = $1 AND m.role = 'write'
+           JOIN library_access($1) a ON a.library = c.library AND a.can_write
            WHERE c.uuid = ANY($2) AND c.uploaded_at IS NULL AND c.deleting_at IS NULL
            FOR UPDATE OF c"#,
-        user,
+        who.token,
         &ids
     )
     .fetch_all(&mut *tx)
@@ -194,6 +188,22 @@ pub async fn declare(
     if !refused.is_empty() {
         return Err(DeclareError::NotAllowed(refused));
     }
+    let Some(first) = rows.first() else {
+        return Ok(Vec::new());
+    };
+    let (organization, user) = (first.organization, first.user);
+    if rows.iter().any(|r| r.organization != organization) {
+        return Err(DeclareError::MixedOrganizations);
+    }
+    // Serializes declarations within the organization, so two concurrent
+    // uploads can't both fit under the quota.
+    let quota = sqlx::query_scalar!(
+        "SELECT quota FROM organization WHERE pk = $1 FOR NO KEY UPDATE",
+        organization
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+
     let (mut invalid, mut mismatch) = (Vec::new(), Vec::new());
     for d in declarations {
         let row = rows.iter().find(|r| r.uuid == d.chunk).expect("checked");
@@ -220,14 +230,15 @@ pub async fn declare(
         return Err(DeclareError::Mismatch(mismatch));
     }
 
-    // Uploads in progress: this user's other chunks with a valid URL, not
-    // uploaded yet. The chunks of this request are all about to be in progress
-    // (renewing a URL doesn't take a second slot).
+    // Uploads in progress: the account's other chunks (in any organization)
+    // with a valid URL, not uploaded yet. The chunks of this request are all
+    // about to be in progress (renewing a URL doesn't take a second slot).
     let in_progress = sqlx::query_scalar!(
         r#"SELECT count(*) AS "count!" FROM chunk
-           WHERE declared_by = $1 AND uploaded_at IS NULL AND deleting_at IS NULL
+           WHERE declared_by IN (SELECT pk FROM "user" WHERE account = $1)
+             AND uploaded_at IS NULL AND deleting_at IS NULL
              AND url_expires_at > now() AND NOT (uuid = ANY($2))"#,
-        user,
+        who.account,
         &ids
     )
     .fetch_one(&mut *tx)
@@ -289,18 +300,18 @@ pub async fn declare(
         .collect())
 }
 
-/// A pending, declared chunk the user may announce: `(chunk, storage, declared size)`.
+/// A pending, declared chunk the account may announce: `(chunk, storage, declared size)`.
 pub async fn announceable(
     pool: &PgPool,
-    user: i64,
+    who: &Credential,
     chunks: &[Uuid],
 ) -> sqlx::Result<Vec<(Uuid, i64, i64)>> {
     let rows = sqlx::query!(
         r#"SELECT c.uuid, c.storage, c.stored_size AS "stored_size!" FROM chunk c
-           JOIN library_member m ON m.library = c.library AND m."user" = $1 AND m.role = 'write'
+           JOIN library_access($1) a ON a.library = c.library AND a.can_write
            WHERE c.uuid = ANY($2) AND c.uploaded_at IS NULL AND c.deleting_at IS NULL
              AND c.stored_size IS NOT NULL"#,
-        user,
+        who.token,
         chunks
     )
     .fetch_all(pool)
@@ -345,17 +356,17 @@ pub async fn download_storage(pool: &PgPool, chunk: Uuid) -> sqlx::Result<Option
     .await
 }
 
-/// Cancels the user's chunks that no version references: tombstones them (they
+/// Cancels the account's chunks that no version references: tombstones them (they
 /// leave lookups and can't be committed). Their objects are deleted later by
 /// the GC, once their upload URLs have expired. Returns the chunks tombstoned.
-pub async fn cancel(pool: &PgPool, user: i64, chunks: &[Uuid]) -> sqlx::Result<Vec<Uuid>> {
+pub async fn cancel(pool: &PgPool, who: &Credential, chunks: &[Uuid]) -> sqlx::Result<Vec<Uuid>> {
     sqlx::query_scalar!(
-        r#"UPDATE chunk c SET deleting_at = now() FROM library_member m
-           WHERE c.uuid = ANY($2) AND m.library = c.library AND m."user" = $1 AND m.role = 'write'
+        r#"UPDATE chunk c SET deleting_at = now() FROM library_access($1) a
+           WHERE c.uuid = ANY($2) AND a.library = c.library AND a.can_write
              AND c.deleting_at IS NULL
              AND NOT EXISTS (SELECT 1 FROM chunk_in_version WHERE chunk = c.pk)
            RETURNING c.uuid"#,
-        user,
+        who.token,
         chunks
     )
     .fetch_all(pool)

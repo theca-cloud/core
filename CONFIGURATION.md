@@ -16,7 +16,8 @@ A test (`tests/configuration.rs`) fails if a variable or a setting read by the c
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `DATABASE_URL__FILE` | yes | | File containing the PostgreSQL URL, e.g. `postgres://user:password@host:5432/theca`. PostgreSQL 18+ with the built-in `C.UTF-8` collation (`initdb --locale-provider=builtin --builtin-locale=C.UTF-8`); the server refuses to start otherwise. |
-| `JWT_KEY__FILE` | yes | | File containing the server's key (64 hex characters). If the file is empty, the server generates a key and writes it there (the file must then be writable). Also derives the key signing the server's own upload/download URLs. |
+| `SERVER_KEY__FILE` | yes | | File containing the server's key (64 hex characters). If the file is empty, the server generates a key and writes it there (the file must then be writable). Derives the key signing the server's own upload/download URLs: rotating it only invalidates the URLs in flight. |
+| `DATA_KEY__FILE` | yes | | File containing the key encrypting secrets stored in the database (TOTP secrets), 64 hex characters; generated into the file if empty. **Back it up with the database and never change it**: without it, those secrets are lost (users must set up TOTP again). |
 | `PUBLIC_URL` | yes | | The URL clients reach the server at, e.g. `https://cloud.example.com`. Used in links and in the server's own presigned URLs. |
 | `LISTEN_ADDR` | no | `0.0.0.0:8080` | Address and port the server listens on. |
 | `RUST_LOG` | no | `info` | Log filter (`tracing` syntax), e.g. `info,theca_core=debug`. |
@@ -31,6 +32,9 @@ Stored as strings in the `setting` table and typed by the server. A missing key 
 | `gc_grace_period_secs` | `86400` (24 h) | How long an unreferenced chunk, untouched, is kept before garbage collection deletes it (abandoned uploads). |
 | `presigned_url_lifetime_secs` | `900` (15 min) | How long presigned upload and download URLs stay valid. |
 | `max_pending_uploads` | `15` | Most chunks a user may have being uploaded at once (declared, upload URL still valid, not uploaded yet). Requesting more upload URLs is refused (`429`); clients upload in batches. |
+| `session_idle_lifetime_secs` | `604800` (7 days) | A session expires after this long without being used (each use extends it). At least `600`. Applies to existing sessions at once. |
+| `oidc_link_by_email` | `false` | Logging in through an OIDC provider with an identity not linked yet links it to the account with the same email, if the provider says that email is verified. Off: identities are only linked by their owner, from a session. Turn on only if you trust every provider's email verification (an organization's provider still only opens sessions restricted to that organization). |
+| `session_max_lifetime_secs` | `0` (no cap) | A session expires this long after login, even if used every day (users log in again). At least `600`, or `0` for no cap. |
 
 ## Storage backends
 

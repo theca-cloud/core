@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM identity WHERE account = $1 AND kind = 'totp'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5f3ba3371f2fa1a23022e0560c9082c0d3e4b4af6d163545b2a85cac4dc9b2fb"
+}
