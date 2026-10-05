@@ -60,6 +60,7 @@ async fn world(pool: PgPool) -> World {
             signer: UrlSigner::new([9; 32], "http://test"),
             backends: Backends::new(pool.clone()),
             cipher: theca_core::keys::DataCipher::new(&[7; 32]),
+            setup: theca_core::api::setup::SetupState::done(),
         }),
         pool,
         organizations: [organizations[0], organizations[1]],

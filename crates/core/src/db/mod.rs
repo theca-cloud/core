@@ -7,6 +7,7 @@ pub mod chunk;
 pub mod file;
 pub mod identity;
 pub mod library;
+pub mod setup;
 
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO \"user\" (pk, account, organization, joined_at) OVERRIDING SYSTEM VALUE\n           VALUES ($1, $2, $3, now())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6705a5adb49469fcd15d86e826834cb645be60565a411ef69d66f0488431353e"
+}

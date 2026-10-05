@@ -385,3 +385,71 @@ pub struct OidcRedirect {
     /// The provider's authorization URL.
     pub url: String,
 }
+
+/// Whether the instance still has to be set up.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SetupStatus {
+    /// Not set up yet: the server only serves the setup.
+    pub required: bool,
+    /// The setup needs the token printed in the server's logs.
+    pub token_required: bool,
+}
+
+/// Sets up a fresh instance: its admin, first organization and storages.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Setup {
+    /// The instance admin's email.
+    pub admin_email: String,
+    /// The instance admin's password (at least 8 characters).
+    pub admin_password: String,
+    /// The first organization, owned by the admin.
+    pub organization: String,
+    /// One or more storages, shared by the instance. The first one is the
+    /// default (new libraries go there).
+    pub storages: Vec<NewStorage>,
+}
+
+/// A storage backend. Credentials are paths to files on the server, never values.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NewStorage {
+    /// Its name (unique, ignoring case).
+    pub name: String,
+    /// What it is.
+    #[serde(flatten)]
+    pub backend: StorageBackend,
+}
+
+/// A storage implementation and its settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(tag = "implementation", rename_all = "lowercase")]
+pub enum StorageBackend {
+    /// A directory on the server.
+    Filesystem {
+        /// Its path (created if missing).
+        path: String,
+    },
+    /// An S3-compatible bucket.
+    S3 {
+        /// The endpoint, e.g. `https://s3.example.com`.
+        host: String,
+        /// The region.
+        region: String,
+        /// The bucket.
+        bucket: String,
+        /// Path to a file holding the access key.
+        access_key_file: String,
+        /// Path to a file holding the secret key.
+        secret_key_file: String,
+        /// Path-style URLs (`host/bucket/key`), what self-hosted servers usually need.
+        #[serde(default = "yes")]
+        path_style: bool,
+    },
+}
+
+fn yes() -> bool {
+    true
+}

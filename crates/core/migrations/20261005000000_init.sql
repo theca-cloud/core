@@ -43,6 +43,8 @@ CREATE TABLE storage (
     is_default boolean NOT NULL DEFAULT false
 );
 CREATE UNIQUE INDEX storage_one_default ON storage (is_default) WHERE is_default;
+-- Shared storages (NULL organization) share one namespace.
+CREATE UNIQUE INDEX storage_name ON storage (organization, lower(name)) NULLS NOT DISTINCT;
 
 -- organization : name, fk default storage, owner (composite FK user(org, pk))
 CREATE TABLE organization (

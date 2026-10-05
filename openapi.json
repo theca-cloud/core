@@ -1115,6 +1115,86 @@
         }
       }
     },
+    "/api/v1/setup": {
+      "get": {
+        "tags": [
+          "setup"
+        ],
+        "summary": "Whether the instance still has to be set up.",
+        "operationId": "status",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupStatus"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "setup"
+        ],
+        "summary": "Set up a fresh instance, once: the admin (logged in by the answer), the\nfirst organization, and the storages, each tested first (write, read back,\ndelete). The token goes in `X-Theca-Setup-Token`.",
+        "operationId": "run",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Setup"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_setup`, `storage_unusable`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`invalid_setup_token`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`already_set_up`, `storage_name_taken`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/version": {
       "get": {
         "tags": [],
@@ -1778,6 +1858,27 @@
           }
         }
       },
+      "NewStorage": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/StorageBackend",
+            "description": "What it is."
+          },
+          {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Its name (unique, ignoring case)."
+              }
+            }
+          }
+        ],
+        "description": "A storage backend. Credentials are paths to files on the server, never values."
+      },
       "Node": {
         "type": "object",
         "description": "A file or folder.",
@@ -1888,6 +1989,124 @@
             "description": "The browser or client that opened it."
           }
         }
+      },
+      "Setup": {
+        "type": "object",
+        "description": "Sets up a fresh instance: its admin, first organization and storages.",
+        "required": [
+          "admin_email",
+          "admin_password",
+          "organization",
+          "storages"
+        ],
+        "properties": {
+          "admin_email": {
+            "type": "string",
+            "description": "The instance admin's email."
+          },
+          "admin_password": {
+            "type": "string",
+            "description": "The instance admin's password (at least 8 characters)."
+          },
+          "organization": {
+            "type": "string",
+            "description": "The first organization, owned by the admin."
+          },
+          "storages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NewStorage"
+            },
+            "description": "One or more storages, shared by the instance. The first one is the\ndefault (new libraries go there)."
+          }
+        }
+      },
+      "SetupStatus": {
+        "type": "object",
+        "description": "Whether the instance still has to be set up.",
+        "required": [
+          "required",
+          "token_required"
+        ],
+        "properties": {
+          "required": {
+            "type": "boolean",
+            "description": "Not set up yet: the server only serves the setup."
+          },
+          "token_required": {
+            "type": "boolean",
+            "description": "The setup needs the token printed in the server's logs."
+          }
+        }
+      },
+      "StorageBackend": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A directory on the server.",
+            "required": [
+              "path",
+              "implementation"
+            ],
+            "properties": {
+              "implementation": {
+                "type": "string",
+                "enum": [
+                  "filesystem"
+                ]
+              },
+              "path": {
+                "type": "string",
+                "description": "Its path (created if missing)."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "An S3-compatible bucket.",
+            "required": [
+              "host",
+              "region",
+              "bucket",
+              "access_key_file",
+              "secret_key_file",
+              "implementation"
+            ],
+            "properties": {
+              "access_key_file": {
+                "type": "string",
+                "description": "Path to a file holding the access key."
+              },
+              "bucket": {
+                "type": "string",
+                "description": "The bucket."
+              },
+              "host": {
+                "type": "string",
+                "description": "The endpoint, e.g. `https://s3.example.com`."
+              },
+              "implementation": {
+                "type": "string",
+                "enum": [
+                  "s3"
+                ]
+              },
+              "path_style": {
+                "type": "boolean",
+                "description": "Path-style URLs (`host/bucket/key`), what self-hosted servers usually need."
+              },
+              "region": {
+                "type": "string",
+                "description": "The region."
+              },
+              "secret_key_file": {
+                "type": "string",
+                "description": "Path to a file holding the secret key."
+              }
+            }
+          }
+        ],
+        "description": "A storage implementation and its settings."
       },
       "TotpCode": {
         "type": "object",

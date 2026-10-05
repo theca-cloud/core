@@ -18,6 +18,7 @@ A test (`tests/configuration.rs`) fails if a variable or a setting read by the c
 | `DATABASE_URL__FILE` | yes | | File containing the PostgreSQL URL, e.g. `postgres://user:password@host:5432/theca`. PostgreSQL 18+ with the built-in `C.UTF-8` collation (`initdb --locale-provider=builtin --builtin-locale=C.UTF-8`); the server refuses to start otherwise. |
 | `SERVER_KEY__FILE` | yes | | File containing the server's key (64 hex characters). If the file is empty, the server generates a key and writes it there (the file must then be writable). Derives the key signing the server's own upload/download URLs: rotating it only invalidates the URLs in flight. |
 | `DATA_KEY__FILE` | yes | | File containing the key encrypting secrets stored in the database (TOTP secrets), 64 hex characters; generated into the file if empty. **Back it up with the database and never change it**: without it, those secrets are lost (users must set up TOTP again). |
+| `SETUP_OPEN` | no | `false` | `true`: a fresh instance's setup needs no token (the first visitor sets it up). Otherwise the server prints the setup URL, token included, in its logs at startup. |
 | `PUBLIC_URL` | yes | | The URL clients reach the server at, e.g. `https://cloud.example.com`. Used in links and in the server's own presigned URLs. |
 | `LISTEN_ADDR` | no | `0.0.0.0:8080` | Address and port the server listens on. |
 | `RUST_LOG` | no | `info` | Log filter (`tracing` syntax), e.g. `info,theca_core=debug`. |

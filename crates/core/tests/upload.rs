@@ -119,6 +119,7 @@ async fn app(pool: &PgPool) -> Router {
         signer: UrlSigner::new([9; 32], PUBLIC_URL),
         backends: Backends::new(pool.clone()),
         cipher: theca_core::keys::DataCipher::new(&[7; 32]),
+        setup: theca_core::api::setup::SetupState::done(),
     })
 }
 

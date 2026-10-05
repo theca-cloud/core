@@ -5,6 +5,7 @@ pub mod auth;
 pub mod error;
 mod oidc;
 mod session;
+pub mod setup;
 mod totp;
 mod v1;
 
@@ -35,6 +36,8 @@ pub struct AppState {
     pub backends: Backends,
     /// Encrypts secrets stored in the database.
     pub cipher: DataCipher,
+    /// Whether the first-run setup is still to be done.
+    pub setup: Arc<setup::SetupState>,
 }
 
 /// The OpenAPI description of the API, committed as `openapi.json`.
@@ -44,6 +47,8 @@ pub struct AppState {
     paths(
         health,
         version,
+        setup::status,
+        setup::run,
         session::login,
         session::logout,
         session::sessions,
@@ -81,6 +86,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .route("/api/version", get(version))
+        .route("/api/v1/setup", get(setup::status).post(setup::run))
         .nest(
             "/api/v1",
             v1::router()
@@ -91,6 +97,10 @@ pub fn router(state: AppState) -> Router {
                 .layer(axum::middleware::from_fn_with_state(
                     state.clone(),
                     auth::authenticate,
+                ))
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    setup::require_setup,
                 )),
         )
         .with_state(state)
@@ -191,6 +201,7 @@ mod tests {
             settings,
             signer: UrlSigner::new([0; 32], "http://test"),
             cipher: DataCipher::new(&[0; 32]),
+            setup: setup::SetupState::done(),
         })
     }
 

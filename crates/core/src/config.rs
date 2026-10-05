@@ -17,6 +17,8 @@ pub struct Config {
     pub public_url: String,
     pub server_key_file: PathBuf,
     pub data_key_file: PathBuf,
+    /// `SETUP_OPEN=true`: a fresh instance's setup needs no token.
+    pub setup_open: bool,
 }
 
 impl Config {
@@ -28,7 +30,19 @@ impl Config {
             public_url: required("PUBLIC_URL")?,
             server_key_file: required("SERVER_KEY__FILE")?.into(),
             data_key_file: required("DATA_KEY__FILE")?.into(),
+            setup_open: setup_open()?,
         })
+    }
+}
+
+/// `SETUP_OPEN`, false by default.
+fn setup_open() -> Result<bool, Error> {
+    match env::var("SETUP_OPEN") {
+        Err(_) => Ok(false),
+        Ok(v) => v.parse().map_err(|_| Error::InvalidEnv {
+            name: "SETUP_OPEN",
+            reason: format!("{v:?} isn't true or false"),
+        }),
     }
 }
 

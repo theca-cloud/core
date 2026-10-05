@@ -46,12 +46,29 @@ pub async fn run() -> Result<(), Error> {
     let listener = tokio::net::TcpListener::bind(config.listen_addr).await?;
     tracing::info!(addr = %config.listen_addr, public_url = config.public_url, "listening");
     let backends = storage::Backends::new(pool.clone());
+    let setup = if db::setup::is_fresh(&pool).await? {
+        let token = (!config.setup_open).then(api::setup::generate_token);
+        match &token {
+            Some(token) => tracing::info!(
+                "not set up yet: open {}/setup?token={token}",
+                config.public_url.trim_end_matches('/')
+            ),
+            None => tracing::warn!(
+                "not set up yet, and SETUP_OPEN is set: the first visitor of {}/setup sets it up",
+                config.public_url.trim_end_matches('/')
+            ),
+        }
+        api::setup::SetupState::pending(token)
+    } else {
+        api::setup::SetupState::done()
+    };
     let app = api::router(AppState {
         pool,
         settings,
         signer,
         backends,
         cipher,
+        setup,
     });
     // Connect info: the client's IP, logged with anomalies.
     axum::serve(
