@@ -24,6 +24,9 @@ pub enum CommitError {
     /// Chunk IDs outside the library's dedup scope and not from a version of the
     /// same file (or unknown): they could be guessed from another library.
     ChunksNotAllowed(Vec<Uuid>),
+    /// Chunks not uploaded yet, or tombstoned (cancelled, garbage-collected):
+    /// the client uploads them again (they get new IDs) and commits again.
+    ChunksMissing(Vec<Uuid>),
     Db(sqlx::Error),
 }
 
@@ -112,7 +115,7 @@ pub async fn commit(
                JOIN library_namespace other ON other.namespace = mine.namespace
                WHERE mine.library = $1
            )
-           SELECT c.pk, c.uuid FROM chunk c
+           SELECT c.pk, c.uuid, c.ready FROM chunk c
            WHERE c.uuid = ANY($2) AND c.organization = $3
              AND (c.library = $1 OR EXISTS (
                      SELECT 1 FROM chunk_in_version civ
@@ -134,6 +137,16 @@ pub async fn commit(
         .collect();
     if !refused.is_empty() {
         return Err(CommitError::ChunksNotAllowed(refused));
+    }
+    // Readiness is also the FK's job (`chunk_in_version_chunk`), but its error
+    // can't say which: the client needs the list to send them again.
+    let missing: Vec<Uuid> = allowed
+        .iter()
+        .filter(|a| !a.ready)
+        .map(|a| a.uuid)
+        .collect();
+    if !missing.is_empty() {
+        return Err(CommitError::ChunksMissing(missing));
     }
     let pks: Vec<i64> = chunks
         .iter()

@@ -42,6 +42,8 @@ dav-server.workspace = true
 tempfile.workspace = true
 
 [dev-dependencies]
+# The end-to-end smoke test drives the real server binary through the client.
+theca-client = { path = "../client" }
 # Computes TOTP codes like an authenticator app.
 totp-rs.workspace = true
 # Sign the fake OIDC provider's ID tokens (HS256).

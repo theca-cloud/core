@@ -1,0 +1,391 @@
+//! End to end: the real `theca-server` binary as a process (environment
+//! configuration, migrations at startup, a real port), driven through
+//! `theca-client` like any client: setup, login, upload, download, an edit
+//! that sends only new chunks, a cancelled upload resumed. On the filesystem
+//! and on S3 (Garage).
+
+use std::net::TcpListener;
+use std::process::{Child, Command, Stdio};
+use std::time::Duration;
+
+use serde_json::json;
+use sqlx::PgPool;
+use theca_client::{
+    Cancel, Client, DownloadOptions, MemorySource, Target, UploadOptions, download, upload,
+};
+use theca_common::api;
+use theca_common::name::Name;
+
+/// The server process, killed when dropped.
+struct Server {
+    child: Child,
+    url: String,
+    _dir: tempfile::TempDir,
+}
+
+impl Drop for Server {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// Starts `theca-server` on the test's database, with fresh keys, an open
+/// setup and a free port, and waits until it's healthy.
+async fn start(pool: &PgPool) -> Server {
+    theca_core::install_crypto_provider();
+    dotenvy::dotenv().ok();
+    let base = std::env::var("DATABASE_URL").expect("DATABASE_URL: run scripts/dev.sh");
+    let database = pool
+        .connect_options()
+        .get_database()
+        .expect("a test database")
+        .to_owned();
+    let url = format!("{}/{database}", base.rsplit_once('/').unwrap().0);
+    let dir = tempfile::tempdir().unwrap();
+    let file = |name: &str, content: &str| {
+        let path = dir.path().join(name);
+        std::fs::write(&path, content).unwrap();
+        path
+    };
+    let port = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let public = format!("http://127.0.0.1:{port}");
+    let child = Command::new(env!("CARGO_BIN_EXE_theca-server"))
+        .env("DATABASE_URL__FILE", file("database_url", &url))
+        .env("SERVER_KEY__FILE", file("server_key", ""))
+        .env("DATA_KEY__FILE", file("data_key", ""))
+        .env("PUBLIC_URL", &public)
+        .env("LISTEN_ADDR", format!("127.0.0.1:{port}"))
+        .env("SETUP_OPEN", "true")
+        .env("RUST_LOG", "warn")
+        .stdout(Stdio::null())
+        .spawn()
+        .expect("the server binary");
+    let server = Server {
+        child,
+        url: public,
+        _dir: dir,
+    };
+    for _ in 0..300 {
+        if let Ok(response) = reqwest::get(format!("{}/api/health", server.url)).await
+            && response.status().is_success()
+        {
+            return server;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("the server didn't become healthy");
+}
+
+/// Deterministic pseudo-random bytes (incompressible, distinct chunks).
+fn data(len: usize, seed: u64) -> Vec<u8> {
+    let mut s = seed * 2 + 1;
+    (0..len)
+        .map(|_| {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            s as u8
+        })
+        .collect()
+}
+
+async fn fetch(client: &Client, file: uuid::Uuid, version: Option<uuid::Uuid>) -> Vec<u8> {
+    let mut out = Vec::new();
+    let options = DownloadOptions {
+        version,
+        ..Default::default()
+    };
+    download(client, file, &mut out, &options, |_| {})
+        .await
+        .unwrap();
+    out
+}
+
+async fn scenario(pool: PgPool, storage: serde_json::Value) {
+    let server = start(&pool).await;
+    let mut client = Client::new(&server.url).unwrap();
+    client.check_version().await.unwrap();
+    let setup: api::Setup = serde_json::from_value(json!({
+        "admin_email": "admin@test.theca",
+        "admin_password": "a long password",
+        "organization": "Acme",
+        "storages": [storage],
+    }))
+    .unwrap();
+    let me = client.setup(&setup, None).await.unwrap();
+    let library = client
+        .create_library(me.organizations[0].organization, "Docs")
+        .await
+        .unwrap();
+
+    // A multi-chunk file, up and down.
+    let original = data(5 * 1024 * 1024, 1);
+    let target = Target::New {
+        library: library.id,
+        parent: library.root,
+        name: Name::new("big.bin").unwrap(),
+    };
+    let options = UploadOptions::default();
+    let committed = upload(
+        &client,
+        &MemorySource(original.clone()),
+        target,
+        &options,
+        |_| {},
+        &Cancel::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(fetch(&client, committed.file, None).await, original);
+
+    // An edit at the end: only the new chunks travel.
+    let mut edited = original.clone();
+    let end = edited.len();
+    edited[end - 1000..].copy_from_slice(&data(1000, 2));
+    let mut last = Default::default();
+    let target = Target::Version {
+        library: library.id,
+        file: committed.file,
+        base: Some(committed.version),
+    };
+    let v2 = upload(
+        &client,
+        &MemorySource(edited.clone()),
+        target,
+        &options,
+        |p| last = p.clone(),
+        &Cancel::default(),
+    )
+    .await
+    .unwrap();
+    assert!(!v2.conflict);
+    assert!(last.skipped > last.uploaded, "deduplicated: {last:?}");
+    assert_eq!(fetch(&client, committed.file, None).await, edited);
+    assert_eq!(
+        fetch(&client, committed.file, Some(committed.version)).await,
+        original
+    );
+
+    let small = UploadOptions {
+        parallel: 1,
+        ..Default::default()
+    };
+    let third = data(6 * 1024 * 1024, 3);
+    let target = |name: &str| Target::New {
+        library: library.id,
+        parent: library.root,
+        name: Name::new(name).unwrap(),
+    };
+
+    // Interrupted after its first chunks (a crash, a lost connection: the
+    // upload is just dropped), then resumed: what was sent isn't sent again.
+    let (sent, mut first_batch) = futures::channel::mpsc::unbounded::<()>();
+    let (source, never) = (MemorySource(third.clone()), Cancel::default());
+    let interrupted = upload(
+        &client,
+        &source,
+        target("third.bin"),
+        &small,
+        |p| {
+            if p.uploaded > 0 {
+                let _ = sent.unbounded_send(());
+            }
+        },
+        &never,
+    );
+    tokio::select! {
+        result = interrupted => panic!("finished before the interruption: {result:?}"),
+        _ = futures::StreamExt::next(&mut first_batch) => {}
+    }
+    let mut resumed = Default::default();
+    let done = upload(
+        &client,
+        &MemorySource(third.clone()),
+        target("third.bin"),
+        &small,
+        |p| resumed = p.clone(),
+        &Cancel::default(),
+    )
+    .await
+    .unwrap();
+    assert!(
+        resumed.skipped > 0,
+        "the chunks sent before the interruption are reused: {resumed:?}"
+    );
+    assert_eq!(fetch(&client, done.file, None).await, third);
+
+    // Cancelled: the upload is abandoned and its chunks freed on the server, so
+    // a new attempt sends everything again.
+    let fourth = data(6 * 1024 * 1024, 4);
+    let cancel = Cancel::default();
+    let stopped = upload(
+        &client,
+        &MemorySource(fourth.clone()),
+        target("fourth.bin"),
+        &small,
+        |p| {
+            if p.uploaded > 0 {
+                cancel.cancel();
+            }
+        },
+        &cancel,
+    )
+    .await;
+    assert!(
+        matches!(stopped, Err(theca_client::Error::Cancelled)),
+        "{stopped:?}"
+    );
+    let mut again = Default::default();
+    upload(
+        &client,
+        &MemorySource(fourth),
+        target("fourth.bin"),
+        &small,
+        |p| again = p.clone(),
+        &Cancel::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(again.skipped, 0, "cancelled chunks were freed: {again:?}");
+
+    // A plain login works too.
+    let mut again = Client::new(&server.url).unwrap();
+    let me = again
+        .login("admin@test.theca", "a long password", None)
+        .await
+        .unwrap();
+    assert_eq!(me.email, "admin@test.theca");
+    let listed = again.children(library.root).await.unwrap();
+    assert_eq!(listed.len(), 3);
+}
+
+#[sqlx::test]
+async fn filesystem(pool: PgPool) {
+    let dir = tempfile::tempdir().unwrap();
+    scenario(
+        pool,
+        json!({ "name": "main", "implementation": "filesystem", "path": dir.path() }),
+    )
+    .await;
+}
+
+#[sqlx::test]
+async fn s3(pool: PgPool) {
+    dotenvy::dotenv().ok();
+    let var =
+        |name: &str| std::env::var(name).unwrap_or_else(|_| panic!("{name}: run scripts/dev.sh"));
+    scenario(
+        pool,
+        json!({
+            "name": "main", "implementation": "s3",
+            "host": var("S3_TEST_HOST"), "region": var("S3_TEST_REGION"), "bucket": var("S3_TEST_BUCKET"),
+            "access_key_file": var("S3_TEST_ACCESS_KEY_FILE"), "secret_key_file": var("S3_TEST_SECRET_KEY_FILE"),
+        }),
+    )
+    .await;
+}
+
+/// A source that pauses when the upload pass reads its last chunk (the hash
+/// pass reads in blocks, never at a chunk's offset), until released.
+struct Gated {
+    inner: MemorySource,
+    last: u64,
+    reads: std::sync::Mutex<u32>,
+    reached: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+impl theca_client::Source for Gated {
+    fn len(&self) -> u64 {
+        theca_client::Source::len(&self.inner)
+    }
+
+    fn read(
+        &self,
+        offset: u64,
+        len: usize,
+    ) -> std::pin::Pin<Box<dyn Future<Output = std::io::Result<Vec<u8>>> + Send + '_>> {
+        Box::pin(async move {
+            let first = offset == self.last && {
+                let mut reads = self.reads.lock().unwrap();
+                *reads += 1;
+                *reads == 1
+            };
+            if first {
+                self.reached.notify_one();
+                self.release.notified().await;
+            }
+            self.inner.read(offset, len).await
+        })
+    }
+}
+
+/// A chunk lost between its upload and the commit (here cancelled; the GC or
+/// a parallel cancel in real life): the commit answers `chunk_missing`, and
+/// the engine uploads it again and commits.
+#[sqlx::test]
+async fn commit_recovers_lost_chunks(pool: PgPool) {
+    let server = start(&pool).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut client = Client::new(&server.url).unwrap();
+    let setup: api::Setup = serde_json::from_value(json!({
+        "admin_email": "admin@test.theca", "admin_password": "a long password", "organization": "Acme",
+        "storages": [{ "name": "main", "implementation": "filesystem", "path": dir.path() }],
+    }))
+    .unwrap();
+    let me = client.setup(&setup, None).await.unwrap();
+    let library = client
+        .create_library(me.organizations[0].organization, "Docs")
+        .await
+        .unwrap();
+
+    let bytes = data(6 * 1024 * 1024, 5);
+    let last = theca_common::chunking::chunks(&bytes[..])
+        .last()
+        .unwrap()
+        .unwrap()
+        .offset;
+    let source = Gated {
+        inner: MemorySource(bytes.clone()),
+        last,
+        reads: Default::default(),
+        reached: Default::default(),
+        release: Default::default(),
+    };
+    let target = Target::New {
+        library: library.id,
+        parent: library.root,
+        name: Name::new("lost.bin").unwrap(),
+    };
+    let options = UploadOptions {
+        parallel: 1,
+        ..Default::default()
+    };
+    let never = Cancel::default();
+    let uploading = upload(&client, &source, target, &options, |_| {}, &never);
+    let interfere = async {
+        source.reached.notified().await;
+        // The first chunk is uploaded, not committed yet: cancel it.
+        let first: uuid::Uuid = sqlx::query_scalar(
+            "SELECT uuid FROM chunk WHERE uploaded_at IS NOT NULL AND deleting_at IS NULL ORDER BY pk LIMIT 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        client.cancel(&[first]).await.unwrap();
+        source.release.notify_one();
+    };
+    // A timeout: a bug here must fail, not hang the suite.
+    let (committed, ()) = tokio::time::timeout(Duration::from_secs(60), async {
+        tokio::join!(uploading, interfere)
+    })
+    .await
+    .expect("the upload and the interference finish");
+    let committed = committed.unwrap();
+    assert_eq!(fetch(&client, committed.file, None).await, bytes);
+}

@@ -1,0 +1,37 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH scope AS (\n               SELECT $1::bigint AS library\n               UNION\n               SELECT other.library FROM library_namespace mine\n               JOIN library_namespace other ON other.namespace = mine.namespace\n               WHERE mine.library = $1\n           )\n           SELECT c.pk, c.uuid, c.ready FROM chunk c\n           WHERE c.uuid = ANY($2) AND c.organization = $3\n             AND (c.library = $1 OR EXISTS (\n                     SELECT 1 FROM chunk_in_version civ\n                     JOIN version v ON v.pk = civ.version\n                     JOIN node n ON n.pk = v.file\n                     WHERE civ.chunk = c.pk\n                       AND (n.library IN (SELECT library FROM scope) OR v.file = $4)))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "ready",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "UuidArray",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9cea16ee4661bd38e60583e9ac8838c3f74b009513b84a63734171acc53c4afd"
+}

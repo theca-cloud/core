@@ -234,6 +234,7 @@ pub async fn store(
             db::file::CommitError::FileNotFound => FileError::NotFound("file"),
             db::file::CommitError::ParentNotFound => FileError::NotFound("folder"),
             db::file::CommitError::BaseNotFound => FileError::Refused("base version"),
+            db::file::CommitError::ChunksMissing(_) => FileError::Refused("chunks missing"),
             db::file::CommitError::ChunksNotAllowed(_) => {
                 FileError::Refused("chunks outside the dedup scope")
             }

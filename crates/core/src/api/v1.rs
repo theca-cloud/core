@@ -320,6 +320,11 @@ async fn commit(
         CommitError::FileNotFound => HttpError::not_found("file"),
         CommitError::ParentNotFound => HttpError::not_found("folder"),
         CommitError::BaseNotFound => HttpError::not_found("base version"),
+        CommitError::ChunksMissing(chunks) => HttpError::conflict(
+            "chunk_missing",
+            "chunks not uploaded (pending) or deleted: upload them again",
+        )
+        .with_chunks(chunks),
         CommitError::ChunksNotAllowed(chunks) => {
             tracing::warn!(anomaly = "commit_chunk_not_allowed", account = %user.account_uuid, library = %req.library,
                 ?chunks, "commit with chunks outside the library's dedup scope");
