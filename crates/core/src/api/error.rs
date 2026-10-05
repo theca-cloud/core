@@ -123,6 +123,23 @@ impl From<sqlx::Error> for HttpError {
     }
 }
 
+impl From<crate::files::FileError> for HttpError {
+    fn from(error: crate::files::FileError) -> Self {
+        use crate::files::FileError as E;
+        match error {
+            E::NotFound(what) => Self::not_found(what),
+            E::ReadOnly => Self::forbidden("read-only access to this library"),
+            E::Root => Self::bad_request("root", error.to_string()),
+            E::OtherOrganization => Self::conflict("other_organization", error.to_string()),
+            E::NameTaken => Self::conflict("name_taken", error.to_string()),
+            E::MoveIntoItself => Self::conflict("move_into_itself", error.to_string()),
+            E::InvalidName => Self::bad_request("name_invalid", error.to_string()),
+            E::QuotaExceeded => Self::conflict("quota_exceeded", error.to_string()),
+            E::Refused(_) | E::Db(_) | E::Backend(_) | E::Io(_) => Self::internal(error),
+        }
+    }
+}
+
 impl From<crate::storage::BackendError> for HttpError {
     fn from(error: crate::storage::BackendError) -> Self {
         Self::internal(error)

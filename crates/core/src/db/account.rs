@@ -25,6 +25,8 @@ pub struct Credential {
     pub session: bool,
     /// The only organization it acts on, if scoped (restricted session, app password).
     pub organization: Option<i64>,
+    /// The only library it acts on, if scoped (app password).
+    pub library: Option<i64>,
 }
 
 impl Credential {
@@ -62,7 +64,7 @@ pub async fn authenticate(
     let (idle, max) = lifetime.secs();
     let row = sqlx::query!(
         r#"WITH t AS (
-               SELECT pk, uuid, usage, organization, resource, last_seen FROM token
+               SELECT pk, uuid, usage, organization, library, resource, last_seen FROM token
                WHERE prefix = $1 AND hash = $2 AND usage IN ('session', 'app_password')
                  AND revoked_at IS NULL
                  AND (usage <> 'session' OR (last_seen > now() - make_interval(secs => $3)
@@ -73,7 +75,7 @@ pub async fn authenticate(
                  AND (t.last_seen IS NULL OR t.last_seen < now() - make_interval(secs => $4))
            )
            SELECT t.pk AS "pk!", t.uuid AS "uuid!", t.usage = 'session' AS "session!",
-                  t.organization, a.pk AS account, a.uuid AS account_uuid
+                  t.organization, t.library, a.pk AS account, a.uuid AS account_uuid
            FROM t JOIN account a ON a.uuid = t.resource"#,
         prefix,
         &hash[..],
@@ -90,6 +92,7 @@ pub async fn authenticate(
         account_uuid: r.account_uuid,
         session: r.session,
         organization: r.organization,
+        library: r.library,
     }))
 }
 

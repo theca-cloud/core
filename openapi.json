@@ -1206,6 +1206,60 @@
         }
       }
     },
+    "/api/v1/files/{id}/content": {
+      "get": {
+        "tags": [
+          "content"
+        ],
+        "summary": "A file's content, streamed (previews and downloads in the browser).",
+        "operationId": "content",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "description": "A version of the file (default: the current one).",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The whole file"
+          },
+          "206": {
+            "description": "The requested range"
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "Range not satisfiable"
+          }
+        }
+      }
+    },
     "/api/v1/files/{id}/download": {
       "get": {
         "tags": [

@@ -14,6 +14,11 @@ RUN rustup component add rustfmt clippy \
  && cargo install --locked sqlx-cli --no-default-features --features postgres,rustls \
  && rm -rf "$CARGO_HOME/registry" "$CARGO_HOME/git"
 
+# litmus, the WebDAV conformance suite, run by tests/dav.rs.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends litmus \
+ && rm -rf /var/lib/apt/lists/*
+
 # Garage (S3) for the S3 tests, started by scripts/ci.sh.
 RUN case "$TARGETARCH" in amd64) arch=x86_64 ;; arm64) arch=aarch64 ;; *) exit 1 ;; esac \
  && curl -fsSL -o /usr/local/bin/garage \

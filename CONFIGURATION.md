@@ -54,6 +54,12 @@ Storage backends are rows of the `storage` table (created by the setup wizard). 
 | `filesystem` | `{"path": "/data/chunks"}`: a directory the server can write to. Uploads and downloads go through the server (`/api/v1/blobs`, URLs signed by the server). |
 | `s3` | `{"host": "https://s3.example.com", "region": "...", "bucket": "...", "access_key_file": "/run/secrets/s3_access", "secret_key_file": "/run/secrets/s3_secret", "path_style": true}`. Clients upload and download directly with S3 presigned URLs. `path_style` (default `true`): `host/bucket/key` URLs, what self-hosted S3 servers (e.g. Garage) usually need. |
 
+## WebDAV
+
+Libraries mount as network drives at `{PUBLIC_URL}/dav/`, with an **app password** as the password (any username). The drive follows the app password's scope: the whole account (organizations, then libraries), one organization (its libraries), or one library (its files); a read-only app password gives a read-only drive.
+
+Uploads through WebDAV are spooled to the server's temporary directory (`TMPDIR`, `/tmp` by default) before being chunked and stored: it needs as much free space as the largest files being uploaded at once.
+
 ## Health check
 
 `theca-server healthcheck` probes `/api/health` on `LISTEN_ADDR` and exits `0` (ready) or `1`: use it as Docker's `HEALTHCHECK`. The server only listens once its database is migrated, so give it a start period.

@@ -4,6 +4,7 @@ mod accounts;
 mod admin;
 mod app_password;
 pub mod auth;
+mod content;
 pub mod error;
 mod nodes;
 mod oidc;
@@ -80,6 +81,7 @@ pub struct AppState {
         v1::cancel,
         v1::commit,
         v1::download,
+        content::content,
         nodes::info,
         nodes::create_folder,
         nodes::update,
@@ -132,7 +134,26 @@ pub fn router(state: AppState) -> Router {
                     setup::require_setup,
                 )),
         )
+        .merge(dav_routes(state.clone()))
         .with_state(state)
+}
+
+/// `/dav/...`: every method, authenticated like the API.
+fn dav_routes(state: AppState) -> Router<AppState> {
+    let dav = crate::dav::handler(state.clone());
+    let serve = move |request: axum::extract::Request| crate::dav::serve(dav.clone(), request);
+    Router::new()
+        .route("/dav", axum::routing::any(serve.clone()))
+        .route("/dav/", axum::routing::any(serve.clone()))
+        .route("/dav/{*path}", axum::routing::any(serve))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::authenticate,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state,
+            setup::require_setup,
+        ))
 }
 
 /// Each health check gets at most this long, so a hung dependency fails the probe.

@@ -73,11 +73,17 @@ pub async fn authenticate(
     next: Next,
 ) -> Response {
     let headers = request.headers();
-    let bearer = bearer(headers);
-    let via_cookie = bearer.is_none();
-    let Some(token) = bearer.or_else(|| cookie(headers, SESSION_COOKIE)) else {
+    // Bearer (CLI, API clients), Basic with an app password as the password
+    // (WebDAV), or the session cookie (the web app).
+    let explicit = bearer(headers)
+        .map(str::to_owned)
+        .or_else(|| basic(headers));
+    let via_cookie = explicit.is_none();
+    let Some(token) = explicit.or_else(|| cookie(headers, SESSION_COOKIE).map(str::to_owned))
+    else {
         return next.run(request).await;
     };
+    let token = token.as_str();
     let credential = match OpaqueToken::parse(token) {
         Some((prefix, hash)) => match db::account::authenticate(
             &state.pool,
@@ -148,6 +154,23 @@ pub(super) fn set_cookie(headers: &mut HeaderMap, cookie: &str) {
         header::SET_COOKIE,
         HeaderValue::from_str(&cookie).expect("cookie values are ASCII"),
     );
+}
+
+/// The password of a Basic `Authorization` (the username is ignored).
+fn basic(headers: &HeaderMap) -> Option<String> {
+    use base64::Engine;
+    let encoded = headers
+        .get(header::AUTHORIZATION)?
+        .to_str()
+        .ok()?
+        .strip_prefix("Basic ")?;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(encoded.trim())
+        .ok()?;
+    let decoded = String::from_utf8(decoded).ok()?;
+    decoded
+        .split_once(':')
+        .map(|(_, password)| password.to_owned())
 }
 
 fn bearer(headers: &HeaderMap) -> Option<&str> {

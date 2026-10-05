@@ -16,6 +16,7 @@ use super::error::{ApiJson, HttpError};
 use super::v1::{library_access, require_write};
 use crate::db;
 use crate::db::library::NodeAccess;
+use crate::files;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -25,6 +26,7 @@ pub fn router() -> Router<AppState> {
         .route("/nodes/{id}/restore", post(restore))
         .route("/libraries/{id}/trash", get(trash))
         .route("/files/{id}/versions", get(versions))
+        .route("/files/{id}/content", get(super::content::content))
         .route(
             "/files/{id}/versions/{version}/restore",
             post(restore_version),
@@ -38,47 +40,12 @@ async fn node(state: &AppState, user: &CurrentAccount, id: Uuid) -> Result<NodeA
         .ok_or_else(|| HttpError::not_found("node"))
 }
 
-/// A folder the user can write into.
-async fn folder(
-    state: &AppState,
-    user: &CurrentAccount,
-    id: Uuid,
-) -> Result<NodeAccess, HttpError> {
-    let folder = node(state, user, id).await?;
-    if folder.is_file {
-        return Err(HttpError::not_found("folder"));
-    }
-    require_write(&folder.access)?;
-    Ok(folder)
-}
-
 async fn file(state: &AppState, user: &CurrentAccount, id: Uuid) -> Result<NodeAccess, HttpError> {
     let file = node(state, user, id).await?;
     if !file.is_file {
         return Err(HttpError::not_found("file"));
     }
     Ok(file)
-}
-
-fn not_root(node: &NodeAccess) -> Result<(), HttpError> {
-    match node.parent {
-        Some(_) => Ok(()),
-        None => Err(HttpError::bad_request(
-            "root",
-            "a library's root can't be renamed, moved or deleted",
-        )),
-    }
-}
-
-fn same_organization(a: &NodeAccess, b: &NodeAccess) -> Result<(), HttpError> {
-    if a.access.organization == b.access.organization {
-        Ok(())
-    } else {
-        Err(HttpError::conflict(
-            "other_organization",
-            "files can't move or be copied to another organization (each pays for its own)",
-        ))
-    }
 }
 
 /// A file or folder, with its library and path.
@@ -107,8 +74,8 @@ pub async fn create_folder(
     Path(id): Path<Uuid>,
     ApiJson(req): ApiJson<api::CreateFolder>,
 ) -> Result<(StatusCode, Json<api::Node>), HttpError> {
-    let parent = folder(&state, &user, id).await?;
-    let created = db::node::create_folder(&state.pool, &parent, req.name.as_str()).await?;
+    let parent = node(&state, &user, id).await?;
+    let created = files::create_folder(&state, &parent, req.name.as_str()).await?;
     Ok((StatusCode::CREATED, Json(created)))
 }
 
@@ -128,18 +95,12 @@ pub async fn update(
     ApiJson(req): ApiJson<api::UpdateNode>,
 ) -> Result<Json<api::NodeInfo>, HttpError> {
     let node = node(&state, &user, id).await?;
-    require_write(&node.access)?;
-    not_root(&node)?;
     let parent = match req.parent {
-        Some(parent) => {
-            let parent = folder(&state, &user, parent).await?;
-            same_organization(&node, &parent)?;
-            Some(parent)
-        }
+        Some(parent) => Some(super::nodes::node(&state, &user, parent).await?),
         None => None,
     };
     let name = req.name.as_ref().map(|n| n.as_str());
-    db::node::update(&state.pool, &node, name, parent.as_ref()).await?;
+    files::rename_move(&state, &node, name, parent.as_ref()).await?;
     Ok(Json(db::node::info(&state.pool, node.node).await?))
 }
 
@@ -173,9 +134,7 @@ pub async fn delete(
         tx.commit().await?;
     } else {
         let node = node(&state, &user, id).await?;
-        require_write(&node.access)?;
-        not_root(&node)?;
-        db::node::trash(&state.pool, node.node).await?;
+        files::trash(&state, &node).await?;
     }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -194,13 +153,9 @@ pub async fn copy(
     ApiJson(req): ApiJson<api::CopyNode>,
 ) -> Result<(StatusCode, Json<api::NodeInfo>), HttpError> {
     let source = node(&state, &user, id).await?;
-    not_root(&source)?;
-    let dest = folder(&state, &user, req.parent).await?;
-    same_organization(&source, &dest)?;
+    let dest = node(&state, &user, req.parent).await?;
     let name = req.name.as_ref().map(|n| n.as_str());
-    let mut tx = state.pool.begin().await?;
-    let copy = db::node::copy(&mut tx, &source, &dest, name).await?;
-    tx.commit().await?;
+    let copy = files::copy(&state, &source, &dest, name).await?;
     let copy = node(&state, &user, copy).await?;
     Ok((
         StatusCode::CREATED,

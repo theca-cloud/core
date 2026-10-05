@@ -11,6 +11,8 @@ publish = false
 [workspace.dependencies]
 argon2 = "0.6"
 askama = "0.16"
+# WebDAV over our own filesystem trait (no local or in-memory filesystem).
+dav-server = { version = "0.11", default-features = false }
 chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc"] }
 axum = "0.8"
 dotenvy = "0.15"
@@ -23,6 +25,7 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls-no-p
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 http = "1"
 base64 = "0.22"
+bytes = "1"
 sha2 = "0.11"
 tempfile = "3"
 uuid = { version = "1", features = ["serde"] }

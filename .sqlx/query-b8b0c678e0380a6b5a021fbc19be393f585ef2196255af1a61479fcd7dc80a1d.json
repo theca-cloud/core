@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT o.pk, o.name, o.personal_of IS NOT NULL AS \"personal!\"\n               FROM organization_access($1) a JOIN organization o ON o.pk = a.organization\n               ORDER BY o.pk",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "personal!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "b8b0c678e0380a6b5a021fbc19be393f585ef2196255af1a61479fcd7dc80a1d"
+}

@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT n.is_file, v.uuid AS \"version?\", extract(epoch FROM v.created_at)::float8 AS \"modified?\",\n                              (SELECT coalesce(sum(c.plain_size), 0)::bigint FROM chunk_in_version civ\n                               JOIN chunk c ON c.pk = civ.chunk WHERE civ.version = v.pk) AS \"len?\"\n                       FROM node n LEFT JOIN version v ON v.pk = n.current_version WHERE n.pk = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "is_file",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "version?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "modified?",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 3,
+        "name": "len?",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "390c673489bfb5e2bb26290fc8b518473e1d3b6282650da84bd290bfeec2b222"
+}

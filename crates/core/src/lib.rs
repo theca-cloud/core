@@ -6,14 +6,17 @@
 pub mod api;
 pub mod auth;
 pub mod config;
+pub mod dav;
 pub mod db;
 pub mod email;
 mod error;
+pub mod files;
 pub mod jobs;
 pub mod keys;
 pub mod oidc;
 pub mod settings;
 pub mod storage;
+pub mod stream;
 pub mod totp;
 
 use std::sync::Arc;
