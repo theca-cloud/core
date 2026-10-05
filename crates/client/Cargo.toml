@@ -36,3 +36,7 @@ tokio = { workspace = true, features = ["time", "macros", "rt"] }
 
 [lints]
 workspace = true
+
+# Rust emits these by default (since 1.82); wasm-pack's wasm-opt needs them allowed.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
