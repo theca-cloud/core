@@ -5,6 +5,7 @@
 #   binaries  static binaries for amd64 and arm64 in dist/ (cargo zigbuild)
 #   tags      the image tags in .tags (refuses an already released version)
 #   publish   crates, browser package, tag and Gitea release (prod)
+#             DRY_RUN=1: packages only, prints the release (scripts/release-local.sh)
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -54,19 +55,31 @@ publish)
             "$gitea/api/v1/packages/theca/$1/$2/$version" 2>/dev/null
     }
     for crate in theca-common theca-client theca-core; do
-        published cargo "$crate" ||
-            cargo publish -q --locked --no-verify --registry gitea -p "$crate"
+        if published cargo "$crate"; then
+            echo "$crate $version: already published"
+        else
+            cargo publish -q --locked --no-verify --registry gitea -p "$crate" ${DRY_RUN:+--dry-run}
+        fi
     done
     # The browser package, as @theca/client.
     wasm-pack build crates/client --release --target web --scope theca --out-dir ../../dist/npm
     sed -i 's|"name": "@theca/theca-client"|"name": "@theca/client"|' dist/npm/package.json
     registry=${gitea#https:}/api/packages/theca/npm/
     printf '%s:_authToken=%s\n' "$registry" "$GITEA_TOKEN" >dist/npm/.npmrc
-    published npm %40theca%2Fclient || (cd dist/npm && npm publish --registry "https:$registry")
+    if published npm %40theca%2Fclient; then
+        echo "@theca/client $version: already published"
+    else
+        (cd dist/npm && npm publish --registry "https:$registry" ${DRY_RUN:+--dry-run})
+    fi
     # The tag and the release, with this version's changelog and openapi.json.
     notes=$(awk -v v="## [$version]" 'index($0, v) == 1 {on = 1; next} /^## \[/ {on = 0} on' CHANGELOG.md)
-    id=$(jq -n --arg tag "v$version" --arg sha "$CI_COMMIT_SHA" --arg body "$notes" \
-        '{tag_name: $tag, target_commitish: $sha, name: $tag, body: $body}' |
+    release=$(jq -n --arg tag "v$version" --arg sha "${CI_COMMIT_SHA:-$(git rev-parse HEAD)}" --arg body "$notes" \
+        '{tag_name: $tag, target_commitish: $sha, name: $tag, body: $body}')
+    if [ -n "${DRY_RUN:-}" ]; then
+        echo "$release"
+        exit 0
+    fi
+    id=$(echo "$release" |
         curl -fsS -X POST -H "Authorization: token $GITEA_TOKEN" -H 'Content-Type: application/json' \
             -d @- "$gitea/api/v1/repos/$repo/releases" | jq -r .id)
     curl -fsS -X POST -H "Authorization: token $GITEA_TOKEN" -F attachment=@openapi.json \

@@ -29,6 +29,7 @@ scripts/ci.sh [lint|test|wasm|deny]   # every CI check natively, or one step
 scripts/ci-docker.sh           # the real Woodpecker pipeline, in Docker (needs woodpecker-cli)
 scripts/install-hooks.sh       # run scripts/ci.sh before every push (bypass: git push --no-verify)
 scripts/release.sh --dry-run   # the next version and its changelog (releases: see CONTRIBUTING.md)
+GITEA_TOKEN=... scripts/release-local.sh   # the publish step in the CI image, without publishing
 cargo fmt --all                # fix formatting
 ```
 
