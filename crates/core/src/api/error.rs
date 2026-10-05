@@ -12,6 +12,8 @@ use uuid::Uuid;
 pub struct HttpError {
     status: StatusCode,
     body: ApiError,
+    /// `Retry-After` (rate limits).
+    retry_after: Option<u64>,
 }
 
 impl HttpError {
@@ -23,7 +25,19 @@ impl HttpError {
                 message: message.into(),
                 chunks: vec![],
             },
+            retry_after: None,
         }
+    }
+
+    /// `429`, with when to try again.
+    pub fn too_many(retry_after: std::time::Duration) -> Self {
+        let mut error = Self::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate_limited",
+            "too many attempts: try again later",
+        );
+        error.retry_after = Some(retry_after.as_secs().max(1));
+        error
     }
 
     /// Replaces the error code (e.g. a `forbidden` with a more specific code).
@@ -77,7 +91,13 @@ impl HttpError {
 
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
-        (self.status, Json(self.body)).into_response()
+        let mut response = (self.status, Json(self.body)).into_response();
+        if let Some(secs) = self.retry_after {
+            response
+                .headers_mut()
+                .insert(axum::http::header::RETRY_AFTER, secs.into());
+        }
+        response
     }
 }
 

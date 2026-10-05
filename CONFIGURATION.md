@@ -19,6 +19,8 @@ A test (`tests/configuration.rs`) fails if a variable or a setting read by the c
 | `SERVER_KEY__FILE` | yes | | File containing the server's key (64 hex characters). If the file is empty, the server generates a key and writes it there (the file must then be writable). Derives the key signing the server's own upload/download URLs: rotating it only invalidates the URLs in flight. |
 | `DATA_KEY__FILE` | yes | | File containing the key encrypting secrets stored in the database (TOTP secrets), 64 hex characters; generated into the file if empty. **Back it up with the database and never change it**: without it, those secrets are lost (users must set up TOTP again). |
 | `SETUP_OPEN` | no | `false` | `true`: a fresh instance's setup needs no token (the first visitor sets it up). Otherwise the server prints the setup URL, token included, in its logs at startup. |
+| `TRUSTED_PROXIES` | no | | Comma-separated addresses or CIDRs of the reverse proxies in front of the server (e.g. `172.17.0.1, 10.0.0.0/8`). Their `X-Forwarded-For` gives the client's address. Unset: the peer is the client, so behind an undeclared proxy every client shares the proxy's address (and its rate limits). |
+| `METRICS_ADDR` | no | | Where Prometheus metrics are served (`/metrics`), e.g. `127.0.0.1:9090` or an internal address. Unset: no metrics. Never the public port. |
 | `PUBLIC_URL` | yes | | The URL clients reach the server at, e.g. `https://cloud.example.com`. Used in links and in the server's own presigned URLs. |
 | `LISTEN_ADDR` | no | `0.0.0.0:8080` | Address and port the server listens on. |
 | `RUST_LOG` | no | `info` | Log filter (`tracing` syntax), e.g. `info,theca_core=debug`. |
@@ -40,6 +42,13 @@ Changed through the admin API (`PATCH /api/v1/admin/settings`), which validates 
 | `smtp_username` | | Login, if the server needs one. |
 | `smtp_password_file` | | Path to a file holding the SMTP password (never the password itself). |
 | `smtp_from` | | The sender, e.g. `Theca <noreply@example.com>`. Required with `smtp_host`. |
+| `rate_limit_login_ip` | `30/300` | Login attempts from one client address: count/seconds. Beyond: `429` with `Retry-After`. Limits slow guessing down; none locks anyone out for good. |
+| `rate_limit_login_account` | `10/300` | **Failed** logins on one account (a user logging in normally is never slowed down). |
+| `rate_limit_totp` | `10/300` | Failed TOTP or recovery codes on one account. |
+| `rate_limit_email_address` | `5/3600` | Emails asked for one address (registration, verification, password reset). |
+| `rate_limit_email_ip` | `30/3600` | Emails asked from one client address. |
+| `rate_limit_setup_ip` | `10/60` | Setup attempts from one client address (the setup token). |
+| `rate_limit_invitations` | `100/3600` | Members added to one organization. |
 | `job_chunk_gc_interval_secs` | `3600` (1 h) | How often unreferenced chunks are collected. |
 | `job_trash_purge_interval_secs` | `3600` (1 h) | How often the trash past its retention is purged. |
 | `job_cleanup_interval_secs` | `86400` (24 h) | How often expired tokens, invitations, unverified accounts, old emails and job history are cleaned. |

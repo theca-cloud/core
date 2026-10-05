@@ -180,6 +180,7 @@ pub async fn store(
     let mut ids = Vec::new();
     for chunk in chunks(std::fs::File::open(path)?) {
         let plain = chunk?.data;
+        metrics::counter!("theca_bytes_total", "direction" => "in").increment(plain.len() as u64);
         let hash = ChunkHash::of(&plain);
         let entry = db::chunk::lookup(
             &state.pool,

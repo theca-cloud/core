@@ -443,6 +443,7 @@ async fn put_blob(
             "the uploaded bytes don't match the declared SHA-256",
         ));
     }
+    metrics::counter!("theca_bytes_total", "direction" => "in").increment(body.len() as u64);
     backend(&state, storage)
         .await?
         .put(chunk, body.to_vec())
@@ -461,5 +462,7 @@ async fn get_blob(
     let storage = db::chunk::download_storage(&state.pool, chunk)
         .await?
         .ok_or_else(|| HttpError::not_found("chunk"))?;
-    Ok(backend(&state, storage).await?.get(chunk).await?)
+    let bytes = backend(&state, storage).await?.get(chunk).await?;
+    metrics::counter!("theca_bytes_total", "direction" => "out").increment(bytes.len() as u64);
+    Ok(bytes)
 }

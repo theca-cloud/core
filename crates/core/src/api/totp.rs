@@ -14,6 +14,7 @@ use super::auth::{ClientIp, CurrentAccount};
 use super::error::{ApiJson, HttpError};
 use crate::db;
 use crate::db::account::TotpIdentity;
+use crate::limits::Limit;
 use crate::totp;
 
 pub fn router() -> Router<AppState> {
@@ -34,6 +35,12 @@ pub(super) async fn check_code(
     recovery: bool,
     ip: ClientIp,
 ) -> Result<bool, HttpError> {
+    let settings = state.settings.get();
+    let key = account.to_string();
+    state
+        .limits
+        .check(&settings, Limit::Totp, &key)
+        .map_err(HttpError::too_many)?;
     let ok = if totp::is_recovery_code(code) {
         let (prefix, hash) = totp::recovery_code_hash(account, code);
         recovery && db::account::use_recovery_code(&state.pool, account, &prefix, &hash).await?
@@ -52,6 +59,7 @@ pub(super) async fn check_code(
         }
     };
     if !ok {
+        state.limits.fail(&settings, Limit::Totp, &key);
         tracing::warn!(anomaly = "totp_failed", %account, ip = ?ip.0,
             "wrong, reused or expired TOTP or recovery code");
     }

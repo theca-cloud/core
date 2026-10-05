@@ -21,6 +21,8 @@ async fn app(pool: &PgPool, token: Option<&str>) -> Router {
         backends: Backends::new(pool.clone()),
         cipher: theca_core::keys::DataCipher::new(&[7; 32]),
         setup: SetupState::pending(token.map(str::to_owned)),
+        limits: Default::default(),
+        proxies: Default::default(),
     })
 }
 

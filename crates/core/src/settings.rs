@@ -44,6 +44,8 @@ pub struct Settings {
     pub smtp: Option<Smtp>,
     /// Each background job's interval, by job name.
     pub job_intervals: HashMap<String, Duration>,
+    /// Each rate limit: `(count, window)`, by limit name.
+    pub rate_limits: HashMap<String, (u32, Duration)>,
 }
 
 /// A setting: its key, its default, and what it does.
@@ -126,6 +128,41 @@ pub const DEFINITIONS: &[Definition] = &[
         "smtp_from",
         "",
         "The sender, e.g. Theca <noreply@example.com> (required with smtp_host).",
+    ),
+    def(
+        "rate_limit_login_ip",
+        "30/300",
+        "Logins from one address: count/seconds.",
+    ),
+    def(
+        "rate_limit_login_account",
+        "10/300",
+        "Failed logins on one account: count/seconds.",
+    ),
+    def(
+        "rate_limit_totp",
+        "10/300",
+        "Failed TOTP or recovery codes on one account: count/seconds.",
+    ),
+    def(
+        "rate_limit_email_address",
+        "5/3600",
+        "Emails asked for one address (registration, verification, reset): count/seconds.",
+    ),
+    def(
+        "rate_limit_email_ip",
+        "30/3600",
+        "Emails asked from one address: count/seconds.",
+    ),
+    def(
+        "rate_limit_setup_ip",
+        "10/60",
+        "Setup attempts from one address: count/seconds.",
+    ),
+    def(
+        "rate_limit_invitations",
+        "100/3600",
+        "Members added to one organization: count/seconds.",
     ),
     def(
         "job_chunk_gc_interval_secs",
@@ -259,6 +296,21 @@ impl Settings {
                 Ok((job.to_owned(), interval))
             })
             .collect::<Result<_, Error>>()?;
+        let rate_limits = DEFINITIONS
+            .iter()
+            .filter_map(|d| Some((d.key, d.key.strip_prefix("rate_limit_")?)))
+            .map(|(key, limit)| {
+                let parsed = take(values, key, |v| {
+                    let (count, secs) = v.split_once('/').ok_or("count/seconds, e.g. 10/60")?;
+                    let count: u32 = count.trim().parse().map_err(|e| format!("{e}"))?;
+                    match seconds(secs.trim())? {
+                        Duration::ZERO => Err("a window of at least 1 second".into()),
+                        window => Ok((count, window)),
+                    }
+                })?;
+                Ok((limit.to_owned(), parsed))
+            })
+            .collect::<Result<_, Error>>()?;
         let settings = Self {
             instance_name: take(values, "instance_name", |v| Ok(v.to_owned()))?,
             gc_grace_period: take(values, "gc_grace_period_secs", seconds)?,
@@ -288,6 +340,7 @@ impl Settings {
                 v.parse::<bool>().map_err(|e| format!("{e}"))
             })?,
             job_intervals,
+            rate_limits,
         };
         Ok((settings, values.keys().cloned().collect()))
     }

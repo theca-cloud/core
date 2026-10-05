@@ -122,6 +122,8 @@ async fn state(pool: &PgPool) -> AppState {
         backends: Backends::new(pool.clone()),
         cipher: theca_core::keys::DataCipher::new(&[7; 32]),
         setup: theca_core::api::setup::SetupState::done(),
+        limits: Default::default(),
+        proxies: Default::default(),
     }
 }
 

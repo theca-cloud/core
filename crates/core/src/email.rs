@@ -189,7 +189,10 @@ pub async fn send_due(state: &AppState) -> Result<i64, JobError> {
             )
             .await
             {
-                Ok(()) => sent += 1,
+                Ok(()) => {
+                    sent += 1;
+                    metrics::counter!("theca_emails_total", "outcome" => "sent").increment(1);
+                }
                 Err(Failure::Retry(error)) => {
                     failed(&state.pool, row.pk, row.attempts, &error, false).await?
                 }
@@ -295,6 +298,12 @@ async fn failed(
     give_up: bool,
 ) -> sqlx::Result<()> {
     let delay = RETRIES.get(attempts as usize).filter(|_| !give_up);
+    let outcome = if delay.is_some() {
+        "retried"
+    } else {
+        "given_up"
+    };
+    metrics::counter!("theca_emails_total", "outcome" => outcome).increment(1);
     tracing::warn!(
         email = pk,
         attempts = attempts + 1,

@@ -9,8 +9,12 @@ async fn main() -> ExitCode {
     let _ = dotenvy::dotenv();
 
     theca_core::install_crypto_provider();
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        .with(theca_core::telemetry::AnomalyCounter)
         .init();
 
     let result = match std::env::args().nth(1).as_deref() {

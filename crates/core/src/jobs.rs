@@ -198,6 +198,7 @@ pub async fn supervise<F>(pool: &PgPool, job: &str, (pk, _): Run, timeout: Durat
 where
     F: Future<Output = Result<i64, JobError>> + Send + 'static,
 {
+    let started = std::time::Instant::now();
     let task = tokio::spawn(tokio::time::timeout(timeout, work));
     let (items, error) = match task.await {
         Ok(Ok(Ok(items))) => (items, None),
@@ -209,6 +210,15 @@ where
         ),
         Err(e) => (0, Some(format!("cancelled: {e}"))),
     };
+    let status = if error.is_none() {
+        "success"
+    } else {
+        "failure"
+    };
+    metrics::counter!("theca_job_runs_total", "job" => job.to_owned(), "status" => status)
+        .increment(1);
+    metrics::histogram!("theca_job_duration_seconds", "job" => job.to_owned())
+        .record(started.elapsed().as_secs_f64());
     match &error {
         None => tracing::info!(job, items, "job done"),
         Some(error) => tracing::error!(job, error, "job failed"),

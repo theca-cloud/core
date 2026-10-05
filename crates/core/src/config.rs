@@ -7,6 +7,8 @@ use std::env;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
+use sqlx::types::ipnetwork::IpNetwork;
+
 use crate::Error;
 
 /// What the server needs before it can reach its database.
@@ -19,6 +21,10 @@ pub struct Config {
     pub data_key_file: PathBuf,
     /// `SETUP_OPEN=true`: a fresh instance's setup needs no token.
     pub setup_open: bool,
+    /// `TRUSTED_PROXIES`: reverse proxies whose `X-Forwarded-For` is believed.
+    pub trusted_proxies: Vec<IpNetwork>,
+    /// `METRICS_ADDR`: where Prometheus metrics are served (never the public port).
+    pub metrics_addr: Option<SocketAddr>,
 }
 
 impl Config {
@@ -31,8 +37,34 @@ impl Config {
             server_key_file: required("SERVER_KEY__FILE")?.into(),
             data_key_file: required("DATA_KEY__FILE")?.into(),
             setup_open: setup_open()?,
+            trusted_proxies: trusted_proxies()?,
+            metrics_addr: match env::var("METRICS_ADDR") {
+                Err(_) => None,
+                Ok(v) => Some(v.parse().map_err(|e| Error::InvalidEnv {
+                    name: "METRICS_ADDR",
+                    reason: format!("{e}"),
+                })?),
+            },
         })
     }
+}
+
+/// `TRUSTED_PROXIES`: comma-separated addresses or CIDRs (e.g.
+/// `10.0.0.0/8, 172.17.0.1`). None by default: the peer is the client.
+fn trusted_proxies() -> Result<Vec<IpNetwork>, Error> {
+    let Ok(raw) = env::var("TRUSTED_PROXIES") else {
+        return Ok(Vec::new());
+    };
+    raw.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            s.parse().map_err(|e| Error::InvalidEnv {
+                name: "TRUSTED_PROXIES",
+                reason: format!("{s:?}: {e}"),
+            })
+        })
+        .collect()
 }
 
 /// `SETUP_OPEN`, false by default.

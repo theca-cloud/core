@@ -67,6 +67,8 @@ async fn world(pool: PgPool) -> World {
             backends: Backends::new(pool.clone()),
             cipher: theca_core::keys::DataCipher::new(&[7; 32]),
             setup: theca_core::api::setup::SetupState::done(),
+            limits: Default::default(),
+            proxies: Default::default(),
         }),
         pool,
         organizations: [organizations[0], organizations[1]],

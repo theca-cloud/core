@@ -45,6 +45,10 @@ pub struct AppState {
     pub cipher: DataCipher,
     /// Whether the first-run setup is still to be done.
     pub setup: Arc<setup::SetupState>,
+    /// Rate limit counters.
+    pub limits: crate::limits::Limits,
+    /// Reverse proxies whose `X-Forwarded-For` is believed (`TRUSTED_PROXIES`).
+    pub proxies: Arc<Vec<sqlx::types::ipnetwork::IpNetwork>>,
 }
 
 /// The OpenAPI description of the API, committed as `openapi.json`.
@@ -155,6 +159,7 @@ pub fn router(state: AppState) -> Router {
                 )),
         )
         .merge(dav_routes(state.clone()))
+        .layer(axum::middleware::from_fn(crate::telemetry::track))
         .with_state(state)
 }
 
@@ -277,6 +282,7 @@ mod tests {
             registration_open: false,
             smtp: None,
             job_intervals: Default::default(),
+            rate_limits: Default::default(),
         });
         router(AppState {
             backends: Backends::new(pool.clone()),
@@ -285,6 +291,8 @@ mod tests {
             signer: UrlSigner::new([0; 32], "http://test"),
             cipher: DataCipher::new(&[0; 32]),
             setup: setup::SetupState::done(),
+            limits: Default::default(),
+            proxies: Default::default(),
         })
     }
 

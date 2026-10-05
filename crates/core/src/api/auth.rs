@@ -192,23 +192,47 @@ pub(super) fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> 
         .map(|(_, v)| v)
 }
 
-/// The client's IP address, when known (logged with anomalies on requests that
-/// have no user, like presigned URLs). Never fails.
-// ponytail: the direct peer; behind a reverse proxy that's the proxy. Trusting
-// X-Forwarded-For needs a configured list of trusted proxies.
+/// The client's IP address, when known (rate limits; logged with anomalies).
+/// The peer, unless it's a trusted proxy (`TRUSTED_PROXIES`): then the
+/// rightmost `X-Forwarded-For` address that isn't one (the left part of that
+/// header is whatever the client wrote). Never fails.
 #[derive(Debug, Clone, Copy)]
 pub struct ClientIp(pub Option<IpAddr>);
 
-impl<S: Send + Sync> FromRequestParts<S> for ClientIp {
+impl FromRequestParts<AppState> for ClientIp {
     type Rejection = std::convert::Infallible;
 
-    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
-        Ok(Self(
-            parts
-                .extensions
-                .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
-                .map(|c| c.0.ip()),
-        ))
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let Some(peer) = parts
+            .extensions
+            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+            .map(|c| c.0.ip())
+        else {
+            return Ok(Self(None));
+        };
+        let trusted = |ip: &IpAddr| state.proxies.iter().any(|net| net.contains(*ip));
+        if !trusted(&peer) {
+            return Ok(Self(Some(peer)));
+        }
+        let forwarded: Vec<IpAddr> = parts
+            .headers
+            .get_all("x-forwarded-for")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .flat_map(|v| v.split(','))
+            .filter_map(|s| s.trim().parse().ok())
+            .collect();
+        Ok(Self(Some(
+            forwarded
+                .iter()
+                .rev()
+                .find(|ip| !trusted(ip))
+                .copied()
+                .unwrap_or(peer),
+        )))
     }
 }
 

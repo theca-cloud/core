@@ -40,6 +40,8 @@ lettre.workspace = true
 askama.workspace = true
 dav-server.workspace = true
 tempfile.workspace = true
+metrics.workspace = true
+metrics-exporter-prometheus.workspace = true
 
 [dev-dependencies]
 # The end-to-end smoke test drives the real server binary through the client.

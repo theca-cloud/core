@@ -12,6 +12,7 @@ use super::auth::{ClientIp, CurrentAccount, UserAgent, clear_session_cookie, set
 use super::error::{ApiJson, HttpError};
 use crate::auth::verify_password;
 use crate::db;
+use crate::limits::Limit;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -35,6 +36,17 @@ pub async fn login(
     agent: UserAgent,
     ApiJson(req): ApiJson<api::Login>,
 ) -> Result<(HeaderMap, Json<api::Me>), HttpError> {
+    let settings = state.settings.get();
+    if let Some(ip) = ip.0 {
+        state
+            .limits
+            .hit(&settings, Limit::LoginIp, &ip.to_string())
+            .map_err(HttpError::too_many)?;
+    }
+    state
+        .limits
+        .check(&settings, Limit::LoginAccount, &req.email)
+        .map_err(HttpError::too_many)?;
     let found = db::account::password_of(&state.pool, &req.email).await?;
     let hash = found
         .as_ref()
@@ -42,6 +54,9 @@ pub async fn login(
     if !verify_password(hash, &req.password) {
         let account = found.map(|(_, uuid, _, _, _)| uuid);
         tracing::warn!(anomaly = "login_failed", ?account, ip = ?ip.0, "failed login");
+        state
+            .limits
+            .fail(&settings, Limit::LoginAccount, &req.email);
         return Err(HttpError::new(
             StatusCode::UNAUTHORIZED,
             "invalid_credentials",

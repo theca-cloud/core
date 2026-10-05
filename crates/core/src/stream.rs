@@ -78,6 +78,7 @@ impl VersionReader {
         };
         let from = (offset - self.starts[index]) as usize;
         let to = plain.len().min(from + max);
+        metrics::counter!("theca_bytes_total", "direction" => "out").increment((to - from) as u64);
         Ok(plain.slice(from..to))
     }
 

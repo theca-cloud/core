@@ -13,6 +13,7 @@ use super::error::{ApiJson, HttpError};
 use crate::auth::hash_password;
 use crate::db;
 use crate::email::{self, Email};
+use crate::limits::Limit;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -31,6 +32,23 @@ pub(super) fn check_password(password: &str) -> Result<(), HttpError> {
             "weak_password",
             "a password needs at least 8 characters",
         ));
+    }
+    Ok(())
+}
+
+/// Emails asked for an address, and from an address: limited (spam, and
+/// someone's inbox flooded).
+fn email_limits(state: &AppState, ip: ClientIp, email: &str) -> Result<(), HttpError> {
+    let settings = state.settings.get();
+    state
+        .limits
+        .hit(&settings, Limit::EmailAddress, email)
+        .map_err(HttpError::too_many)?;
+    if let Some(ip) = ip.0 {
+        state
+            .limits
+            .hit(&settings, Limit::EmailIp, &ip.to_string())
+            .map_err(HttpError::too_many)?;
     }
     Ok(())
 }
@@ -79,6 +97,7 @@ async fn log_in(
 ))]
 pub async fn register(
     State(state): State<AppState>,
+    ip: ClientIp,
     ApiJson(req): ApiJson<api::Register>,
 ) -> Result<StatusCode, HttpError> {
     if !state.settings.get().registration_open {
@@ -88,6 +107,7 @@ pub async fn register(
         return Err(email_unavailable());
     }
     let email = check_email(&req.email)?;
+    email_limits(&state, ip, email)?;
     check_password(&req.password)?;
     // Hashed whether or not the address is free: same time either way.
     let hash = hash_password(&req.password);
@@ -139,8 +159,10 @@ pub async fn verify(
 #[utoipa::path(post, path = "/api/v1/auth/verify/resend", request_body = api::EmailAddress, responses((status = 202)))]
 pub async fn resend(
     State(state): State<AppState>,
+    ip: ClientIp,
     ApiJson(req): ApiJson<api::EmailAddress>,
 ) -> Result<StatusCode, HttpError> {
+    email_limits(&state, ip, req.email.trim())?;
     if let Some((account, false, true)) =
         db::account::by_email(&state.pool, req.email.trim()).await?
     {
@@ -155,8 +177,10 @@ pub async fn resend(
 #[utoipa::path(post, path = "/api/v1/auth/password/forgot", request_body = api::EmailAddress, responses((status = 202)))]
 pub async fn forgot(
     State(state): State<AppState>,
+    ip: ClientIp,
     ApiJson(req): ApiJson<api::EmailAddress>,
 ) -> Result<StatusCode, HttpError> {
+    email_limits(&state, ip, req.email.trim())?;
     if let Some((account, _, _)) = db::account::by_email(&state.pool, req.email.trim()).await? {
         let mut tx = state.pool.begin().await?;
         email::enqueue(&mut tx, req.email.trim(), &Email::PasswordReset { account }).await?;

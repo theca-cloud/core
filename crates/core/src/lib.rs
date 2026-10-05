@@ -13,10 +13,12 @@ mod error;
 pub mod files;
 pub mod jobs;
 pub mod keys;
+pub mod limits;
 pub mod oidc;
 pub mod settings;
 pub mod storage;
 pub mod stream;
+pub mod telemetry;
 pub mod totp;
 
 use std::time::Duration;
@@ -74,6 +76,8 @@ pub async fn run() -> Result<(), Error> {
         backends,
         cipher,
         setup,
+        limits: Default::default(),
+        proxies: std::sync::Arc::new(config.trusted_proxies.clone()),
     };
 
     let interrupted = jobs::mark_interrupted(&state.pool).await?;
@@ -86,6 +90,14 @@ pub async fn run() -> Result<(), Error> {
     let (stop, stopping) = tokio::sync::watch::channel(false);
     let mut job_tasks = jobs::spawn_all(state.clone(), stopping);
 
+    if let Some(addr) = config.metrics_addr {
+        let handle = telemetry::install_recorder();
+        let metrics = tokio::net::TcpListener::bind(addr).await?;
+        tracing::info!(%addr, "metrics on /metrics");
+        tokio::spawn(
+            axum::serve(metrics, telemetry::router(handle, state.pool.clone())).into_future(),
+        );
+    }
     let app = api::router(state);
     // Connect info: the client's IP, logged with anomalies.
     axum::serve(

@@ -73,6 +73,15 @@ pub async fn add(
     if organization.personal {
         return Err(personal());
     }
+    let settings = state.settings.get();
+    state
+        .limits
+        .hit(
+            &settings,
+            crate::limits::Limit::Invitations,
+            &organization.pk.to_string(),
+        )
+        .map_err(HttpError::too_many)?;
     let email = req.email.trim();
     if !email.contains('@') {
         return Err(HttpError::bad_request(

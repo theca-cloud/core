@@ -44,6 +44,9 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # SMTP over rustls with ring (like everything else), certificates checked by the platform.
+metrics = "0.24"
+# Rendering only: the server serves /metrics on its own listener (METRICS_ADDR).
+metrics-exporter-prometheus = { version = "0.18", default-features = false }
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "hostname", "tokio1-rustls", "ring", "rustls-platform-verifier"] }
 # No default features: its HTTP client is ours (reqwest 0.13, see oidc.rs).
 openidconnect = { version = "4", default-features = false }

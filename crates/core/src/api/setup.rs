@@ -109,6 +109,13 @@ pub async fn run(
     agent: UserAgent,
     ApiJson(req): ApiJson<api::Setup>,
 ) -> Result<(HeaderMap, Json<api::Me>), HttpError> {
+    if let Some(ip) = ip.0 {
+        let settings = state.settings.get();
+        state
+            .limits
+            .hit(&settings, crate::limits::Limit::SetupIp, &ip.to_string())
+            .map_err(HttpError::too_many)?;
+    }
     let already = || HttpError::conflict("already_set_up", "this instance is already set up");
     if !state.setup.is_pending() {
         return Err(already());
