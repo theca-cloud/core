@@ -12,9 +12,14 @@ publish = false
 axum = "0.8"
 dotenvy = "0.15"
 getrandom = "0.3"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "macros", "migrate"] }
+hmac = "0.13"
+object_store = { version = "0.14", default-features = false, features = ["fs"] }
+sha2 = "0.11"
+tempfile = "3"
+uuid = { version = "1", features = ["serde"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "macros", "migrate", "uuid", "json"] }
 tower = "0.5"
-utoipa = "5"
+utoipa = { version = "5", features = ["uuid"] }
 fastcdc = { version = "5.0.0", features = ["futures"] }
 futures = "0.3.34"
 lz4_flex = "0.14.0"

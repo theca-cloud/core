@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT l.pk, l.owner, l.storage, m.role\n           FROM library l JOIN library_member m ON m.library = l.pk AND m.\"user\" = $1\n           WHERE l.uuid = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "owner",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "storage",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "role",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d62c477134b5c3812002495cb1320a206709210dff4375d5b690d1c6622be976"
+}

@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT n.pk, n.is_file, n.current_version, l.pk AS library, l.owner, l.storage, m.role\n           FROM node n\n           JOIN library l ON l.pk = n.library\n           JOIN library_member m ON m.library = l.pk AND m.\"user\" = $1\n           WHERE n.uuid = $2 AND n.deleted_at IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "is_file",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "current_version",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "library",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "owner",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "storage",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "role",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "36a08eb33aa8e44352005e050cadaf958bf2d6d40579c42a04271b81567feaf1"
+}

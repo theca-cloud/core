@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO library_namespace (organization, library, namespace)\n         SELECT $1, $2, unnest($3::bigint[])",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ecdd69b530bff4a2f3b74e856d1e187740ea7885628d7ea5c55166f1e4df692b"
+}

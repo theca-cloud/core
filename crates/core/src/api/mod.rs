@@ -1,4 +1,8 @@
-//! HTTP API. Unversioned probes (`/api/health`, `/api/version`) and, later, `/api/v1`.
+//! HTTP API. Unversioned probes (`/api/health`, `/api/version`) and `/api/v1`.
+
+pub mod auth;
+pub mod error;
+mod v1;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -13,17 +17,36 @@ use sqlx::PgPool;
 use utoipa::{OpenApi, ToSchema};
 
 use crate::settings::Settings;
+use crate::storage::UrlSigner;
 
 /// Shared by every handler.
 #[derive(Clone)]
 pub struct AppState {
     pub pool: PgPool,
     pub settings: Arc<Settings>,
+    /// Signs and verifies the server's own presigned URLs (filesystem backend).
+    pub signer: UrlSigner,
 }
 
 /// The OpenAPI description of the API, committed as `openapi.json`.
 #[derive(OpenApi)]
-#[openapi(info(title = "Theca"), paths(health, version))]
+#[openapi(
+    info(title = "Theca"),
+    paths(
+        health,
+        version,
+        v1::create_library,
+        v1::list_libraries,
+        v1::children,
+        v1::lookup,
+        v1::upload_urls,
+        v1::announce,
+        v1::cancel,
+        v1::commit,
+        v1::download,
+    ),
+    components(schemas(theca_common::api::ApiError, theca_common::api::ChunkState))
+)]
 pub struct ApiDoc;
 
 /// Builds the router.
@@ -31,6 +54,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .route("/api/version", get(version))
+        .nest("/api/v1", v1::router())
         .with_state(state)
 }
 
@@ -118,7 +142,11 @@ mod tests {
             instance_name: "Theca".into(),
             gc_grace_period: Duration::from_secs(1),
         });
-        router(AppState { pool, settings })
+        router(AppState {
+            pool,
+            settings,
+            signer: UrlSigner::new([0; 32], "http://test"),
+        })
     }
 
     #[sqlx::test]

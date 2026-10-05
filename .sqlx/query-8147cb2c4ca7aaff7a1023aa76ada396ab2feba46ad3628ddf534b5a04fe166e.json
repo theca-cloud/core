@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT implementation, details FROM storage WHERE pk = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "implementation",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "details",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "8147cb2c4ca7aaff7a1023aa76ada396ab2feba46ad3628ddf534b5a04fe166e"
+}

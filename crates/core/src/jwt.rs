@@ -4,9 +4,10 @@ use std::path::Path;
 
 use crate::Error;
 
-/// HS256 key (32 bytes). Signing comes with authentication.
+/// HS256 key (32 bytes). Signing JWTs comes with authentication; until then it
+/// also derives the other server keys (see [`JwtKey::derive`]).
 #[derive(Clone)]
-pub struct JwtKey(#[allow(dead_code)] [u8; 32]);
+pub struct JwtKey([u8; 32]);
 
 impl std::fmt::Debug for JwtKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -42,6 +43,17 @@ impl JwtKey {
             *byte = u8::from_str_radix(&content[2 * i..2 * i + 2], 16).map_err(|_| invalid())?;
         }
         Ok(Self(key))
+    }
+}
+
+impl JwtKey {
+    /// A key for another purpose, derived from this one (HMAC-SHA256 of `label`),
+    /// so the server has a single secret to manage.
+    pub fn derive(&self, label: &str) -> [u8; 32] {
+        use hmac::{KeyInit, Mac};
+        let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(&self.0).expect("any key length");
+        mac.update(label.as_bytes());
+        mac.finalize().into_bytes().into()
     }
 }
 

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO chunk_in_version (organization, version, chunk, position)\n         SELECT $1, $2, chunk, (position - 1)::int\n         FROM unnest($3::bigint[]) WITH ORDINALITY AS t (chunk, position)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "aaa3357c5d1195ae289094cd8479c605e281d94d803cf19c237a8324b1642763"
+}

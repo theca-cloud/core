@@ -13,16 +13,22 @@ path = "src/main.rs"
 axum.workspace = true
 dotenvy.workspace = true
 getrandom.workspace = true
+hmac.workspace = true
+object_store.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 sqlx.workspace = true
+theca-common = { path = "../common", features = ["openapi"] }
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 utoipa.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 tower.workspace = true
 
 [lints]

@@ -9,6 +9,7 @@ pub mod db;
 mod error;
 pub mod jwt;
 pub mod settings;
+pub mod storage;
 
 use std::sync::Arc;
 
@@ -22,7 +23,8 @@ use crate::settings::Settings;
 /// Starts the server and returns when it stops (SIGTERM or Ctrl-C).
 pub async fn run() -> Result<(), Error> {
     let config = Config::from_env()?;
-    let _jwt_key = JwtKey::load_or_generate(&config.jwt_key_file)?;
+    let jwt_key = JwtKey::load_or_generate(&config.jwt_key_file)?;
+    let signer = storage::UrlSigner::new(jwt_key.derive("theca blob url v1"), &config.public_url);
     let pool = db::connect(&config.database_url).await?;
     let settings = Arc::new(Settings::load(&pool).await?);
 
@@ -30,9 +32,16 @@ pub async fn run() -> Result<(), Error> {
     // health probe fails during startup.
     let listener = tokio::net::TcpListener::bind(config.listen_addr).await?;
     tracing::info!(addr = %config.listen_addr, public_url = config.public_url, "listening");
-    axum::serve(listener, api::router(AppState { pool, settings }))
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        api::router(AppState {
+            pool,
+            settings,
+            signer,
+        }),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
     tracing::info!("stopped");
     Ok(())
 }

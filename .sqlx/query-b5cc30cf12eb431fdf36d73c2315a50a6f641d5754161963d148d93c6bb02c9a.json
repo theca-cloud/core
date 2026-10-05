@@ -1,0 +1,43 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH scope AS (\n               SELECT $1::bigint AS library\n               UNION\n               SELECT other.library FROM library_namespace mine\n               JOIN library_namespace other ON other.namespace = mine.namespace\n               WHERE mine.library = $1\n           )\n           SELECT DISTINCT ON (c.hash) c.pk, c.uuid, c.hash, c.ready\n           FROM chunk c\n           WHERE c.organization = $2 AND c.storage = $3 AND c.hash = ANY($4)\n             AND c.deleting_at IS NULL\n             AND (c.library = $1 OR (c.ready AND EXISTS (\n                     SELECT 1 FROM chunk_in_version civ\n                     JOIN version v ON v.pk = civ.version\n                     JOIN node n ON n.pk = v.file\n                     WHERE civ.chunk = c.pk AND n.library IN (SELECT library FROM scope))))\n           ORDER BY c.hash, c.ready DESC, c.pk",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "hash",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 3,
+        "name": "ready",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "ByteaArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b5cc30cf12eb431fdf36d73c2315a50a6f641d5754161963d148d93c6bb02c9a"
+}

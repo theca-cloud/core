@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT storage FROM chunk WHERE uuid = $1 AND deleting_at IS NULL\n         AND ($2 = (uploaded_at IS NULL) OR NOT $2)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "storage",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "66bd4e63999bb93e75e8a41ee7bc6e82daa96680beec7779a2310df7354bfe2d"
+}

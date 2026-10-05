@@ -39,6 +39,356 @@
         }
       }
     },
+    "/api/v1/chunks/announce": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Mark uploaded chunks as ready. The real size is read from the backend; a\nchunk whose object is missing stays pending (`upload`).",
+        "operationId": "announce",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Announce"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Chunks still to upload (object missing), with fresh URLs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ChunkUrl"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/chunks/cancel": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Cancel an upload: deletes the given chunks that no version references.",
+        "operationId": "cancel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Chunks"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/chunks/lookup": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Which chunks to upload. Misses become pending chunks; every chunk returned is\ntouched (repeat the lookup as a keepalive during long uploads).",
+        "operationId": "lookup",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Lookup"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LookupEntry"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/chunks/upload-urls": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Presigned upload URLs for pending chunks (request them in batches).",
+        "operationId": "upload_urls",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Chunks"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ChunkUrl"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Chunks not pending or not writable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/files/commit": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Commit a version: a new file (`parent` + `name`) or a new version (`file`).",
+        "operationId": "commit",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Commit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Committed"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Chunks not allowed (`chunk_not_allowed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`name_taken`, `chunk_missing`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/files/{id}/download": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "The current version's chunks, in order, with presigned download URLs.",
+        "operationId": "download",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Download"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/libraries": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "The libraries the user is a member of.",
+        "operationId": "list_libraries",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Library"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Create a library: its root folder, the creator as `write` member, in the given\nnamespaces. Storage: the organization's default, else the instance default.",
+        "operationId": "create_library",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateLibrary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Library"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown namespace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Name taken, or no storage configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{id}/children": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "A folder's children.",
+        "operationId": "children",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Node"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/version": {
       "get": {
         "tags": [],
@@ -61,6 +411,268 @@
   },
   "components": {
     "schemas": {
+      "Announce": {
+        "type": "object",
+        "description": "One chunk of `POST /chunks/announce`.",
+        "required": [
+          "chunk",
+          "plain_size",
+          "compression"
+        ],
+        "properties": {
+          "chunk": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The uploaded chunk."
+          },
+          "compression": {
+            "type": "string",
+            "description": "How it was compressed."
+          },
+          "plain_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Its size before compression and encryption.",
+            "minimum": 0
+          }
+        }
+      },
+      "ApiError": {
+        "type": "object",
+        "description": "An API error: a stable machine-readable `code` and a human message.",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "chunks": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Chunks concerned, for `chunk_missing` and `chunk_not_allowed`."
+          },
+          "code": {
+            "type": "string",
+            "description": "Stable identifier, e.g. `name_taken`, `chunk_missing`."
+          },
+          "message": {
+            "type": "string",
+            "description": "Explanation for humans."
+          }
+        }
+      },
+      "ChunkState": {
+        "type": "string",
+        "description": "Whether a chunk must be uploaded.",
+        "enum": [
+          "ready",
+          "upload",
+          "unknown"
+        ]
+      },
+      "ChunkUrl": {
+        "type": "object",
+        "description": "A presigned URL for one chunk.",
+        "required": [
+          "chunk",
+          "url"
+        ],
+        "properties": {
+          "chunk": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The chunk."
+          },
+          "url": {
+            "type": "string",
+            "description": "Where to `PUT` (upload) or `GET` (download) it, without authentication."
+          }
+        }
+      },
+      "Chunks": {
+        "type": "object",
+        "description": "A list of chunks (`/chunks/upload-urls`, `/chunks/cancel`).",
+        "required": [
+          "chunks"
+        ],
+        "properties": {
+          "chunks": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The chunks."
+          }
+        }
+      },
+      "Commit": {
+        "type": "object",
+        "description": "`POST /files/commit`: either `file` (a new version of an existing file) or\n`parent` + `name` (a new file).",
+        "required": [
+          "library",
+          "chunks"
+        ],
+        "properties": {
+          "base_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The version the client started from (none for a new file)."
+          },
+          "chunks": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The file's chunks, in order."
+          },
+          "file": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "An existing file."
+          },
+          "library": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The library."
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Description of the version."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name of a new file."
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The folder of a new file."
+          }
+        }
+      },
+      "Committed": {
+        "type": "object",
+        "description": "The result of a commit.",
+        "required": [
+          "file",
+          "version",
+          "conflict"
+        ],
+        "properties": {
+          "conflict": {
+            "type": "boolean",
+            "description": "The base wasn't the current version: another branch exists."
+          },
+          "file": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The file."
+          },
+          "version": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The new version, now current."
+          }
+        }
+      },
+      "CreateLibrary": {
+        "type": "object",
+        "description": "`POST /libraries`.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The library name (same rules as file names)."
+          },
+          "namespaces": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Existing namespaces of the organization to put the library in. Empty:\nthe library only dedups with itself."
+          }
+        }
+      },
+      "Download": {
+        "type": "object",
+        "description": "`GET /files/{id}/download`.",
+        "required": [
+          "version",
+          "chunks"
+        ],
+        "properties": {
+          "chunks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DownloadChunk"
+            },
+            "description": "Its chunks, in order."
+          },
+          "version": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The version downloaded (the current one)."
+          }
+        }
+      },
+      "DownloadChunk": {
+        "type": "object",
+        "description": "One chunk of a download, in order.",
+        "required": [
+          "chunk",
+          "hash",
+          "compression",
+          "plain_size",
+          "url"
+        ],
+        "properties": {
+          "chunk": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The chunk."
+          },
+          "compression": {
+            "type": "string",
+            "description": "How it's compressed."
+          },
+          "hash": {
+            "type": "string",
+            "description": "Its hash, to verify the downloaded plaintext."
+          },
+          "plain_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Its size once decompressed.",
+            "minimum": 0
+          },
+          "url": {
+            "type": "string",
+            "description": "Presigned `GET` URL."
+          }
+        }
+      },
       "Health": {
         "type": "object",
         "description": "Health report. The contract is the HTTP status (200 / 503); the body is informational.",
@@ -82,6 +694,101 @@
           "status": {
             "type": "string",
             "description": "`ok` or `failing`."
+          }
+        }
+      },
+      "Library": {
+        "type": "object",
+        "description": "A library.",
+        "required": [
+          "id",
+          "name",
+          "root"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The library."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "root": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Its root folder."
+          }
+        }
+      },
+      "Lookup": {
+        "type": "object",
+        "description": "`POST /chunks/lookup`.",
+        "required": [
+          "library",
+          "hashes"
+        ],
+        "properties": {
+          "hashes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Hashes of the file's chunks."
+          },
+          "library": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The library being uploaded into."
+          }
+        }
+      },
+      "LookupEntry": {
+        "type": "object",
+        "description": "One hash of a lookup.",
+        "required": [
+          "hash",
+          "chunk",
+          "state"
+        ],
+        "properties": {
+          "chunk": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The chunk to reference in the commit."
+          },
+          "hash": {
+            "type": "string",
+            "description": "The hash looked up."
+          },
+          "state": {
+            "$ref": "#/components/schemas/ChunkState",
+            "description": "Upload it or not."
+          }
+        }
+      },
+      "Node": {
+        "type": "object",
+        "description": "A file or folder.",
+        "required": [
+          "id",
+          "name",
+          "is_file"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The node."
+          },
+          "is_file": {
+            "type": "boolean",
+            "description": "A file (true) or a folder (false)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
           }
         }
       },

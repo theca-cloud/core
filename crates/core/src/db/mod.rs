@@ -1,4 +1,11 @@
-//! Database connection, compatibility check and migrations.
+//! The database: connection, compatibility check, migrations, and every query
+//! (handlers never write SQL). Refusals by named constraints are mapped to API
+//! errors in `api::error`.
+
+pub mod chunk;
+pub mod file;
+pub mod library;
+pub mod user;
 
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
@@ -16,7 +23,7 @@ pub async fn connect(url: &str) -> Result<PgPool, Error> {
     Ok(pool)
 }
 
-/// Postgres 17+ with the built-in `C.UTF-8` collation: case-insensitive name
+/// Postgres 18+ (built-in `uuidv7()`) with the built-in `C.UTF-8` collation: case-insensitive name
 /// uniqueness (`lower()`) depends on it being identical on every install.
 pub async fn check(pool: &PgPool) -> Result<(), Error> {
     let row = sqlx::query!(
@@ -27,9 +34,9 @@ pub async fn check(pool: &PgPool) -> Result<(), Error> {
     )
     .fetch_one(pool)
     .await?;
-    if row.version < 170_000 {
+    if row.version < 180_000 {
         return Err(Error::UnsupportedDatabase(format!(
-            "PostgreSQL 17 or newer is required (found version number {})",
+            "PostgreSQL 18 or newer is required (found version number {})",
             row.version
         )));
     }

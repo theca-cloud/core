@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.uuid, c.hash, c.compression AS \"compression!\", c.plain_size AS \"plain_size!\", c.storage\n           FROM chunk_in_version civ JOIN chunk c ON c.pk = civ.chunk\n           WHERE civ.version = $1 ORDER BY civ.position",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "hash",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 2,
+        "name": "compression!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "plain_size!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "storage",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "d83a05ec2b2b6b493374d7b92347e2907bf31da790a025ec93a57fa1fc49210f"
+}

@@ -13,6 +13,12 @@ serde.workspace = true
 thiserror.workspace = true
 twox-hash.workspace = true
 unicode-normalization.workspace = true
+utoipa = { workspace = true, optional = true }
+uuid.workspace = true
+
+[features]
+# OpenAPI schemas for the API types, only needed by the server.
+openapi = ["dep:utoipa"]
 
 [dev-dependencies]
 serde_json.workspace = true
