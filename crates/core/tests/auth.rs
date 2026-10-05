@@ -34,7 +34,7 @@ async fn world(pool: PgPool) -> World {
     sqlx::raw_sql(&format!(
         r#"
         BEGIN;
-        INSERT INTO account (pk, email) OVERRIDING SYSTEM VALUE VALUES (1, 'a@x.ch'), (2, 'b@x.ch');
+        INSERT INTO account (pk, email, verified) OVERRIDING SYSTEM VALUE VALUES (1, 'a@x.ch', true), (2, 'b@x.ch', true);
         INSERT INTO identity (account, kind, details)
             SELECT pk, 'password', jsonb_build_object('hash', '{hash}') FROM account;
         INSERT INTO organization (pk, name, owner) OVERRIDING SYSTEM VALUE VALUES (1, 'one', 1), (2, 'two', 2);
@@ -42,6 +42,8 @@ async fn world(pool: PgPool) -> World {
             VALUES (1, 1, 1, now()), (2, 1, 2, now()), (3, 2, 1, now()), (4, 2, 2, NULL);
         INSERT INTO storage (name, implementation, details, is_default)
             VALUES ('main', 'filesystem', '{{"path": "{}"}}', true);
+        -- The rows above have explicit keys: move the sequences past them.
+        SELECT setval(pg_get_serial_sequence(t, 'pk'), 100) FROM unnest(ARRAY['account', 'organization', '"user"']) AS t;
         COMMIT;
         "#,
         dir.path().display()
@@ -1191,5 +1193,62 @@ async fn oidc_takeover_is_contained(pool: PgPool) {
     assert_eq!(
         w.app_password(s, outside).await.unwrap_err().status,
         StatusCode::NOT_FOUND
+    );
+}
+
+/// With registration open, an unknown identity from an instance-wide provider
+/// creates an account; never over an unverified account (someone may have
+/// registered the address first), never through an organization's provider.
+#[sqlx::test]
+async fn oidc_sign_up(pool: PgPool) {
+    sqlx::query(
+        "INSERT INTO setting (key, value) VALUES ('registration', 'open'), ('oidc_link_by_email', 'true')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let w = world(pool).await;
+    let idp = fake_idp().await;
+    let google = w.provider(&idp, "Google", None).await;
+
+    let new = w
+        .oidc_login(google, &idp, ("g-new", "new@x.ch", true))
+        .await;
+    assert_eq!(new.location.as_deref(), Some(HOME));
+    let session = format!("theca_session={}", new.cookie("theca_session").unwrap());
+    let me: api::Me = serde_json::from_value(w.get("/api/v1/me", &session).await.body).unwrap();
+    assert_eq!(me.email, "new@x.ch");
+    assert!(me.organizations[0].personal);
+    assert_eq!(
+        w.get("/api/v1/auth/sessions", &session).await.status,
+        StatusCode::OK,
+        "a full session"
+    );
+    let again = w.oidc_login(google, &idp, ("g-new", "", false)).await;
+    assert_eq!(
+        again.location.as_deref(),
+        Some(HOME),
+        "the identity was linked"
+    );
+
+    sqlx::query("INSERT INTO account (email) VALUES ('squat@x.ch')")
+        .execute(&w.pool)
+        .await
+        .unwrap();
+    let squatted = w
+        .oidc_login(google, &idp, ("g-squat", "squat@x.ch", true))
+        .await;
+    assert_eq!(
+        squatted.location.as_deref(),
+        Some("http://test/login?error=unknown_identity")
+    );
+
+    let theirs = w.provider(&idp, "Two's SSO", Some(2)).await;
+    let refused = w
+        .oidc_login(theirs, &idp, ("o-new", "other@x.ch", true))
+        .await;
+    assert_eq!(
+        refused.location.as_deref(),
+        Some("http://test/login?error=unknown_identity")
     );
 }

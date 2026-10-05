@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO account (email) VALUES ($1) RETURNING pk, uuid",
+  "query": "INSERT INTO account (email) VALUES ($1) ON CONFLICT ((lower(email))) DO NOTHING RETURNING pk, uuid",
   "describe": {
     "columns": [
       {
@@ -24,5 +24,5 @@
       false
     ]
   },
-  "hash": "1cbe38a1de3342738050bc55ec25db48562d43347440e764c5aa45d2af20afd7"
+  "hash": "fbc50687f6358f93195fbdeac4e5ff7f027433a533167a00705df15ad007e96c"
 }

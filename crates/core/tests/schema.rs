@@ -206,6 +206,23 @@ async fn account_email_unique_ignoring_case(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn personal_organizations(pool: PgPool) {
+    fixture(&pool).await;
+    // Organization 1 is owned by account 1: it can be account 1's personal one, not account 2's.
+    assert_refused(
+        &pool,
+        "organization_personal_owner",
+        "UPDATE organization SET personal_of = 2 WHERE pk = 1",
+    )
+    .await;
+    assert_accepted(
+        &pool,
+        "UPDATE organization SET personal_of = 1 WHERE pk = 1",
+    )
+    .await;
+}
+
+#[sqlx::test]
 async fn a_leaving_author_keeps_their_versions(pool: PgPool) {
     fixture(&pool).await;
     sqlx::raw_sql(r#"UPDATE version SET author = 2 WHERE pk = 1; DELETE FROM "user" WHERE pk = 2"#)

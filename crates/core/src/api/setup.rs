@@ -131,9 +131,7 @@ pub async fn run(
     if !req.admin_email.contains('@') {
         return Err(invalid("the admin's email is invalid"));
     }
-    if req.admin_password.chars().count() < 8 {
-        return Err(invalid("the admin's password needs at least 8 characters"));
-    }
+    super::accounts::check_password(&req.admin_password)?;
     if req.organization.trim().is_empty() {
         return Err(invalid("the organization needs a name"));
     }

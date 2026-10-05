@@ -234,23 +234,45 @@ async fn link_by_email(
     provider: &Provider,
     asserted: &oidc::Asserted,
 ) -> Result<Uuid, &'static str> {
-    // ponytail: no account → refused; creating one comes with registration (step 10).
-    let email = asserted
+    let verified_email = asserted
         .email
         .as_deref()
         .filter(|_| asserted.email_verified);
-    let (Some(email), true) = (email, state.settings.oidc_link_by_email) else {
+    // A verified account with the address the provider verified: linked, if allowed.
+    if let (Some(email), true) = (verified_email, state.settings.oidc_link_by_email) {
+        let found = db::identity::verified_account_by_email(&state.pool, email)
+            .await
+            .map_err(|_| "internal")?;
+        if let Some((pk, uuid)) = found {
+            db::identity::link(&state.pool, pk, provider.pk, &asserted.subject)
+                .await
+                .map_err(|_| "internal")?;
+            tracing::info!(account = %uuid, provider = %provider.uuid, "OIDC identity linked by email");
+            return Ok(uuid);
+        }
+    }
+    // Sign-up: an instance-wide provider, registration open, an address
+    // without an account. (An organization's provider can't create members.)
+    let email = asserted.email.as_deref().filter(|e| e.contains('@'));
+    let (Some(email), None, true) = (
+        email,
+        provider.organization,
+        state.settings.registration_open,
+    ) else {
         return Err("unknown_identity");
     };
-    let (pk, uuid) = db::identity::account_by_email(&state.pool, email)
-        .await
-        .map_err(|_| "internal")?
-        .ok_or("unknown_identity")?;
-    db::identity::link(&state.pool, pk, provider.pk, &asserted.subject)
-        .await
-        .map_err(|_| "internal")?;
-    tracing::info!(account = %uuid, provider = %provider.uuid, "OIDC identity linked by email");
-    Ok(uuid)
+    let account = db::identity::sign_up(
+        &state.pool,
+        email,
+        asserted.email_verified,
+        provider.pk,
+        &asserted.subject,
+    )
+    .await
+    .map_err(|_| "internal")?
+    .ok_or("unknown_identity")?;
+    tracing::info!(%account, provider = %provider.uuid, "account created through OIDC");
+    Ok(account)
 }
 
 async fn load(state: &AppState, provider: Uuid) -> Option<Provider> {

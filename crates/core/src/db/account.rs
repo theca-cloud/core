@@ -93,44 +93,98 @@ pub async fn authenticate(
     }))
 }
 
-/// Creates an account with a password (tests, setup wizard, registration).
-pub async fn create_with_password(
-    pool: &PgPool,
+/// Self-registration: an unverified account with its password and its
+/// personal organization. `None` if the address has an account.
+pub async fn register(
+    db: &mut sqlx::PgConnection,
     email: &str,
     password_hash: &str,
-) -> sqlx::Result<(i64, Uuid)> {
-    let mut tx = pool.begin().await?;
-    let account = sqlx::query!(
-        "INSERT INTO account (email) VALUES ($1) RETURNING pk, uuid",
+) -> sqlx::Result<Option<Uuid>> {
+    let Some(account) = sqlx::query!(
+        "INSERT INTO account (email) VALUES ($1) ON CONFLICT ((lower(email))) DO NOTHING RETURNING pk, uuid",
         email
     )
-    .fetch_one(&mut *tx)
-    .await?;
-    sqlx::query!(
-        "INSERT INTO identity (account, kind, details) VALUES ($1, 'password', jsonb_build_object('hash', $2::text))",
-        account.pk,
-        password_hash
-    )
-    .execute(&mut *tx)
-    .await?;
-    tx.commit().await?;
-    Ok((account.pk, account.uuid))
+    .fetch_optional(&mut *db)
+    .await?
+    else {
+        return Ok(None);
+    };
+    set_password(db, account.pk, password_hash).await?;
+    super::organization::create(db, account.pk, email, true).await?;
+    Ok(Some(account.uuid))
 }
 
-/// The account and password hash for an email (case-insensitive).
+/// Sets (or replaces) an account's password.
+pub async fn set_password(
+    db: &mut sqlx::PgConnection,
+    account: i64,
+    password_hash: &str,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "INSERT INTO identity (account, kind, details) VALUES ($1, 'password', jsonb_build_object('hash', $2::text))
+         ON CONFLICT (account) WHERE kind = 'password' DO UPDATE SET details = excluded.details",
+        account,
+        password_hash
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Marks an account's email verified (its owner proved the inbox). Returns its pk.
+pub async fn set_verified(db: &mut sqlx::PgConnection, account: Uuid) -> sqlx::Result<Option<i64>> {
+    sqlx::query_scalar!(
+        "UPDATE account SET verified = true WHERE uuid = $1 RETURNING pk",
+        account
+    )
+    .fetch_optional(db)
+    .await
+}
+
+/// Revokes all of an account's sessions (e.g. after a password reset).
+pub async fn revoke_sessions(
+    db: &mut sqlx::PgConnection,
+    account: Uuid,
+    reason: &str,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE token SET revoked_at = now(), revocation_reason = $2
+         WHERE resource = $1 AND usage = 'session' AND revoked_at IS NULL",
+        account,
+        reason
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// An account by email: `(uuid, verified, has a password)`.
+pub async fn by_email(pool: &PgPool, email: &str) -> sqlx::Result<Option<(Uuid, bool, bool)>> {
+    let row = sqlx::query!(
+        r#"SELECT a.uuid, a.verified,
+                  EXISTS (SELECT 1 FROM identity WHERE account = a.pk AND kind = 'password') AS "password!"
+           FROM account a WHERE lower(a.email) = lower($1)"#,
+        email
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| (r.uuid, r.verified, r.password)))
+}
+
+/// The account, password hash and verified flag for an email (case-insensitive).
 pub async fn password_of(
     pool: &PgPool,
     email: &str,
-) -> sqlx::Result<Option<(i64, Uuid, Option<String>)>> {
+) -> sqlx::Result<Option<(i64, Uuid, Option<String>, bool)>> {
     let row = sqlx::query!(
-        r#"SELECT a.pk, a.uuid, i.details->>'hash' AS "hash?"
+        r#"SELECT a.pk, a.uuid, i.details->>'hash' AS "hash?", a.verified
            FROM account a LEFT JOIN identity i ON i.account = a.pk AND i.kind = 'password'
            WHERE lower(a.email) = lower($1)"#,
         email
     )
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(|r| (r.pk, r.uuid, r.hash)))
+    Ok(row.map(|r| (r.pk, r.uuid, r.hash, r.verified)))
 }
 
 /// Opens a session: a refresh token (returned once), its row, and its uuid.
@@ -232,7 +286,8 @@ pub async fn me(pool: &PgPool, account: i64) -> sqlx::Result<api::Me> {
         .await?;
     let organizations = sqlx::query_as!(
         api::Membership,
-        r#"SELECT o.uuid AS organization, o.name, u.joined_at IS NOT NULL AS "joined!"
+        r#"SELECT o.uuid AS organization, o.name, u.joined_at IS NOT NULL AS "joined!",
+                  o.personal_of IS NOT NULL AS "personal!"
            FROM "user" u JOIN organization o ON o.pk = u.organization
            WHERE u.account = $1 ORDER BY lower(o.name)"#,
         account
@@ -499,4 +554,58 @@ async fn revoke_recovery_codes(
     .execute(&mut **tx)
     .await?;
     Ok(())
+}
+
+/// A one-off token (email verification, password reset, invitation) for
+/// `resource`, created at send time. Revokes the previous unused ones of the
+/// same usage and resource: only the latest link works.
+pub async fn create_one_off(
+    db: &mut sqlx::PgConnection,
+    usage: &str,
+    resource: Uuid,
+) -> sqlx::Result<OpaqueToken> {
+    sqlx::query!(
+        "UPDATE token SET revoked_at = now(), revocation_reason = 'replaced'
+         WHERE usage = $1 AND resource = $2 AND revoked_at IS NULL",
+        usage,
+        resource
+    )
+    .execute(&mut *db)
+    .await?;
+    let token = OpaqueToken::generate();
+    sqlx::query!(
+        "INSERT INTO token (usage, resource, name, prefix, hash) VALUES ($1, $2, $1, $3, $4)",
+        usage,
+        resource,
+        token.prefix,
+        &token.hash[..]
+    )
+    .execute(&mut *db)
+    .await?;
+    Ok(token)
+}
+
+/// Uses a one-off token: valid (right usage, not used or replaced, younger
+/// than `lifetime`) once. Returns its resource.
+pub async fn consume_one_off(
+    db: &mut sqlx::PgConnection,
+    usage: &str,
+    token: &str,
+    lifetime: Duration,
+) -> sqlx::Result<Option<Uuid>> {
+    let Some((prefix, hash)) = OpaqueToken::parse(token) else {
+        return Ok(None);
+    };
+    sqlx::query_scalar!(
+        "UPDATE token SET revoked_at = now(), revocation_reason = 'used'
+         WHERE prefix = $1 AND hash = $2 AND usage = $3 AND revoked_at IS NULL
+           AND created_at > now() - make_interval(secs => $4)
+         RETURNING resource",
+        prefix,
+        &hash[..],
+        usage,
+        lifetime.as_secs_f64()
+    )
+    .fetch_optional(db)
+    .await
 }

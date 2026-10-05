@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE email SET sent_at = now(), attempts = attempts + 1 WHERE pk = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ebfef1ec6ad1b2f497b3f79970705e3c33c17d26fbd1cde8ba6ce8b5f07ebe4b"
+}

@@ -58,6 +58,8 @@ DATABASE_URL__FILE=data/secrets/database_url
 SERVER_KEY__FILE=data/secrets/server_key
 DATA_KEY__FILE=data/secrets/data_key
 PUBLIC_URL=http://localhost:8080
+# SMTP for tests (Mailpit: SMTP on 1025, API on 8025).
+MAILPIT_TEST_HOST=localhost
 # S3 backend for tests (Garage).
 S3_TEST_HOST=http://localhost:3900
 S3_TEST_REGION=garage

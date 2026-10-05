@@ -1,0 +1,5 @@
+Someone tried to create a {{ e.instance_name }} account with your email address, but you already have one.
+
+If it was you, log in, or reset your password if you forgot it. Otherwise, ignore this email: nothing changed.
+
+{{ e.public_url }}

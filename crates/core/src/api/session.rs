@@ -27,6 +27,7 @@ pub fn router() -> Router<AppState> {
 #[utoipa::path(post, path = "/api/v1/auth/login", request_body = api::Login, responses(
     (status = 200, body = api::Me),
     (status = 401, description = "`invalid_credentials`, `totp_required`, `invalid_totp`", body = api::ApiError),
+    (status = 403, description = "`email_not_verified`", body = api::ApiError),
 ))]
 pub async fn login(
     State(state): State<AppState>,
@@ -35,9 +36,9 @@ pub async fn login(
     ApiJson(req): ApiJson<api::Login>,
 ) -> Result<(HeaderMap, Json<api::Me>), HttpError> {
     let found = db::account::password_of(&state.pool, &req.email).await?;
-    let hash = found.as_ref().and_then(|(_, _, hash)| hash.as_deref());
+    let hash = found.as_ref().and_then(|(_, _, hash, _)| hash.as_deref());
     if !verify_password(hash, &req.password) {
-        let account = found.map(|(_, uuid, _)| uuid);
+        let account = found.map(|(_, uuid, _, _)| uuid);
         tracing::warn!(anomaly = "login_failed", ?account, ip = ?ip.0, "failed login");
         return Err(HttpError::new(
             StatusCode::UNAUTHORIZED,
@@ -45,7 +46,16 @@ pub async fn login(
             "wrong email or password",
         ));
     }
-    let (pk, account, _) = found.expect("a password matched");
+    let (pk, account, _, verified) = found.expect("a password matched");
+    // Self-registered accounts log in once their address is verified (else a
+    // stranger could have registered it first). Checked after the password:
+    // only someone who knows it learns the account is unverified.
+    if !verified {
+        return Err(
+            HttpError::forbidden("confirm your email address first (see your inbox)")
+                .into_code("email_not_verified"),
+        );
+    }
     // The second factor. `totp_required` only tells someone who already knows
     // the password that a code is needed.
     if let Some(identity) = db::account::totp_of(&state.pool, pk)

@@ -1,0 +1,5 @@
+Confirm your email address to start using your {{ e.instance_name }} account:
+
+{{ e.link }}
+
+The link works for 7 days. If you didn't create an account, ignore this email.

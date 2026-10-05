@@ -61,28 +61,7 @@ pub async fn run(
     )
     .execute(&mut *tx)
     .await?;
-    // The owner FK is deferred: reserve the owner's pk, insert the
-    // organization, then its owner.
-    let owner =
-        sqlx::query_scalar!(r#"SELECT nextval(pg_get_serial_sequence('"user"', 'pk')) AS "pk!""#)
-            .fetch_one(&mut *tx)
-            .await?;
-    let org = sqlx::query_scalar!(
-        "INSERT INTO organization (name, owner) VALUES ($1, $2) RETURNING pk",
-        organization,
-        owner
-    )
-    .fetch_one(&mut *tx)
-    .await?;
-    sqlx::query!(
-        r#"INSERT INTO "user" (pk, account, organization, joined_at) OVERRIDING SYSTEM VALUE
-           VALUES ($1, $2, $3, now())"#,
-        owner,
-        account.pk,
-        org
-    )
-    .execute(&mut *tx)
-    .await?;
+    super::organization::create(&mut tx, account.pk, organization, false).await?;
     for (i, (name, implementation, details)) in storages.iter().enumerate() {
         sqlx::query!(
             "INSERT INTO storage (name, implementation, details, is_default) VALUES ($1, $2, $3, $4)",

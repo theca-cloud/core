@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT u.uuid AS id, a.email, u.joined_at IS NOT NULL AS \"joined!\", o.owner = u.pk AS \"owner!\"\n           FROM \"user\" u JOIN account a ON a.pk = u.account JOIN organization o ON o.pk = u.organization\n           WHERE u.organization = $1 ORDER BY lower(a.email)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "joined!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "owner!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "3a5e30547894034ad112d84a9f1f5738af8f18e59f83b47bb1ef20385e1097ec"
+}

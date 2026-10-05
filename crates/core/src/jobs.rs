@@ -30,6 +30,8 @@ pub enum Job {
     Cleanup,
     /// Deletes objects without a chunk row.
     OrphanCheck,
+    /// Sends the queued emails.
+    EmailSend,
 }
 
 const HOUR: Duration = Duration::from_secs(3600);
@@ -39,11 +41,12 @@ const DAY: Duration = Duration::from_secs(24 * 3600);
 const BATCH: i64 = 1000;
 
 impl Job {
-    pub const ALL: [Job; 4] = [
+    pub const ALL: [Job; 5] = [
         Job::ChunkGc,
         Job::TrashPurge,
         Job::Cleanup,
         Job::OrphanCheck,
+        Job::EmailSend,
     ];
 
     pub fn name(self) -> &'static str {
@@ -52,6 +55,7 @@ impl Job {
             Job::TrashPurge => "trash_purge",
             Job::Cleanup => "cleanup",
             Job::OrphanCheck => "orphan_check",
+            Job::EmailSend => "email_send",
         }
     }
 
@@ -64,6 +68,7 @@ impl Job {
         match self {
             Job::ChunkGc | Job::TrashPurge => HOUR,
             Job::Cleanup | Job::OrphanCheck => DAY,
+            Job::EmailSend => Duration::from_secs(30),
         }
     }
 
@@ -71,6 +76,7 @@ impl Job {
         match self {
             Job::ChunkGc | Job::TrashPurge | Job::Cleanup => HOUR,
             Job::OrphanCheck => 6 * HOUR,
+            Job::EmailSend => Duration::from_secs(600),
         }
     }
 
@@ -81,6 +87,7 @@ impl Job {
             Job::TrashPurge => trash_purge(state).await,
             Job::Cleanup => cleanup(state).await,
             Job::OrphanCheck => orphan_check(state).await,
+            Job::EmailSend => crate::email::send_due(state).await,
         }
     }
 }
@@ -92,6 +99,8 @@ pub enum JobError {
     Database(#[from] sqlx::Error),
     #[error("{0}")]
     Backend(#[from] BackendError),
+    #[error("{0}")]
+    Other(String),
 }
 
 /// Marks the runs a crash left `running` as interrupted (at startup).
@@ -343,7 +352,8 @@ async fn trash_purge(state: &AppState) -> Result<i64, JobError> {
     }
 }
 
-/// Revoked tokens and expired sessions go, and job history older than 30 days.
+/// Revoked tokens and expired sessions, job history and emails older than 30
+/// days, expired invitations, never verified accounts.
 async fn cleanup(state: &AppState) -> Result<i64, JobError> {
     let lifetime = state.settings.session_lifetime();
     let tokens = sqlx::query!(
@@ -361,7 +371,63 @@ async fn cleanup(state: &AppState) -> Result<i64, JobError> {
         .execute(&state.pool)
         .await?
         .rows_affected();
-    Ok((tokens + runs) as i64)
+    // Sent or given-up emails hold addresses: kept 30 days for debugging.
+    let emails = sqlx::query!(
+        "DELETE FROM email WHERE sent_at < now() - interval '30 days' OR given_up_at < now() - interval '30 days'"
+    )
+    .execute(&state.pool)
+    .await?
+    .rows_affected();
+    // Expired invitations: the pending user, and its account if it has no
+    // identity and no other membership.
+    let expired = sqlx::query!(
+        r#"DELETE FROM "user" WHERE joined_at IS NULL
+             AND invited_at < now() - make_interval(secs => $1) RETURNING account"#,
+        crate::email::INVITATION_LIFETIME.as_secs_f64()
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    for row in &expired {
+        crate::db::organization::delete_if_phantom(&mut *state.pool.acquire().await?, row.account)
+            .await?;
+    }
+    // Self-registered accounts never verified: they could never log in, and
+    // their address is freed (someone else may have registered it).
+    let unverified = sqlx::query_scalar!(
+        "SELECT a.pk FROM account a
+         WHERE NOT a.verified AND a.created_at < now() - make_interval(secs => $1)
+           AND EXISTS (SELECT 1 FROM identity WHERE account = a.pk AND kind = 'password')
+           AND NOT EXISTS (SELECT 1 FROM identity WHERE account = a.pk AND kind = 'oidc')",
+        crate::email::VERIFICATION_LIFETIME.as_secs_f64()
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    for &account in &unverified {
+        delete_unverified(&state.pool, account).await?;
+    }
+    Ok((tokens + runs + emails) as i64 + expired.len() as i64 + unverified.len() as i64)
+}
+
+/// Deletes a never verified account: its memberships, its personal
+/// organization (empty: it never logged in), its tokens, itself.
+async fn delete_unverified(pool: &PgPool, account: i64) -> sqlx::Result<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query!(r#"DELETE FROM "user" WHERE account = $1"#, account)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query!("DELETE FROM organization WHERE personal_of = $1", account)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query!(
+        "DELETE FROM token WHERE resource = (SELECT uuid FROM account WHERE pk = $1)",
+        account
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query!("DELETE FROM account WHERE pk = $1", account)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await
 }
 
 /// Objects without a chunk row, older than any upload URL could be (rows exist

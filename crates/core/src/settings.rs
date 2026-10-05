@@ -32,6 +32,34 @@ pub struct Settings {
     /// How long trashed files stay restorable before the purge (`0`: purged at
     /// its next run).
     pub trash_retention: Duration,
+    /// Anyone may create an account (`registration = open`; needs SMTP).
+    pub registration_open: bool,
+    /// Where emails go out. `None` (no `smtp_host`): emails stay queued.
+    pub smtp: Option<Smtp>,
+}
+
+/// The SMTP server (settings `smtp_*`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Smtp {
+    pub host: String,
+    pub port: u16,
+    pub tls: SmtpTls,
+    pub username: Option<String>,
+    /// A path, like every secret (decisions.md, Configuration).
+    pub password_file: Option<String>,
+    /// The sender, e.g. `Theca <noreply@example.com>`.
+    pub from: String,
+}
+
+/// How the SMTP connection is secured.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SmtpTls {
+    /// Plain, then upgraded (port 587).
+    StartTls,
+    /// TLS from the start (port 465).
+    Tls,
+    /// None: only for a server on the same host or network (or tests).
+    None,
 }
 
 /// The shortest session lifetime: `last_seen` is only written every
@@ -80,6 +108,12 @@ impl Settings {
                     d => session_lifetime(v).map(|_| Some(d)),
                 }
             })?,
+            registration_open: take(&mut values, "registration", "closed", |v| match v {
+                "open" => Ok(true),
+                "closed" => Ok(false),
+                _ => Err("open or closed".into()),
+            })?,
+            smtp: smtp(&mut values)?,
             trash_retention: take(&mut values, "trash_retention_secs", "2592000", seconds)?,
             oidc_link_by_email: take(&mut values, "oidc_link_by_email", "false", |v| {
                 v.parse::<bool>().map_err(|e| format!("{e}"))
@@ -94,6 +128,41 @@ impl Settings {
         }
         Ok(settings)
     }
+}
+
+/// The SMTP settings, if `smtp_host` is set (then `smtp_from` is required).
+fn smtp(values: &mut HashMap<String, String>) -> Result<Option<Smtp>, Error> {
+    let optional = |values: &mut HashMap<String, String>, key: &str| {
+        values.remove(key).filter(|v| !v.is_empty())
+    };
+    let host = optional(values, "smtp_host");
+    let port = take(values, "smtp_port", "587", |v| {
+        v.parse::<u16>().map_err(|e| format!("{e}"))
+    })?;
+    let tls = take(values, "smtp_tls", "starttls", |v| match v {
+        "starttls" => Ok(SmtpTls::StartTls),
+        "tls" => Ok(SmtpTls::Tls),
+        "none" => Ok(SmtpTls::None),
+        _ => Err("starttls, tls or none".into()),
+    })?;
+    let username = optional(values, "smtp_username");
+    let password_file = optional(values, "smtp_password_file");
+    let from = optional(values, "smtp_from");
+    let Some(host) = host else {
+        return Ok(None);
+    };
+    let from = from.ok_or(Error::InvalidSetting {
+        key: "smtp_from",
+        reason: "required with smtp_host".into(),
+    })?;
+    Ok(Some(Smtp {
+        host,
+        port,
+        tls,
+        username,
+        password_file,
+        from,
+    }))
 }
 
 fn seconds(v: &str) -> Result<Duration, String> {

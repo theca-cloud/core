@@ -257,6 +257,8 @@ pub struct Membership {
     pub name: String,
     /// False while it's an invitation not accepted yet.
     pub joined: bool,
+    /// The account's personal organization (shown as "My files").
+    pub personal: bool,
 }
 
 /// A live session of the account.
@@ -600,4 +602,64 @@ pub struct JobRun {
     pub items: i32,
     /// Why it failed.
     pub error: Option<String>,
+}
+
+/// A member of an organization (or a pending invitation).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Member {
+    /// The member (their user in this organization).
+    pub id: Uuid,
+    /// Their email.
+    pub email: String,
+    /// Joined (false: invited, pending).
+    pub joined: bool,
+    /// The organization's owner.
+    pub owner: bool,
+}
+
+/// `POST /organizations/{id}/members`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AddMember {
+    /// An existing account joins at once; another address gets an invitation.
+    pub email: String,
+}
+
+/// An email and a password (registration).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Register {
+    /// The email (verified before the account can log in).
+    pub email: String,
+    /// The password (at least 8 characters).
+    pub password: String,
+}
+
+/// An email address.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct EmailAddress {
+    /// The address.
+    pub email: String,
+}
+
+/// A token from an email's link.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LinkToken {
+    /// The token.
+    pub token: String,
+}
+
+/// A token from an email's link, and a password to set.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SetPassword {
+    /// The token.
+    pub token: String,
+    /// The new password (at least 8 characters). Optional to accept an
+    /// invitation for an account that can already log in.
+    #[serde(default)]
+    pub password: Option<String>,
 }

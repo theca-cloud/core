@@ -205,7 +205,7 @@ async fn broken_setups_change_nothing(pool: PgPool) {
     let mut short = setup_body(json!([filesystem("Good", &dir)]));
     short["admin_password"] = json!("short");
     let (_, refused, _) = setup(&app, Some(TOKEN), short).await;
-    assert_eq!(refused["code"], "invalid_setup");
+    assert_eq!(refused["code"], "weak_password");
     let count: i64 = sqlx::query_scalar(
         "SELECT (SELECT count(*) FROM account) + (SELECT count(*) FROM storage)",
     )

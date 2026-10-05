@@ -58,10 +58,14 @@ pub async fn account_of(
     Ok(row.map(|r| (r.pk, r.uuid)))
 }
 
-/// The account with this email (case-insensitive): `(pk, uuid)`.
-pub async fn account_by_email(pool: &PgPool, email: &str) -> sqlx::Result<Option<(i64, Uuid)>> {
+/// The **verified** account with this email (case-insensitive): `(pk, uuid)`.
+/// Never an unverified one: someone may have registered the address first.
+pub async fn verified_account_by_email(
+    pool: &PgPool,
+    email: &str,
+) -> sqlx::Result<Option<(i64, Uuid)>> {
     let row = sqlx::query!(
-        "SELECT pk, uuid FROM account WHERE lower(email) = lower($1)",
+        "SELECT pk, uuid FROM account WHERE lower(email) = lower($1) AND verified",
         email
     )
     .fetch_optional(pool)
@@ -150,4 +154,39 @@ pub async fn account_by_uuid(pool: &PgPool, uuid: Uuid) -> sqlx::Result<Option<(
         .fetch_optional(pool)
         .await?;
     Ok(row.map(|r| (r.pk, r.uuid)))
+}
+
+/// OIDC sign-up: an account for an unknown identity (no password; verified if
+/// the provider says the email is), its personal organization, and the
+/// identity. `None` if the address already has an account.
+pub async fn sign_up(
+    pool: &PgPool,
+    email: &str,
+    verified: bool,
+    provider: i64,
+    subject: &str,
+) -> sqlx::Result<Option<Uuid>> {
+    let mut tx = pool.begin().await?;
+    let Some(account) = sqlx::query!(
+        "INSERT INTO account (email, verified) VALUES ($1, $2) ON CONFLICT ((lower(email))) DO NOTHING RETURNING pk, uuid",
+        email,
+        verified
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    else {
+        return Ok(None);
+    };
+    sqlx::query!(
+        "INSERT INTO identity (account, kind, provider, details)
+         VALUES ($1, 'oidc', $2, jsonb_build_object('subject', $3::text))",
+        account.pk,
+        provider,
+        subject
+    )
+    .execute(&mut *tx)
+    .await?;
+    super::organization::create(&mut tx, account.pk, email, true).await?;
+    tx.commit().await?;
+    Ok(Some(account.uuid))
 }

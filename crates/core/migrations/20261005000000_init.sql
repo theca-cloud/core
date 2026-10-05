@@ -57,7 +57,11 @@ CREATE TABLE organization (
     -- Storage quota in bytes (sum of the stored sizes of its chunks). NULL: unlimited.
     quota bigint CONSTRAINT organization_quota CHECK (quota >= 0),
     -- Constant, only for the owner FK below: the owner has joined (not an invitation).
-    owner_joined boolean NOT NULL DEFAULT true CHECK (owner_joined)
+    owner_joined boolean NOT NULL DEFAULT true CHECK (owner_joined),
+    -- Personal organization of this account ("My files"; created at
+    -- self-registration and OIDC sign-up), NULL for a company one. Its owner is
+    -- that account (FK below), and it never has another member (trigger).
+    personal_of bigint UNIQUE  -- FK to account added below (account is created after)
 );
 
 ALTER TABLE storage
@@ -130,11 +134,14 @@ CREATE TABLE "user" (
     account bigint NOT NULL REFERENCES account,
     organization bigint NOT NULL REFERENCES organization,
     joined_at timestamptz,  -- NULL: invited, not yet accepted
+    -- When an invitation was sent (pending invitations expire from it).
+    invited_at timestamptz,
     joined boolean NOT NULL GENERATED ALWAYS AS (joined_at IS NOT NULL) STORED,
     UNIQUE (account, organization),
     -- Logically redundant with pk, but an FK target must be UNIQUE.
     UNIQUE (organization, pk),          -- target of "member of this organization" FKs
-    UNIQUE (organization, pk, joined)   -- target of organization's owner FK
+    UNIQUE (organization, pk, joined),  -- target of organization's owner FK
+    UNIQUE (pk, account)                -- target of the personal organization's FK
 );
 
 -- The owner is a member of the organization who has joined: exactly one owner.
@@ -143,7 +150,11 @@ CREATE TABLE "user" (
 -- transaction. The owner can't be removed nor un-joined while owner.
 ALTER TABLE organization
     ADD CONSTRAINT organization_owner FOREIGN KEY (pk, owner, owner_joined) REFERENCES "user" (organization, pk, joined)
-    DEFERRABLE INITIALLY DEFERRED;
+    DEFERRABLE INITIALLY DEFERRED,
+    -- A personal organization's owner is its account (NULL personal_of: not checked).
+    ADD CONSTRAINT organization_personal_owner FOREIGN KEY (owner, personal_of) REFERENCES "user" (pk, account)
+    DEFERRABLE INITIALLY DEFERRED,
+    ADD CONSTRAINT organization_personal_of FOREIGN KEY (personal_of) REFERENCES account;
 
 -- library : name, owner, storage (nullable)
 -- NOTE: UNIQUE (owner, lower(name)) from decisions.md (Library names).
@@ -189,7 +200,6 @@ CREATE TABLE token (
         'email_verification',
         'invitation',
         'password_reset',
-        'password_setup',
         'app_password',
         'recovery_code'
     )),
@@ -474,8 +484,13 @@ CREATE TABLE email (
     attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
     next_attempt_at timestamptz NOT NULL DEFAULT now(),
     sent_at timestamptz,
-    last_error text
+    -- Given up after the last attempt (last_error says why).
+    given_up_at timestamptz,
+    last_error text,
+    CONSTRAINT email_done CHECK (sent_at IS NULL OR given_up_at IS NULL)
 );
+-- The sending job's queue.
+CREATE INDEX email_due ON email (next_attempt_at) WHERE sent_at IS NULL AND given_up_at IS NULL;
 
 -- setting : key, value
 CREATE TABLE setting (
@@ -599,3 +614,19 @@ $$;
 CREATE TRIGGER user_left_identities
     AFTER DELETE ON "user"
     FOR EACH ROW EXECUTE FUNCTION user_left_identities();
+
+-- 7. A personal organization never has another member than its account.
+CREATE FUNCTION user_personal_organization() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM organization WHERE pk = NEW.organization AND personal_of <> NEW.account
+    ) THEN
+        RAISE EXCEPTION 'organization % is personal', NEW.organization
+            USING ERRCODE = 'check_violation', CONSTRAINT = 'personal_organization';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER user_personal_organization
+    BEFORE INSERT OR UPDATE OF account, organization ON "user"
+    FOR EACH ROW EXECUTE FUNCTION user_personal_organization();

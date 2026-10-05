@@ -1,11 +1,13 @@
 //! HTTP API. Unversioned probes (`/api/health`, `/api/version`) and `/api/v1`.
 
+mod accounts;
 mod admin;
 mod app_password;
 pub mod auth;
 pub mod error;
 mod nodes;
 mod oidc;
+mod organizations;
 mod session;
 pub mod setup;
 mod totp;
@@ -89,6 +91,15 @@ pub struct AppState {
         nodes::restore_version,
         nodes::search,
         admin::jobs,
+        accounts::register,
+        accounts::verify,
+        accounts::resend,
+        accounts::forgot,
+        accounts::reset,
+        accounts::accept,
+        organizations::members,
+        organizations::add,
+        organizations::remove,
         admin::run_job,
     ),
     components(schemas(theca_common::api::ApiError, theca_common::api::ChunkState))
@@ -106,6 +117,8 @@ pub fn router(state: AppState) -> Router {
             v1::router()
                 .merge(nodes::router())
                 .merge(admin::router())
+                .merge(accounts::router())
+                .merge(organizations::router())
                 .merge(session::router())
                 .merge(app_password::router())
                 .merge(totp::router())
@@ -219,6 +232,8 @@ mod tests {
             session_max_lifetime: None,
             oidc_link_by_email: false,
             trash_retention: Duration::from_secs(0),
+            registration_open: false,
+            smtp: None,
         });
         router(AppState {
             backends: Backends::new(pool.clone()),

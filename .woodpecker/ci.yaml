@@ -11,6 +11,10 @@ services:
       # Same as docker-compose.yml: the server refuses other collations.
       POSTGRES_INITDB_ARGS: --locale-provider=builtin --builtin-locale=C.UTF-8
 
+  # Catches the tests' emails (same as docker-compose.yml).
+  - name: mailpit
+    image: axllent/mailpit:v1.31.4
+
 steps:
   - name: ci
     # Built and pushed from a dev machine by scripts/ci-image.sh;
@@ -22,5 +26,6 @@ steps:
       DATABASE_URL: postgres://theca:theca@postgres:5432/theca
       # Builds use the committed .sqlx/ metadata, never the live database.
       SQLX_OFFLINE: "true"
+      MAILPIT_TEST_HOST: mailpit
     commands:
       - scripts/ci.sh

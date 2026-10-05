@@ -76,7 +76,7 @@ async fn world(kind: Kind, pool: PgPool) -> World {
     sqlx::raw_sql(&format!(
         r#"
         BEGIN;
-        INSERT INTO account (pk, email) OVERRIDING SYSTEM VALUE VALUES (1, 'a@x.ch'), (2, 'b@x.ch'), (3, 'c@x.ch');
+        INSERT INTO account (pk, email, verified) OVERRIDING SYSTEM VALUE VALUES (1, 'a@x.ch', true), (2, 'b@x.ch', true), (3, 'c@x.ch', true);
         INSERT INTO identity (account, kind, details)
             SELECT pk, 'password', jsonb_build_object('hash', '{hash}') FROM account;
         INSERT INTO organization (pk, name, owner) OVERRIDING SYSTEM VALUE VALUES (1, 'one', 1), (2, 'two', 3);
@@ -84,6 +84,8 @@ async fn world(kind: Kind, pool: PgPool) -> World {
             VALUES (1, 1, 1, now()), (2, 2, 1, now()), (3, 3, 2, now());
         INSERT INTO storage (pk, name, implementation, details, is_default) OVERRIDING SYSTEM VALUE
             VALUES (1, 'main', '{implementation}', '{first}', true), (2, 'other', '{implementation}', '{second}', false);
+        -- The rows above have explicit keys: move the sequences past them.
+        SELECT setval(pg_get_serial_sequence(t, 'pk'), 100) FROM unnest(ARRAY['account', 'organization', '"user"', 'storage']) AS t;
         COMMIT;
         "#,
     ))

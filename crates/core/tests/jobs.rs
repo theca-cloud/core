@@ -348,7 +348,13 @@ async fn admin_api(pool: PgPool) {
     let names: Vec<&str> = listed.iter().map(|j| j.job.as_str()).collect();
     assert_eq!(
         names,
-        ["chunk_gc", "trash_purge", "cleanup", "orphan_check"]
+        [
+            "chunk_gc",
+            "trash_purge",
+            "cleanup",
+            "orphan_check",
+            "email_send"
+        ]
     );
 
     let run: api::JobRun = alice

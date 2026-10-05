@@ -378,6 +378,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "`email_not_verified`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           }
         }
       }
@@ -552,6 +562,118 @@
         "responses": {
           "303": {
             "description": "To the provider, or to `/login?error=...`"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/password/forgot": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Email a link to choose a new password. Always `202`.",
+        "operationId": "forgot",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailAddress"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/auth/password/reset": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Choose a new password (the link's token). Also confirms the address, and\nlogs out every session. TOTP, if on, stays required.",
+        "operationId": "reset",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPassword"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "`invalid_token`, `weak_password`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/register": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Create an account (when registration is open): it gets a personal\norganization, and logs in once its address is confirmed by email. Always\n`202`: a taken address gets an email saying so instead.",
+        "operationId": "register",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Register"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": ""
+          },
+          "400": {
+            "description": "`invalid_email`, `weak_password`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`registration_closed`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`email_unavailable`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           }
         }
       }
@@ -798,6 +920,71 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/verify": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Confirm an email address (the link's token): the account can log in, and is.",
+        "operationId": "verify",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkToken"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_token`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/verify/resend": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Send the confirmation email again (unverified accounts). Always `202`.",
+        "operationId": "resend",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailAddress"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": ""
           }
         }
       }
@@ -1152,6 +1339,54 @@
           },
           "404": {
             "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/invitations/accept": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Accept an invitation (the link's token): joins the organization. A new\naccount chooses its password here, and is logged in; an account that can\nalready log in just joins (no login: its own password and TOTP apply).",
+        "operationId": "accept",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPassword"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Joined; `Me` if logged in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Me"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_token`, `weak_password`",
             "content": {
               "application/json": {
                 "schema": {
@@ -1677,6 +1912,175 @@
         }
       }
     },
+    "/api/v1/organizations/{id}/members": {
+      "get": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "The organization's members and pending invitations (any member).",
+        "operationId": "members",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Member"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Add a member by email (the owner): an existing account joins at once (and\nis told by email); another address gets an invitation.",
+        "operationId": "add",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddMember"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Member"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`already_member`, `personal_organization`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`email_unavailable` (an invitation needs SMTP)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{id}/members/{user}": {
+      "delete": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Remove a member, or cancel an invitation (the owner; never the owner).",
+        "operationId": "remove",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "user",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`owner`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/search": {
       "get": {
         "tags": [
@@ -1837,6 +2241,19 @@
   },
   "components": {
     "schemas": {
+      "AddMember": {
+        "type": "object",
+        "description": "`POST /organizations/{id}/members`.",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "An existing account joins at once; another address gets an invitation."
+          }
+        }
+      },
       "ApiError": {
         "type": "object",
         "description": "An API error: a stable machine-readable `code` and a human message.",
@@ -2239,6 +2656,19 @@
           }
         }
       },
+      "EmailAddress": {
+        "type": "object",
+        "description": "An email address.",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "The address."
+          }
+        }
+      },
       "Health": {
         "type": "object",
         "description": "Health report. The contract is the HTTP status (200 / 503); the body is informational.",
@@ -2427,6 +2857,19 @@
           }
         }
       },
+      "LinkToken": {
+        "type": "object",
+        "description": "A token from an email's link.",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "The token."
+          }
+        }
+      },
       "Login": {
         "type": "object",
         "description": "`POST /auth/login`.",
@@ -2550,13 +2993,43 @@
           }
         }
       },
+      "Member": {
+        "type": "object",
+        "description": "A member of an organization (or a pending invitation).",
+        "required": [
+          "id",
+          "email",
+          "joined",
+          "owner"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Their email."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The member (their user in this organization)."
+          },
+          "joined": {
+            "type": "boolean",
+            "description": "Joined (false: invited, pending)."
+          },
+          "owner": {
+            "type": "boolean",
+            "description": "The organization's owner."
+          }
+        }
+      },
       "Membership": {
         "type": "object",
         "description": "An account's membership in an organization.",
         "required": [
           "organization",
           "name",
-          "joined"
+          "joined",
+          "personal"
         ],
         "properties": {
           "joined": {
@@ -2571,6 +3044,10 @@
             "type": "string",
             "format": "uuid",
             "description": "The organization."
+          },
+          "personal": {
+            "type": "boolean",
+            "description": "The account's personal organization (shown as \"My files\")."
           }
         }
       },
@@ -2724,6 +3201,24 @@
           }
         }
       },
+      "Register": {
+        "type": "object",
+        "description": "An email and a password (registration).",
+        "required": [
+          "email",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "The email (verified before the account can log in)."
+          },
+          "password": {
+            "type": "string",
+            "description": "The password (at least 8 characters)."
+          }
+        }
+      },
       "Restored": {
         "type": "object",
         "description": "Where a restored node landed.",
@@ -2838,6 +3333,26 @@
               "null"
             ],
             "description": "The browser or client that opened it."
+          }
+        }
+      },
+      "SetPassword": {
+        "type": "object",
+        "description": "A token from an email's link, and a password to set.",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The new password (at least 8 characters). Optional to accept an\ninvitation for an account that can already log in."
+          },
+          "token": {
+            "type": "string",
+            "description": "The token."
           }
         }
       },

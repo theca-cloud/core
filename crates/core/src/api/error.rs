@@ -92,6 +92,12 @@ impl From<sqlx::Error> for HttpError {
                 Some("node_no_cycle") => {
                     return Self::conflict("move_into_itself", "a folder can't move into itself");
                 }
+                Some("personal_organization") => {
+                    return Self::conflict(
+                        "personal_organization",
+                        "a personal organization has no other member",
+                    );
+                }
                 Some("library_name") => {
                     return Self::conflict("library_name_taken", "a library with this name exists");
                 }

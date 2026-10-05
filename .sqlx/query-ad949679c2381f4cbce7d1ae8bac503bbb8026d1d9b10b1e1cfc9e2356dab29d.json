@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.pk FROM account a\n         WHERE NOT a.verified AND a.created_at < now() - make_interval(secs => $1)\n           AND EXISTS (SELECT 1 FROM identity WHERE account = a.pk AND kind = 'password')\n           AND NOT EXISTS (SELECT 1 FROM identity WHERE account = a.pk AND kind = 'oidc')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ad949679c2381f4cbce7d1ae8bac503bbb8026d1d9b10b1e1cfc9e2356dab29d"
+}

@@ -33,6 +33,13 @@ Stored as strings in the `setting` table and typed by the server. A missing key 
 | `gc_grace_period_secs` | `86400` (24 h) | How long an unreferenced chunk, untouched, is kept before garbage collection deletes it (abandoned uploads). |
 | `presigned_url_lifetime_secs` | `900` (15 min) | How long presigned upload and download URLs stay valid. |
 | `max_pending_uploads` | `15` | Most chunks a user may have being uploaded at once (declared, upload URL still valid, not uploaded yet). Requesting more upload URLs is refused (`429`); clients upload in batches. |
+| `registration` | `closed` | `open`: anyone can create an account (verified by email, so it needs SMTP). `closed`: accounts come from invitations (and the setup). |
+| `smtp_host` | | The SMTP server. Unset: emails stay queued (and registration and invitations are unavailable). Changes apply to the next sending run, no restart needed. |
+| `smtp_port` | `587` | Its port. |
+| `smtp_tls` | `starttls` | `starttls` (587), `tls` (465), or `none` (a server on the same host or network only). |
+| `smtp_username` | | Login, if the server needs one. |
+| `smtp_password_file` | | Path to a file holding the SMTP password (never the password itself). |
+| `smtp_from` | | The sender, e.g. `Theca <noreply@example.com>`. Required with `smtp_host`. |
 | `trash_retention_secs` | `2592000` (30 days) | How long trashed files and folders stay restorable; then the hourly purge deletes them for good (their chunks follow with the garbage collection). `0`: purged at the next run. |
 | `session_idle_lifetime_secs` | `604800` (7 days) | A session expires after this long without being used (each use extends it). At least `600`. Applies to existing sessions at once. |
 | `oidc_link_by_email` | `false` | Logging in through an OIDC provider with an identity not linked yet links it to the account with the same email, if the provider says that email is verified. Off: identities are only linked by their owner, from a session. Turn on only if you trust every provider's email verification (an organization's provider still only opens sessions restricted to that organization). |

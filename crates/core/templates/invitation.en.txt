@@ -1,0 +1,5 @@
+{{ e.inviter }} invites you to join {{ e.organization }} on {{ e.instance_name }}. You'll choose a password:
+
+{{ e.link }}
+
+The link works for 14 days.
