@@ -2334,6 +2334,27 @@
         }
       }
     },
+    "/api/v1/limits": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "The instance's limits, as they stand (they change live): clients size their\nwork by them, e.g. an upload engine's window.",
+        "operationId": "limits",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Limits"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/me": {
       "get": {
         "tags": [
@@ -4460,6 +4481,21 @@
             "type": "string",
             "format": "uuid",
             "description": "Its root folder."
+          }
+        }
+      },
+      "Limits": {
+        "type": "object",
+        "description": "`GET /limits`: the instance's limits clients size their work by.",
+        "required": [
+          "max_pending_uploads"
+        ],
+        "properties": {
+          "max_pending_uploads": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Chunks an account may have declared and not yet announced\n(`max_pending_uploads`): an upload engine's window.",
+            "minimum": 0
           }
         }
       },

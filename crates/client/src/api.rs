@@ -190,6 +190,11 @@ impl Client {
         decode(response).await
     }
 
+    /// The instance's limits (they change live).
+    pub async fn limits(&self) -> Result<api::Limits, Error> {
+        self.get("/api/v1/limits").await
+    }
+
     pub async fn me(&self) -> Result<api::Me, Error> {
         self.get("/api/v1/me").await
     }

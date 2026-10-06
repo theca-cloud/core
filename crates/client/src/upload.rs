@@ -45,11 +45,12 @@ use crate::source::Source;
 /// How uploads behave.
 #[derive(Debug, Clone)]
 pub struct UploadOptions {
-    /// Chunks sent at once (each at most 8 MiB in memory).
+    /// Chunks sent at once (each at most 8 MiB in memory), within the window.
     pub parallel: usize,
-    /// Chunks declared and not yet announced, at most: the server's
-    /// `max_pending_uploads` (15 by default), shared by an account's clients.
-    pub window: usize,
+    /// Chunks declared and not yet announced, at most. `None`: the server's
+    /// `max_pending_uploads` (`GET /limits`, read when a run starts), shared
+    /// by an account's clients; more would be refused.
+    pub window: Option<usize>,
     /// Files read and hashed at once.
     pub hashing: usize,
     /// How long a batch waits to fill before it's sent anyway.
@@ -67,8 +68,10 @@ pub struct UploadOptions {
 impl Default for UploadOptions {
     fn default() -> Self {
         Self {
-            parallel: 4,
-            window: 15,
+            // Measured (the CLI's roadmap/07): 16 at once is 3× faster than 4
+            // at 20 ms; a browser tab keeps 4 (memory).
+            parallel: if cfg!(target_arch = "wasm32") { 4 } else { 16 },
+            window: None,
             hashing: 4,
             flush: Duration::from_millis(20),
             keepalive: Duration::from_secs(6 * 3600),
@@ -676,7 +679,15 @@ async fn window_stage<P: FnMut(&UploadProgress)>(
     options: &UploadOptions,
     cancel: &Cancel,
 ) {
-    let window = options.window.max(1);
+    let window = match options.window {
+        Some(window) => window,
+        // A server without the endpoint: its default.
+        None => client
+            .limits()
+            .await
+            .map_or(15, |l| l.max_pending_uploads as usize),
+    }
+    .max(1);
     let parallel = options.parallel.clamp(1, window);
     let mut in_flight = 0usize;
     let mut closed = false;

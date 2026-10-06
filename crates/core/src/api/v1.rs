@@ -21,6 +21,7 @@ use theca_common::hash::Sha256;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/limits", get(limits))
         .route("/libraries", post(create_library).get(list_libraries))
         .route(
             "/libraries/{id}",
@@ -42,6 +43,16 @@ pub fn router() -> Router<AppState> {
                 .put(put_blob)
                 .layer(DefaultBodyLimit::max(MAX_SIZE + MAX_SIZE / 64 + 1024)),
         )
+}
+
+/// The instance's limits, as they stand (they change live): clients size their
+/// work by them, e.g. an upload engine's window.
+#[utoipa::path(get, path = "/api/v1/limits", responses((status = 200, body = api::Limits)))]
+async fn limits(State(state): State<AppState>, _user: CurrentAccount) -> Json<api::Limits> {
+    let settings = state.settings.get();
+    Json(api::Limits {
+        max_pending_uploads: u32::try_from(settings.max_pending_uploads).unwrap_or(u32::MAX),
+    })
 }
 
 pub(super) async fn library_access(

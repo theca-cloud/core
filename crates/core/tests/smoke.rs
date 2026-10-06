@@ -378,7 +378,7 @@ async fn commit_recovers_lost_chunks(pool: PgPool) {
     // One chunk at a time: the first is announced before the last is read.
     let options = UploadOptions {
         parallel: 1,
-        window: 1,
+        window: Some(1),
         ..Default::default()
     };
     let never = Cancel::default();
@@ -578,7 +578,7 @@ async fn cancel_one_file(pool: PgPool) {
     // is confirmed.
     let options = UploadOptions {
         parallel: 1,
-        window: 1,
+        window: Some(1),
         ..Default::default()
     };
     let cancel = Cancel::default();
@@ -626,4 +626,56 @@ async fn cancel_one_file(pool: PgPool) {
         again.skipped, 0,
         "the cancelled file's chunks were freed: {again:?}"
     );
+}
+
+/// The upload engine sizes its window by the server's `max_pending_uploads`
+/// (`GET /limits`, live): a window larger than the cap would have every
+/// declaration refused, forever.
+#[sqlx::test]
+async fn the_window_follows_the_server(pool: PgPool) {
+    let server = start(&pool).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut client = Client::new(&server.url).unwrap();
+    let setup: api::Setup = serde_json::from_value(json!({
+        "admin_email": "admin@test.theca", "admin_password": "a long password", "organization": "Acme",
+        "storages": [{ "name": "main", "implementation": "filesystem", "path": dir.path() }],
+    }))
+    .unwrap();
+    let me = client.setup(&setup, None).await.unwrap();
+    let library = client
+        .create_library(me.organizations[0].organization, "Docs")
+        .await
+        .unwrap();
+    assert_eq!(client.limits().await.unwrap().max_pending_uploads, 15);
+    let _: serde_json::Value = client
+        .call(
+            reqwest::Method::PATCH,
+            "/api/v1/admin/settings",
+            Some(&json!({ "max_pending_uploads": "2" })),
+        )
+        .await
+        .unwrap();
+    assert_eq!(client.limits().await.unwrap().max_pending_uploads, 2);
+
+    let bytes = data(8 * 1024 * 1024, 11);
+    let target = Target::New {
+        library: library.id,
+        parent: library.root,
+        name: Name::new("big.bin").unwrap(),
+    };
+    let committed = tokio::time::timeout(
+        Duration::from_secs(60),
+        upload(
+            &client,
+            &MemorySource(bytes.clone()),
+            target,
+            &UploadOptions::default(),
+            |_| {},
+            &Cancel::default(),
+        ),
+    )
+    .await
+    .expect("declarations within the server's window are never refused")
+    .unwrap();
+    assert_eq!(fetch(&client, committed.file, None).await, bytes);
 }

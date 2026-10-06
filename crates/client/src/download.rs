@@ -43,7 +43,8 @@ pub struct DownloadOptions {
 impl Default for DownloadOptions {
     fn default() -> Self {
         Self {
-            parallel: 8,
+            // Measured (the CLI's roadmap/07): 16 at once, 30 % faster than 8.
+            parallel: 16,
             verify: true,
             skip_identical: false,
             flush: Duration::from_millis(20),

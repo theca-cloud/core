@@ -261,6 +261,15 @@ pub struct DownloadChunk {
     pub url: String,
 }
 
+/// `GET /limits`: the instance's limits clients size their work by.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Limits {
+    /// Chunks an account may have declared and not yet announced
+    /// (`max_pending_uploads`): an upload engine's window.
+    pub max_pending_uploads: u32,
+}
+
 /// `POST /files/download`: files whose chunks to download (at most 100).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
