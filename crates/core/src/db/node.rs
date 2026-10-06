@@ -39,7 +39,8 @@ pub async fn create_folder(
         api::Node,
         r#"INSERT INTO node (organization, library, parent, name, is_file)
            VALUES ($1, $2, $3, $4, false)
-           RETURNING uuid AS id, name, is_file, NULL::text AS modified"#,
+           RETURNING uuid AS id, name, is_file, NULL::text AS modified,
+                     NULL::uuid AS current_version"#,
         parent.access.organization,
         parent.access.library,
         parent.node,

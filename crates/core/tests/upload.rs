@@ -27,6 +27,7 @@ on_both_backends!(
     reupload_uploads_nothing,
     edit_uploads_only_new_chunks,
     concurrent_edits_conflict,
+    unchanged_content_creates_no_version,
     empty_file,
     other_bytes_are_refused,
     declarations_are_fixed,
@@ -151,6 +152,52 @@ async fn concurrent_edits_conflict(kind: Kind, pool: PgPool) {
     .await
     .unwrap();
     assert_eq!(versions, 3, "both branches are kept");
+}
+
+async fn unchanged_content_creates_no_version(kind: Kind, pool: PgPool) {
+    let w = world(kind, pool).await;
+    let mut alice = w.as_user(1).await;
+    let lib = alice.create_library("docs").await;
+    let content = data(3 * MIB, 7);
+    let v1 = alice
+        .upload(&lib, new_file(&lib, "doc.bin"), &content)
+        .await
+        .unwrap();
+    assert!(!v1.unchanged);
+    let listed: Vec<api::Node> = alice
+        .get(&format!("/api/v1/nodes/{}/children", lib.root))
+        .await
+        .unwrap();
+    assert_eq!(
+        listed[0].current_version,
+        Some(v1.version),
+        "listings carry it"
+    );
+
+    let on = |base: Uuid| json!({ "file": v1.file, "base_version": base, "message": "again" });
+    let again = alice.upload(&lib, on(v1.version), &content).await.unwrap();
+    assert!(again.unchanged);
+    assert_eq!(again.version, v1.version, "the current version");
+    let count = || async {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM version v JOIN node n ON n.pk = v.file WHERE n.uuid = $1",
+        )
+        .bind(v1.file)
+        .fetch_one(&w.pool)
+        .await
+        .unwrap()
+    };
+    assert_eq!(count().await, 1);
+
+    // From a base no longer current, the same content is a real version.
+    let v2 = alice
+        .upload(&lib, on(v1.version), &data(MIB, 8))
+        .await
+        .unwrap();
+    let stale = alice.upload(&lib, on(v1.version), &content).await.unwrap();
+    assert!(!stale.unchanged && stale.conflict);
+    assert_ne!(stale.version, v2.version);
+    assert_eq!(count().await, 3);
 }
 
 async fn empty_file(kind: Kind, pool: PgPool) {

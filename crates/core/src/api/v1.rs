@@ -339,6 +339,7 @@ async fn commit(
         file: committed.file,
         version: committed.version,
         conflict: committed.conflict,
+        unchanged: committed.unchanged,
     }))
 }
 

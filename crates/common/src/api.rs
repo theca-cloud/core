@@ -64,6 +64,9 @@ pub struct Node {
     pub is_file: bool,
     /// A file's current version date.
     pub modified: Option<String>,
+    /// A file's current version (the base of a new one).
+    #[serde(default)]
+    pub current_version: Option<Uuid>,
 }
 
 /// `POST /chunks/lookup`.
@@ -189,6 +192,10 @@ pub struct Committed {
     pub version: Uuid,
     /// The base wasn't the current version: another branch exists.
     pub conflict: bool,
+    /// The same content as the base, still current: no version was created,
+    /// `version` is the current one.
+    #[serde(default)]
+    pub unchanged: bool,
 }
 
 /// One chunk of a download, in order.

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT n.uuid AS id, n.name, n.is_file, v.created_at::text AS modified\n           FROM node n LEFT JOIN version v ON v.pk = n.current_version\n           WHERE n.parent = $1 AND n.deleted_at IS NULL ORDER BY n.is_file, lower(n.name)",
+  "query": "SELECT n.uuid AS id, n.name, n.is_file, v.created_at::text AS modified,\n                  v.uuid AS \"current_version?\"\n           FROM node n LEFT JOIN version v ON v.pk = n.current_version\n           WHERE n.parent = $1 AND n.deleted_at IS NULL ORDER BY n.is_file, lower(n.name)",
   "describe": {
     "columns": [
       {
@@ -22,6 +22,11 @@
         "ordinal": 3,
         "name": "modified",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "current_version?",
+        "type_info": "Uuid"
       }
     ],
     "parameters": {
@@ -33,8 +38,9 @@
       false,
       false,
       false,
-      null
+      null,
+      false
     ]
   },
-  "hash": "c2f712d9dd3ad716b4d68bc0e2e973c351e24f4570119811ec11e625f5858142"
+  "hash": "1731815f9cb535d50cf6ab0350f37ccee8dc4a4f62e6a483cd03467fb3565ef6"
 }
