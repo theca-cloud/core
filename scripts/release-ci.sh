@@ -81,7 +81,7 @@ publish)
     fi
     id=$(echo "$release" |
         curl -fsS -X POST -H "Authorization: token $GITEA_TOKEN" -H 'Content-Type: application/json' \
-            -d @- "$gitea/api/v1/repos/$repo/releases" | jq -r .id)
+            --data-binary @- "$gitea/api/v1/repos/$repo/releases" | jq -r .id)
     curl -fsS -X POST -H "Authorization: token $GITEA_TOKEN" -F attachment=@openapi.json \
         "$gitea/api/v1/repos/$repo/releases/$id/assets?name=openapi.json" >/dev/null
     echo "Released v$version"
