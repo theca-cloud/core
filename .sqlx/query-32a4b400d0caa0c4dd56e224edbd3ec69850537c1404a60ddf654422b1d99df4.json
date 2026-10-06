@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT v.pk, v.parent_version, v.uuid AS id, p.uuid AS \"parent?\", a.email AS \"author?\",\n                  v.created_at::text AS \"created_at!\", v.message,\n                  v.pk = n.current_version AS \"current!\"\n           FROM version v\n           JOIN node n ON n.pk = v.file\n           LEFT JOIN version p ON p.pk = v.parent_version\n           LEFT JOIN \"user\" u ON u.pk = v.author\n           LEFT JOIN account a ON a.pk = u.account\n           WHERE v.file = $1 ORDER BY v.pk",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "parent_version",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "parent?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "author?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "message",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "current!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      false,
+      null,
+      true,
+      null
+    ]
+  },
+  "hash": "32a4b400d0caa0c4dd56e224edbd3ec69850537c1404a60ddf654422b1d99df4"
+}

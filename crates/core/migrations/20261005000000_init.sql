@@ -185,10 +185,14 @@ CREATE TABLE library (
     -- not nullable, or changing the default would make a part of the lib in one storage, then in another one
     -- TRIGGER: shared (NULL organization) or the library's organization's.
     storage bigint NOT NULL REFERENCES storage,
+    -- In the trash (with everything in it: unreachable, see library_access);
+    -- purged after the trash retention.
+    deleted_at timestamptz,
     CONSTRAINT library_name_valid CHECK (is_valid_name(name)),
     UNIQUE (owner, pk)  -- target of composite FKs checking the organization
 );
-CREATE UNIQUE INDEX library_name ON library (owner, lower(name));
+-- Names unique outside the trash.
+CREATE UNIQUE INDEX library_name ON library (owner, lower(name)) WHERE deleted_at IS NULL;
 
 -- library_member : who can access a library, with which rights.
 -- A private library is a library with a single member. When a user is removed,
@@ -271,13 +275,25 @@ $$;
 
 -- The libraries a token reaches: library memberships within its scope.
 -- `can_write`: the member's role is `write` and the token isn't read-only.
-CREATE FUNCTION library_access(token bigint)
+-- Trashed libraries included: only for the trash's own operations (list,
+-- restore, purge).
+CREATE FUNCTION library_access_any(token bigint)
 RETURNS TABLE (library bigint, organization bigint, "user" bigint, can_write boolean)
 LANGUAGE sql STABLE AS $$
     SELECT m.library, o.organization, o."user", o.can_write AND m.role = 'write'
     FROM organization_access($1) o
     JOIN library_member m ON m."user" = o."user"
     WHERE o.library IS NULL OR m.library = o.library
+$$;
+
+-- What every other query joins: a trashed library and everything in it are
+-- out of reach.
+CREATE FUNCTION library_access(token bigint)
+RETURNS TABLE (library bigint, organization bigint, "user" bigint, can_write boolean)
+LANGUAGE sql STABLE AS $$
+    SELECT a.* FROM library_access_any($1) a
+    JOIN library l ON l.pk = a.library
+    WHERE l.deleted_at IS NULL
 $$;
 
 -- namespace : a dedup boundary, owned by an organization. Libraries in a common
@@ -342,7 +358,10 @@ CREATE TABLE node (
     UNIQUE (pk, library, is_file),       -- target of the "parent is a folder of the same library" FK
     CONSTRAINT node_library FOREIGN KEY (organization, library) REFERENCES library (owner, pk),
     -- The parent is a folder of the same library (NULL parent: root, not checked).
+    -- A node's library changing (a move to another library) cascades to its
+    -- subtree.
     CONSTRAINT node_parent FOREIGN KEY (parent, library, parent_is_file) REFERENCES node (pk, library, is_file)
+        ON UPDATE CASCADE
 );
 CREATE UNIQUE INDEX node_name ON node (parent, lower(name)) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX node_one_root ON node (library) WHERE parent IS NULL;

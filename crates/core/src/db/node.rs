@@ -50,12 +50,9 @@ pub async fn create_folder(
     .await
 }
 
-/// Renames and/or moves a node. Within its library, a move only changes
-/// `parent`; to another library (same organization, checked by the caller), it
-/// also rewrites `library` on the whole subtree, in the same statement (the
-/// composite FKs are checked at its end), so the history follows.
-// ponytail: one UPDATE of the subtree; run huge cross-library moves as a
-// background job (step 09) if they become a problem.
+/// Renames and/or moves a node. To another library (same organization,
+/// checked by the caller), its `library` changes and the database cascades it
+/// to the subtree (`node_parent`), so the history follows.
 pub async fn update(
     pool: &PgPool,
     node: &NodeAccess,
@@ -64,34 +61,105 @@ pub async fn update(
 ) -> sqlx::Result<()> {
     let library = parent.map_or(node.access.library, |p| p.access.library);
     let parent = parent.map_or(node.parent, |p| Some(p.node));
-    if library == node.access.library {
-        sqlx::query!(
-            "UPDATE node SET name = coalesce($2, name), parent = $3 WHERE pk = $1",
-            node.node,
-            name,
-            parent
-        )
-        .execute(pool)
+    sqlx::query!(
+        "UPDATE node SET name = coalesce($2, name), parent = $3, library = $4 WHERE pk = $1",
+        node.node,
+        name,
+        parent,
+        library
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// The reachable child of `folder` named `name` (ignoring case), if any:
+/// `(pk, is_file, current_version)`.
+pub async fn child_named(
+    pool: &PgPool,
+    folder: i64,
+    name: &str,
+) -> sqlx::Result<Option<(i64, bool, Option<i64>)>> {
+    let row = sqlx::query!(
+        "SELECT pk, is_file, current_version FROM node
+         WHERE parent = $1 AND lower(name) = lower($2) AND deleted_at IS NULL",
+        folder,
+        name
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| (r.pk, r.is_file, r.current_version)))
+}
+
+/// Merges the file `source` into the file `dest` (a move onto it): the
+/// source's versions join the destination's, its root(s) based on the
+/// destination's current version; the source's current version becomes the
+/// destination's; the source node goes.
+pub async fn graft(tx: &mut Transaction<'_, Postgres>, source: i64, dest: i64) -> sqlx::Result<()> {
+    let current = sqlx::query_scalar!("SELECT current_version FROM node WHERE pk = $1", source)
+        .fetch_one(&mut **tx)
         .await?;
-    } else {
-        sqlx::query!(
-            "WITH RECURSIVE subtree (pk) AS (
-                 SELECT $1::bigint
-                 UNION ALL
-                 SELECT n.pk FROM node n JOIN subtree s ON n.parent = s.pk
-             )
-             UPDATE node SET library = $4,
-                 name = CASE WHEN pk = $1 THEN coalesce($2, name) ELSE name END,
-                 parent = CASE WHEN pk = $1 THEN $3 ELSE parent END
-             WHERE pk IN (SELECT pk FROM subtree)",
-            node.node,
-            name,
-            parent,
-            library
-        )
-        .execute(pool)
+    sqlx::query!(
+        "UPDATE node SET current_version = NULL WHERE pk = $1",
+        source
+    )
+    .execute(&mut **tx)
+    .await?;
+    // One statement: `version_parent` (same file) holds at its end.
+    sqlx::query!(
+        "UPDATE version SET file = $2,
+             parent_version = coalesce(parent_version, (SELECT current_version FROM node WHERE pk = $2))
+         WHERE file = $1",
+        source,
+        dest
+    )
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query!(
+        "UPDATE node SET current_version = $2 WHERE pk = $1",
+        dest,
+        current
+    )
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query!("DELETE FROM node WHERE pk = $1", source)
+        .execute(&mut **tx)
         .await?;
-    }
+    Ok(())
+}
+
+/// A new version of the file `dest`, based on its current one, with the
+/// chunks of the version `content` (a copy onto an existing file).
+pub async fn add_version(
+    tx: &mut Transaction<'_, Postgres>,
+    access: &Access,
+    dest: i64,
+    content: i64,
+) -> sqlx::Result<()> {
+    let new = sqlx::query_scalar!(
+        "INSERT INTO version (organization, file, parent_version, author)
+         SELECT $1, pk, current_version, $3 FROM node WHERE pk = $2 RETURNING pk",
+        access.organization,
+        dest,
+        access.user
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    sqlx::query!(
+        "INSERT INTO chunk_in_version (organization, version, chunk, position)
+         SELECT organization, $2, chunk, position FROM chunk_in_version WHERE version = $1",
+        content,
+        new
+    )
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query!(
+        "UPDATE node SET current_version = $2 WHERE pk = $1",
+        dest,
+        new
+    )
+    .execute(&mut **tx)
+    .await?;
     Ok(())
 }
 
@@ -105,7 +173,7 @@ pub async fn copy(
     source: &NodeAccess,
     dest: &NodeAccess,
     name: Option<&str>,
-) -> sqlx::Result<Uuid> {
+) -> sqlx::Result<i64> {
     let nodes = sqlx::query!(
         r#"WITH RECURSIVE subtree (pk, parent, name, is_file, current_version, depth) AS (
                SELECT pk, parent, name, is_file, current_version, 0 FROM node WHERE pk = $1
@@ -144,7 +212,7 @@ pub async fn copy(
         .fetch_one(&mut **tx)
         .await?;
         copies.insert(n.pk, copy.pk);
-        top.get_or_insert(copy.uuid);
+        top.get_or_insert(copy.pk);
         if let Some(version) = n.current_version {
             let new = sqlx::query_scalar!(
                 "INSERT INTO version (organization, file, author) VALUES ($1, $2, $3) RETURNING pk",
@@ -275,7 +343,7 @@ pub async fn restore(
 
 /// `a.txt`, then `a (restored).txt`, `a (restored 2).txt`, ... (folders and
 /// dotfiles: the suffix goes at the end).
-fn restored_name(name: &str, is_file: bool, attempt: u32) -> String {
+pub(crate) fn restored_name(name: &str, is_file: bool, attempt: u32) -> String {
     let suffix = match attempt {
         0 => return name.to_owned(),
         1 => " (restored)".to_owned(),
@@ -322,11 +390,10 @@ pub async fn purge(tx: &mut Transaction<'_, Postgres>, node: i64) -> sqlx::Resul
     Ok(())
 }
 
-/// A file's versions (the tree, oldest first).
+/// A file's versions, numbered RCS-style (`numbers`), in tree order.
 pub async fn versions(pool: &PgPool, file: i64) -> sqlx::Result<Vec<api::Version>> {
-    sqlx::query_as!(
-        api::Version,
-        r#"SELECT v.uuid AS id, p.uuid AS "parent?", a.email AS "author?",
+    let rows = sqlx::query!(
+        r#"SELECT v.pk, v.parent_version, v.uuid AS id, p.uuid AS "parent?", a.email AS "author?",
                   v.created_at::text AS "created_at!", v.message,
                   v.pk = n.current_version AS "current!"
            FROM version v
@@ -338,7 +405,64 @@ pub async fn versions(pool: &PgPool, file: i64) -> sqlx::Result<Vec<api::Version
         file
     )
     .fetch_all(pool)
-    .await
+    .await?;
+    let tree: Vec<(i64, Option<i64>)> = rows.iter().map(|r| (r.pk, r.parent_version)).collect();
+    Ok(numbers(&tree)
+        .into_iter()
+        .map(|(i, number)| {
+            let r = &rows[i];
+            api::Version {
+                id: r.id,
+                number,
+                parent: r.parent,
+                author: r.author.clone(),
+                created_at: r.created_at.clone(),
+                message: r.message.clone(),
+                current: r.current,
+            }
+        })
+        .collect())
+}
+
+/// RCS-style numbers for a version tree given as `(pk, parent)` rows in
+/// creation order (pk order): `(row index, number)` in tree order (depth
+/// first). Along a line numbers increment (1, 2, 3); a version's oldest child
+/// continues its line, each later child starts a branch `<version>.<k>.1`.
+/// Extra roots (none in practice) count as branches of a virtual `0`.
+fn numbers(rows: &[(i64, Option<i64>)]) -> Vec<(usize, String)> {
+    let children = |parent: Option<i64>| -> Vec<usize> {
+        let mut found: Vec<usize> = (0..rows.len()).filter(|&i| rows[i].1 == parent).collect();
+        found.sort_by_key(|&i| rows[i].0);
+        found
+    };
+    let mut out = Vec::with_capacity(rows.len());
+    // (row, its number), depth first, children in reverse so the oldest pops first.
+    let mut stack: Vec<(usize, Vec<u64>)> = Vec::new();
+    for (k, &root) in children(None).iter().enumerate().rev() {
+        let number = if k == 0 {
+            vec![1]
+        } else {
+            vec![0, k as u64, 1]
+        };
+        stack.push((root, number));
+    }
+    while let Some((i, number)) = stack.pop() {
+        for (k, &child) in children(Some(rows[i].0)).iter().enumerate().rev() {
+            let next = if k == 0 {
+                let mut n = number.clone();
+                *n.last_mut().expect("never empty") += 1;
+                n
+            } else {
+                let mut n = number.clone();
+                n.extend([k as u64, 1]);
+                n
+            };
+            stack.push((child, next));
+        }
+        let text: Vec<String> = number.iter().map(u64::to_string).collect();
+        out.push((i, text.join(".")));
+    }
+    out
 }
 
 /// A version of a file, by its uuid.
@@ -405,5 +529,64 @@ mod tests {
         assert_eq!(restored_name("a.tar.gz", true, 2), "a.tar (restored 2).gz");
         assert_eq!(restored_name(".bashrc", true, 1), ".bashrc (restored)");
         assert_eq!(restored_name("v1.0", false, 1), "v1.0 (restored)");
+    }
+}
+
+#[cfg(test)]
+mod numbering {
+    use super::numbers;
+
+    /// Numbers by pk, for readable assertions.
+    fn numbered(rows: &[(i64, Option<i64>)]) -> Vec<(i64, String)> {
+        numbers(rows)
+            .into_iter()
+            .map(|(i, n)| (rows[i].0, n))
+            .collect()
+    }
+
+    #[test]
+    fn a_line() {
+        let rows = [(1, None), (2, Some(1)), (3, Some(2))];
+        assert_eq!(
+            numbered(&rows),
+            [(1, "1".into()), (2, "2".into()), (3, "3".into())]
+        );
+    }
+
+    #[test]
+    fn branches() {
+        // 1 - 2 - 3, a conflict on 2 (5), a second branch from 2 (7) after a
+        // restore, a branch from the branch (6 then 8 on 5).
+        let rows = [
+            (1, None),
+            (2, Some(1)),
+            (3, Some(2)),
+            (5, Some(2)),
+            (6, Some(5)),
+            (7, Some(2)),
+            (8, Some(5)),
+            (9, Some(3)),
+        ];
+        assert_eq!(
+            numbered(&rows),
+            [
+                (1, "1".into()),
+                (2, "2".into()),
+                (3, "3".into()),
+                (9, "4".into()),
+                (5, "2.1.1".into()),
+                (6, "2.1.2".into()),
+                (8, "2.1.1.1.1".into()),
+                (7, "2.2.1".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_graft_continues_the_line() {
+        // Destination 1 - 2; the grafted file's versions 3 - 4 hang below 2.
+        let rows = [(1, None), (2, Some(1)), (3, Some(2)), (4, Some(3))];
+        let last = numbered(&rows).pop().unwrap();
+        assert_eq!(last, (4, "4".into()));
     }
 }

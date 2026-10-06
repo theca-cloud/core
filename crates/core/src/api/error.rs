@@ -152,6 +152,7 @@ impl From<crate::files::FileError> for HttpError {
             E::Root => Self::bad_request("root", error.to_string()),
             E::OtherOrganization => Self::conflict("other_organization", error.to_string()),
             E::NameTaken => Self::conflict("name_taken", error.to_string()),
+            E::LibraryNameTaken => Self::conflict("library_name_taken", error.to_string()),
             E::MoveIntoItself => Self::conflict("move_into_itself", error.to_string()),
             E::InvalidName => Self::bad_request("name_invalid", error.to_string()),
             E::QuotaExceeded => Self::conflict("quota_exceeded", error.to_string()),

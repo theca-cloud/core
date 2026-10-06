@@ -200,6 +200,27 @@ async fn trash_purge(pool: PgPool) {
         )
         .await;
     assert_eq!(w.run(Job::TrashPurge).await, 1);
+
+    // A trashed library, whole.
+    let photos = alice.create_library("Photos").await;
+    alice
+        .upload(&photos, new_file(&photos, "c.txt"), &data(1000, 3))
+        .await
+        .unwrap();
+    alice
+        .call(
+            "DELETE",
+            &format!("/api/v1/libraries/{}", photos.id),
+            None,
+            true,
+        )
+        .await;
+    assert_eq!(w.run(Job::TrashPurge).await, 1);
+    assert_eq!(
+        w.rows("SELECT count(*) FROM library WHERE deleted_at IS NOT NULL")
+            .await,
+        0
+    );
 }
 
 #[sqlx::test]

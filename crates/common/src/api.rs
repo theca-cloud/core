@@ -38,6 +38,27 @@ pub struct CreateLibrary {
     pub namespaces: Vec<Uuid>,
 }
 
+/// `PATCH /libraries/{id}`: rename.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UpdateLibrary {
+    /// The new name (same rules as file names).
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
+    pub name: Name,
+}
+
+/// A library in its organization's trash.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TrashedLibrary {
+    /// The library.
+    pub id: Uuid,
+    /// Its name.
+    pub name: String,
+    /// When it was trashed.
+    pub deleted_at: String,
+}
+
 /// A library.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -507,6 +528,12 @@ pub struct UpdateNode {
     /// The new folder (in any library of the same organization).
     #[serde(default)]
     pub parent: Option<Uuid>,
+    /// A file of that name exists there: merge into it (its history gains
+    /// this file's versions after its current one, this file's current version
+    /// becomes current, this node goes). Otherwise `name_taken`. Folders are
+    /// never replaced.
+    #[serde(default)]
+    pub replace: bool,
 }
 
 /// `POST /nodes/{id}/copy`.
@@ -519,6 +546,11 @@ pub struct CopyNode {
     #[serde(default)]
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub name: Option<Name>,
+    /// A file of that name exists there: the copy is a new version of it
+    /// (based on its current one). Otherwise `name_taken`. Folders are never
+    /// replaced.
+    #[serde(default)]
+    pub replace: bool,
 }
 
 /// A trashed file or folder.
@@ -555,6 +587,11 @@ pub struct Restored {
 pub struct Version {
     /// The version.
     pub id: Uuid,
+    /// Its number in the tree, RCS-style: `1`, `2`, `3` along a line; a
+    /// version's oldest child continues its line, later ones start branches
+    /// (`2.1.1`, `2.1.2`, `2.2.1`). Never changes.
+    #[serde(default)]
+    pub number: String,
     /// The version it was based on (a tree: branches after conflicts and restores).
     pub parent: Option<Uuid>,
     /// Who committed it (their email), unless they left the organization.

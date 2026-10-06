@@ -25,7 +25,7 @@ use crate::storage::{BackendError, chunk_of};
 pub enum Job {
     /// Deletes chunks no version references (objects, then rows).
     ChunkGc,
-    /// Deletes trashed nodes past the retention.
+    /// Deletes trashed nodes and libraries past the retention.
     TrashPurge,
     /// Deletes revoked and expired tokens, and old job history.
     Cleanup,
@@ -350,8 +350,9 @@ fn is_constraint(e: &sqlx::Error, name: &str) -> bool {
     e.as_database_error().and_then(|d| d.constraint()) == Some(name)
 }
 
-/// Trashed nodes past the retention go for good (subtree, versions, chunk
-/// references), one transaction each; their chunks follow with the GC.
+/// Trashed nodes and libraries past the retention go for good (subtree,
+/// versions, chunk references), one transaction each; their chunks follow with
+/// the GC.
 async fn trash_purge(state: &AppState) -> Result<i64, JobError> {
     let retention = state.settings.get().trash_retention.as_secs_f64();
     let mut purged = 0;
@@ -365,12 +366,32 @@ async fn trash_purge(state: &AppState) -> Result<i64, JobError> {
         .fetch_all(&state.pool)
         .await?;
         if nodes.is_empty() {
-            return Ok(purged);
+            break;
         }
         for node in nodes {
             // A node inside an already purged folder went with it.
             let mut tx = state.pool.begin().await?;
             crate::db::node::purge(&mut tx, node).await?;
+            tx.commit().await?;
+            purged += 1;
+        }
+    }
+    // Trashed libraries, whole.
+    loop {
+        let libraries: Vec<i64> = sqlx::query_scalar!(
+            "SELECT pk FROM library WHERE deleted_at <= now() - make_interval(secs => $1)
+             ORDER BY deleted_at LIMIT $2",
+            retention,
+            BATCH
+        )
+        .fetch_all(&state.pool)
+        .await?;
+        if libraries.is_empty() {
+            return Ok(purged);
+        }
+        for library in libraries {
+            let mut tx = state.pool.begin().await?;
+            crate::db::library::purge(&mut tx, library).await?;
             tx.commit().await?;
             purged += 1;
         }

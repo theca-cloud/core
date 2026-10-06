@@ -4,7 +4,7 @@
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::StatusCode;
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use theca_common::api;
@@ -22,6 +22,12 @@ use theca_common::hash::Sha256;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/libraries", post(create_library).get(list_libraries))
+        .route(
+            "/libraries/{id}",
+            patch(update_library).delete(delete_library),
+        )
+        .route("/libraries/{id}/restore", post(restore_library))
+        .route("/organizations/{id}/trash", get(organization_trash))
         .route("/nodes/{id}/children", get(children))
         .route("/chunks/lookup", post(lookup))
         .route("/chunks/upload-urls", post(upload_urls))
@@ -46,6 +52,90 @@ pub(super) async fn library_access(
     db::library::access(&state.pool, user, library)
         .await?
         .ok_or_else(|| HttpError::not_found("library"))
+}
+
+/// Rename a library (a `write` member).
+#[utoipa::path(patch, path = "/api/v1/libraries/{id}", params(("id" = Uuid, Path)), request_body = api::UpdateLibrary, responses(
+    (status = 200, body = api::Library),
+    (status = 404, body = api::ApiError),
+    (status = 409, description = "`library_name_taken`", body = api::ApiError),
+))]
+async fn update_library(
+    State(state): State<AppState>,
+    user: CurrentAccount,
+    Path(id): Path<Uuid>,
+    ApiJson(req): ApiJson<api::UpdateLibrary>,
+) -> Result<Json<api::Library>, HttpError> {
+    let access = library_access(&state, &user, id).await?;
+    crate::files::rename_library(&state, &access, req.name.as_str()).await?;
+    Ok(Json(db::library::get(&state.pool, access.library).await?))
+}
+
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+struct DeleteLibraryParams {
+    /// Delete for good (a library already in the trash only).
+    #[serde(default)]
+    permanent: bool,
+}
+
+/// Put a library, with everything in it, in its organization's trash (a
+/// `write` member); or (`permanent`, from the trash) delete it for good.
+#[utoipa::path(delete, path = "/api/v1/libraries/{id}", params(("id" = Uuid, Path), DeleteLibraryParams), responses(
+    (status = 204),
+    (status = 404, body = api::ApiError),
+))]
+async fn delete_library(
+    State(state): State<AppState>,
+    user: CurrentAccount,
+    Path(id): Path<Uuid>,
+    Query(params): Query<DeleteLibraryParams>,
+) -> Result<StatusCode, HttpError> {
+    if params.permanent {
+        let access = trashed_library(&state, &user, id).await?;
+        crate::files::purge_library(&state, &access).await?;
+    } else {
+        let access = library_access(&state, &user, id).await?;
+        crate::files::trash_library(&state, &access).await?;
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Take a library out of the trash (renamed ` (restored)` if its name was
+/// taken since).
+#[utoipa::path(post, path = "/api/v1/libraries/{id}/restore", params(("id" = Uuid, Path)), responses(
+    (status = 200, body = api::Library),
+    (status = 404, body = api::ApiError),
+))]
+async fn restore_library(
+    State(state): State<AppState>,
+    user: CurrentAccount,
+    Path(id): Path<Uuid>,
+) -> Result<Json<api::Library>, HttpError> {
+    let access = trashed_library(&state, &user, id).await?;
+    crate::files::restore_library(&state, &access).await?;
+    Ok(Json(db::library::get(&state.pool, access.library).await?))
+}
+
+/// An organization's trashed libraries (those the account is a member of).
+#[utoipa::path(get, path = "/api/v1/organizations/{id}/trash", params(("id" = Uuid, Path)), responses(
+    (status = 200, body = Vec<api::TrashedLibrary>),
+))]
+async fn organization_trash(
+    State(state): State<AppState>,
+    user: CurrentAccount,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<api::TrashedLibrary>>, HttpError> {
+    Ok(Json(db::library::trash_list(&state.pool, &user, id).await?))
+}
+
+async fn trashed_library(
+    state: &AppState,
+    user: &CurrentAccount,
+    library: Uuid,
+) -> Result<Access, HttpError> {
+    db::library::trashed_access(&state.pool, user, library)
+        .await?
+        .ok_or_else(|| HttpError::not_found("trashed library"))
 }
 
 pub(super) fn require_write(access: &Access) -> Result<(), HttpError> {

@@ -236,6 +236,121 @@ impl Client {
         self.get(&format!("/api/v1/files/{file}/versions")).await
     }
 
+    /// Makes a version current.
+    pub async fn restore_version(&self, file: Uuid, version: Uuid) -> Result<(), Error> {
+        self.post(
+            &format!("/api/v1/files/{file}/versions/{version}/restore"),
+            &(),
+        )
+        .await
+    }
+
+    /// A file or folder, with its library and path.
+    pub async fn node(&self, id: Uuid) -> Result<api::NodeInfo, Error> {
+        self.get(&format!("/api/v1/nodes/{id}")).await
+    }
+
+    /// Renames and/or moves a node (`replace`: merge into a file of that name).
+    pub async fn update_node(
+        &self,
+        id: Uuid,
+        update: &api::UpdateNode,
+    ) -> Result<api::NodeInfo, Error> {
+        self.call(Method::PATCH, &format!("/api/v1/nodes/{id}"), Some(update))
+            .await
+    }
+
+    /// Copies a node (`replace`: a new version of a file of that name).
+    pub async fn copy_node(&self, id: Uuid, copy: &api::CopyNode) -> Result<api::NodeInfo, Error> {
+        self.post(&format!("/api/v1/nodes/{id}/copy"), copy).await
+    }
+
+    /// Puts a node in the trash, or (`permanent`, from the trash) deletes it
+    /// for good.
+    pub async fn delete_node(&self, id: Uuid, permanent: bool) -> Result<(), Error> {
+        self.call(
+            Method::DELETE,
+            &format!("/api/v1/nodes/{id}?permanent={permanent}"),
+            None::<&()>,
+        )
+        .await
+    }
+
+    /// Takes a node out of the trash.
+    pub async fn restore_node(&self, id: Uuid) -> Result<api::Restored, Error> {
+        self.post(&format!("/api/v1/nodes/{id}/restore"), &()).await
+    }
+
+    /// A library's trash.
+    pub async fn library_trash(&self, library: Uuid) -> Result<Vec<api::TrashEntry>, Error> {
+        self.get(&format!("/api/v1/libraries/{library}/trash"))
+            .await
+    }
+
+    pub async fn rename_library(&self, library: Uuid, name: &str) -> Result<api::Library, Error> {
+        let body = serde_json::json!({ "name": name });
+        self.call(
+            Method::PATCH,
+            &format!("/api/v1/libraries/{library}"),
+            Some(&body),
+        )
+        .await
+    }
+
+    /// Puts a library in the trash, or (`permanent`, from the trash) deletes it
+    /// for good.
+    pub async fn delete_library(&self, library: Uuid, permanent: bool) -> Result<(), Error> {
+        self.call(
+            Method::DELETE,
+            &format!("/api/v1/libraries/{library}?permanent={permanent}"),
+            None::<&()>,
+        )
+        .await
+    }
+
+    pub async fn restore_library(&self, library: Uuid) -> Result<api::Library, Error> {
+        self.post(&format!("/api/v1/libraries/{library}/restore"), &())
+            .await
+    }
+
+    /// An organization's trashed libraries.
+    pub async fn organization_trash(
+        &self,
+        organization: Uuid,
+    ) -> Result<Vec<api::TrashedLibrary>, Error> {
+        self.get(&format!("/api/v1/organizations/{organization}/trash"))
+            .await
+    }
+
+    /// Names containing `text` (at least 3 characters), in one library or all.
+    pub async fn search(
+        &self,
+        text: &str,
+        library: Option<Uuid>,
+    ) -> Result<Vec<api::SearchResult>, Error> {
+        let mut url = reqwest::Url::parse("http://x/api/v1/search").expect("a valid URL");
+        url.query_pairs_mut().append_pair("q", text);
+        if let Some(library) = library {
+            url.query_pairs_mut()
+                .append_pair("library", &library.to_string());
+        }
+        let path = format!("{}?{}", url.path(), url.query().unwrap_or(""));
+        self.get(&path).await
+    }
+
+    pub async fn app_passwords(&self) -> Result<Vec<api::AppPassword>, Error> {
+        self.get("/api/v1/auth/app-passwords").await
+    }
+
+    pub async fn revoke_app_password(&self, id: Uuid) -> Result<(), Error> {
+        self.call(
+            Method::DELETE,
+            &format!("/api/v1/auth/app-passwords/{id}"),
+            None::<&()>,
+        )
+        .await
+    }
+
     pub async fn lookup(&self, lookup: &api::Lookup) -> Result<Vec<api::LookupEntry>, Error> {
         self.post("/api/v1/chunks/lookup", lookup).await
     }

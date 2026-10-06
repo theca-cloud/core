@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE node SET name = coalesce($2, name), parent = $3, library = $4 WHERE pk = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "48fe180398ef27fa5b5cd70f754be10ea6acab5a0f2f411a69468fbfb826a8fb"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE version SET file = $2,\n             parent_version = coalesce(parent_version, (SELECT current_version FROM node WHERE pk = $2))\n         WHERE file = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cb08ebf9c17b3232b9c45c3627816d94af8e7cf63073456ffffa1d58927a9b33"
+}
