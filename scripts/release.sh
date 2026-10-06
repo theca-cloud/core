@@ -3,7 +3,8 @@
 # Releases): the next
 # version from the Conventional Commits since the last release (git-cliff),
 # written to Cargo.toml (the workspace's version and its own crates'),
-# CHANGELOG.md, committed as `chore(release): X.Y.Z`. Then merge `dev` into
+# openapi.json (it carries the version), CHANGELOG.md, committed as
+# `chore(release): X.Y.Z`. Then merge `dev` into
 # `prod` (git merge --no-ff dev): its pipeline publishes.
 #   scripts/release.sh            prepare and commit
 #   scripts/release.sh --dry-run  show the version and the changelog only
@@ -43,8 +44,9 @@ sed -i.bak \
     Cargo.toml
 rm Cargo.toml.bak
 cargo update -q --workspace
+UPDATE_OPENAPI=1 cargo test -q -p theca-core --lib openapi_is_up_to_date >/dev/null
 git cliff --tag "v$next" -o CHANGELOG.md
-git add Cargo.toml Cargo.lock CHANGELOG.md
+git add Cargo.toml Cargo.lock openapi.json CHANGELOG.md
 git commit -q -m "chore(release): $next"
 echo "Release $next prepared on dev. Next: push dev, wait for its CI, then"
 echo "  git checkout prod && git merge --no-ff dev && git push"
