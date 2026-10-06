@@ -262,6 +262,13 @@ async fn scenario(pool: PgPool, storage: serde_json::Value) {
     assert_eq!(me.email, "admin@test.theca");
     let listed = again.children(library.root).await.unwrap();
     assert_eq!(listed.len(), 3);
+
+    // Logging out revokes that session.
+    again.logout().await.unwrap();
+    assert_eq!(
+        again.me().await.unwrap_err().code(),
+        Some("unauthenticated")
+    );
 }
 
 #[sqlx::test]

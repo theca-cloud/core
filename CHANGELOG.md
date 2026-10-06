@@ -1,6 +1,15 @@
 # Changelog
 
 Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
+## [0.2.0] - 2026-10-06
+
+### Features
+
+- **client**: Logout
+
+### Build and CI
+
+- Try/, a local instance from the released image
 ## [0.1.0] - 2026-10-05
 
 ### Features
@@ -24,8 +33,11 @@ Every release of `core`: the server image, the crates, the browser package, `ope
 ### Fixes
 
 - **ci**: Run the release pipeline on manual triggers too
+- **ci**: Send the registry token, re-runnable publish
+- **client**: Allow the wasm features Rust emits in wasm-opt
 
 ### Build and CI
 
 - Split the pipeline into steps, skip documentation-only changes
 - Release pipeline, images and packages
+- Dry-run the publish step locally

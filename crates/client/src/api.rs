@@ -194,6 +194,12 @@ impl Client {
         self.get("/api/v1/me").await
     }
 
+    /// Revokes the session in use (`not_a_session` with an app password).
+    pub async fn logout(&self) -> Result<(), Error> {
+        self.call(Method::POST, "/api/v1/auth/logout", None::<&()>)
+            .await
+    }
+
     pub async fn libraries(&self) -> Result<Vec<api::Library>, Error> {
         self.get("/api/v1/libraries").await
     }
