@@ -1,11 +1,20 @@
 # Changelog
 
 Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
+## [0.3.0] - 2026-10-06
+
+### Features
+
+- **core**: Unchanged content creates no version; listings carry the current version
 ## [0.2.0] - 2026-10-06
 
 ### Features
 
 - **client**: Logout
+
+### Fixes
+
+- **ci**: The release commit updates openapi.json, which carries the version
 
 ### Build and CI
 
