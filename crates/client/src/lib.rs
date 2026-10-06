@@ -14,8 +14,11 @@ mod wasm;
 
 pub use api::{Client, Error};
 #[cfg(not(target_arch = "wasm32"))]
-pub use download::{DownloadOptions, DownloadProgress, download};
+pub use download::{
+    DownloadOptions, DownloadProgress, Downloaded, Downloader, Fetched, FileSink, MemorySink, Sink,
+    download,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use source::FileSource;
 pub use source::{MemorySource, Source};
-pub use upload::{Cancel, Target, UploadOptions, UploadProgress, upload};
+pub use upload::{Cancel, Submitted, Target, UploadOptions, UploadProgress, Uploader, upload};

@@ -147,10 +147,7 @@ async fn gc_and_commits_cannot_race(pool: PgPool) {
     .await;
     let commit =
         json!({ "library": docs.id, "parent": docs.root, "name": "c.txt", "chunks": [marked] });
-    let refused = alice
-        .json::<Value>("POST", "/api/v1/files/commit", &commit)
-        .await
-        .unwrap_err();
+    let refused = alice.commit(&commit).await.unwrap_err();
     assert_eq!(refused.1["code"], "chunk_missing");
 }
 

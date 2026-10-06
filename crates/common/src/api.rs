@@ -176,7 +176,7 @@ pub struct ChunkUrl {
     pub headers: BTreeMap<String, String>,
 }
 
-/// `POST /files/commit`: either `file` (a new version of an existing file) or
+/// One commit of `POST /files/commit`: either `file` (a new version of an existing file) or
 /// `parent` + `name` (a new file).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -219,6 +219,30 @@ pub struct Committed {
     pub unchanged: bool,
 }
 
+/// `POST /files/commit`: commits, each in its own transaction (one
+/// commit is a batch of one).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Commits {
+    /// At most 100.
+    pub commits: Vec<Commit>,
+}
+
+/// One commit's outcome in a batch: committed, or why not.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CommitOutcome {
+    /// Committed (or `unchanged`).
+    #[serde(default)]
+    pub committed: Option<Committed>,
+    /// Refused, and why.
+    #[serde(default)]
+    pub error: Option<ApiError>,
+    /// With `error`: its HTTP status, as a call of its own would have answered.
+    #[serde(default)]
+    pub status: Option<u16>,
+}
+
 /// One chunk of a download, in order.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -237,7 +261,50 @@ pub struct DownloadChunk {
     pub url: String,
 }
 
-/// `GET /files/{id}/download`.
+/// `GET /limits`: the instance's limits clients size their work by.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Limits {
+    /// Chunks an account may have declared and not yet announced
+    /// (`max_pending_uploads`): an upload engine's window.
+    pub max_pending_uploads: u32,
+}
+
+/// `POST /files/download`: files whose chunks to download (at most 100).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Downloads {
+    /// The files, at most 100.
+    pub files: Vec<DownloadFile>,
+}
+
+/// A file to download: its current version, or another one.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct DownloadFile {
+    /// The file.
+    pub file: Uuid,
+    /// One of its versions (default: the current one).
+    #[serde(default)]
+    pub version: Option<Uuid>,
+}
+
+/// One file's outcome in `POST /files/download`: its chunks, or why not.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct DownloadOutcome {
+    /// The version's chunks.
+    #[serde(default)]
+    pub download: Option<Download>,
+    /// Refused, and why (`not_found`: the file or the version).
+    #[serde(default)]
+    pub error: Option<ApiError>,
+    /// With `error`: its HTTP status.
+    #[serde(default)]
+    pub status: Option<u16>,
+}
+
+/// A file's version to download (an outcome of `POST /files/download`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct Download {

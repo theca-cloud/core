@@ -7,7 +7,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.4.0"
+    "version": "0.5.0"
   },
   "paths": {
     "/api/health": {
@@ -1796,13 +1796,13 @@
         "tags": [
           "v1"
         ],
-        "summary": "Commit a version: a new file (`parent` + `name`) or a new version (`file`).",
+        "summary": "Commit versions: each a new file (`parent` + `name`) or a new version\n(`file`), in its own transaction, so one failing never undoes the others.\nThe outcomes come in the request's order; one commit is a batch of one.\nAn outcome's error: `name_taken`, `chunk_missing` (with the chunks to\nupload again), `chunk_not_allowed`, `not_found` (file, folder, base\nversion), `invalid_target`.",
         "operationId": "commit",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Commit"
+                "$ref": "#/components/schemas/Commits"
               }
             }
           },
@@ -1814,13 +1814,16 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Committed"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CommitOutcome"
+                  }
                 }
               }
             }
           },
-          "403": {
-            "description": "Chunks not allowed (`chunk_not_allowed`)",
+          "400": {
+            "description": "`batch_too_large`",
             "content": {
               "application/json": {
                 "schema": {
@@ -1828,9 +1831,43 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/files/download": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Files' chunks, in order, with presigned download URLs: each file's current\nversion, or the one asked. The outcomes come in the request's order.",
+        "operationId": "download",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Downloads"
+              }
+            }
           },
-          "409": {
-            "description": "`name_taken`, `chunk_missing`",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DownloadOutcome"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`batch_too_large`",
             "content": {
               "application/json": {
                 "schema": {
@@ -1892,61 +1929,6 @@
           },
           "416": {
             "description": "Range not satisfiable"
-          }
-        }
-      }
-    },
-    "/api/v1/files/{id}/download": {
-      "get": {
-        "tags": [
-          "v1"
-        ],
-        "summary": "A version's chunks (the current one by default), in order, with presigned\ndownload URLs.",
-        "operationId": "download",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "version",
-            "in": "path",
-            "description": "A version of the file (default: the current one).",
-            "required": true,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Download"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
           }
         }
       }
@@ -2345,6 +2327,27 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/limits": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "The instance's limits, as they stand (they change live): clients size their\nwork by them, e.g. an upload engine's window.",
+        "operationId": "limits",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Limits"
                 }
               }
             }
@@ -3722,7 +3725,7 @@
       },
       "Commit": {
         "type": "object",
-        "description": "`POST /files/commit`: either `file` (a new version of an existing file) or\n`parent` + `name` (a new file).",
+        "description": "One commit of `POST /files/commit`: either `file` (a new version of an existing file) or\n`parent` + `name` (a new file).",
         "required": [
           "library",
           "chunks"
@@ -3778,6 +3781,59 @@
             ],
             "format": "uuid",
             "description": "The folder of a new file."
+          }
+        }
+      },
+      "CommitOutcome": {
+        "type": "object",
+        "description": "One commit's outcome in a batch: committed, or why not.",
+        "properties": {
+          "committed": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Committed",
+                "description": "Committed (or `unchanged`)."
+              }
+            ]
+          },
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ApiError",
+                "description": "Refused, and why."
+              }
+            ]
+          },
+          "status": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "With `error`: its HTTP status, as a call of its own would have answered.",
+            "minimum": 0
+          }
+        }
+      },
+      "Commits": {
+        "type": "object",
+        "description": "`POST /files/commit`: commits, each in its own transaction (one\ncommit is a batch of one).",
+        "required": [
+          "commits"
+        ],
+        "properties": {
+          "commits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Commit"
+            },
+            "description": "At most 100."
           }
         }
       },
@@ -3979,7 +4035,7 @@
       },
       "Download": {
         "type": "object",
-        "description": "`GET /files/{id}/download`.",
+        "description": "A file's version to download (an outcome of `POST /files/download`).",
         "required": [
           "version",
           "chunks"
@@ -4032,6 +4088,81 @@
           "url": {
             "type": "string",
             "description": "Presigned `GET` URL."
+          }
+        }
+      },
+      "DownloadFile": {
+        "type": "object",
+        "description": "A file to download: its current version, or another one.",
+        "required": [
+          "file"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The file."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "One of its versions (default: the current one)."
+          }
+        }
+      },
+      "DownloadOutcome": {
+        "type": "object",
+        "description": "One file's outcome in `POST /files/download`: its chunks, or why not.",
+        "properties": {
+          "download": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Download",
+                "description": "The version's chunks."
+              }
+            ]
+          },
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ApiError",
+                "description": "Refused, and why (`not_found`: the file or the version)."
+              }
+            ]
+          },
+          "status": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "With `error`: its HTTP status.",
+            "minimum": 0
+          }
+        }
+      },
+      "Downloads": {
+        "type": "object",
+        "description": "`POST /files/download`: files whose chunks to download (at most 100).",
+        "required": [
+          "files"
+        ],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DownloadFile"
+            },
+            "description": "The files, at most 100."
           }
         }
       },
@@ -4350,6 +4481,21 @@
             "type": "string",
             "format": "uuid",
             "description": "Its root folder."
+          }
+        }
+      },
+      "Limits": {
+        "type": "object",
+        "description": "`GET /limits`: the instance's limits clients size their work by.",
+        "required": [
+          "max_pending_uploads"
+        ],
+        "properties": {
+          "max_pending_uploads": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Chunks an account may have declared and not yet announced\n(`max_pending_uploads`): an upload engine's window.",
+            "minimum": 0
           }
         }
       },

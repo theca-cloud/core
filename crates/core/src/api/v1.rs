@@ -21,6 +21,7 @@ use theca_common::hash::Sha256;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/limits", get(limits))
         .route("/libraries", post(create_library).get(list_libraries))
         .route(
             "/libraries/{id}",
@@ -34,7 +35,7 @@ pub fn router() -> Router<AppState> {
         .route("/chunks/announce", post(announce))
         .route("/chunks/cancel", post(cancel))
         .route("/files/commit", post(commit))
-        .route("/files/{id}/download", get(download))
+        .route("/files/download", post(download))
         .route(
             "/blobs/{chunk}",
             // A chunk is at most MAX_SIZE plaintext; compression can grow it slightly.
@@ -42,6 +43,16 @@ pub fn router() -> Router<AppState> {
                 .put(put_blob)
                 .layer(DefaultBodyLimit::max(MAX_SIZE + MAX_SIZE / 64 + 1024)),
         )
+}
+
+/// The instance's limits, as they stand (they change live): clients size their
+/// work by them, e.g. an upload engine's window.
+#[utoipa::path(get, path = "/api/v1/limits", responses((status = 200, body = api::Limits)))]
+async fn limits(State(state): State<AppState>, _user: CurrentAccount) -> Json<api::Limits> {
+    let settings = state.settings.get();
+    Json(api::Limits {
+        max_pending_uploads: u32::try_from(settings.max_pending_uploads).unwrap_or(u32::MAX),
+    })
 }
 
 pub(super) async fn library_access(
@@ -367,19 +378,59 @@ async fn cancel(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Commit a version: a new file (`parent` + `name`) or a new version (`file`).
-#[utoipa::path(post, path = "/api/v1/files/commit", request_body = api::Commit, responses(
-    (status = 200, body = api::Committed),
-    (status = 403, description = "Chunks not allowed (`chunk_not_allowed`)", body = api::ApiError),
-    (status = 409, description = "`name_taken`, `chunk_missing`", body = api::ApiError),
+/// Most commits in one batch.
+const COMMIT_BATCH: usize = 100;
+
+/// Commit versions: each a new file (`parent` + `name`) or a new version
+/// (`file`), in its own transaction, so one failing never undoes the others.
+/// The outcomes come in the request's order; one commit is a batch of one.
+/// An outcome's error: `name_taken`, `chunk_missing` (with the chunks to
+/// upload again), `chunk_not_allowed`, `not_found` (file, folder, base
+/// version), `invalid_target`.
+#[utoipa::path(post, path = "/api/v1/files/commit", request_body = api::Commits, responses(
+    (status = 200, body = Vec<api::CommitOutcome>),
+    (status = 400, description = "`batch_too_large`", body = api::ApiError),
 ))]
 async fn commit(
     State(state): State<AppState>,
     user: CurrentAccount,
-    ApiJson(req): ApiJson<api::Commit>,
-) -> Result<Json<api::Committed>, HttpError> {
+    ApiJson(req): ApiJson<api::Commits>,
+) -> Result<Json<Vec<api::CommitOutcome>>, HttpError> {
+    if req.commits.len() > COMMIT_BATCH {
+        return Err(HttpError::bad_request(
+            "batch_too_large",
+            format!("at most {COMMIT_BATCH} commits per batch"),
+        ));
+    }
+    let mut outcomes = Vec::with_capacity(req.commits.len());
+    for commit in &req.commits {
+        outcomes.push(match commit_one(&state, &user, commit).await {
+            Ok(committed) => api::CommitOutcome {
+                committed: Some(committed),
+                error: None,
+                status: None,
+            },
+            Err(e) => {
+                let (status, error) = e.into_parts();
+                api::CommitOutcome {
+                    committed: None,
+                    error: Some(error),
+                    status: Some(status.as_u16()),
+                }
+            }
+        });
+    }
+    Ok(Json(outcomes))
+}
+
+/// One commit, in its own transaction.
+async fn commit_one(
+    state: &AppState,
+    user: &CurrentAccount,
+    req: &api::Commit,
+) -> Result<api::Committed, HttpError> {
     use db::file::{CommitError, Target};
-    let access = library_access(&state, &user, req.library).await?;
+    let access = library_access(state, user, req.library).await?;
     require_write(&access)?;
     let target = match (req.file, req.parent, req.name.as_ref()) {
         (Some(file), None, None) => Target::File {
@@ -425,37 +476,66 @@ async fn commit(
         CommitError::Db(e) => e.into(),
     })?;
     tx.commit().await?;
-    Ok(Json(api::Committed {
+    Ok(api::Committed {
         file: committed.file,
         version: committed.version,
         conflict: committed.conflict,
         unchanged: committed.unchanged,
-    }))
+    })
 }
 
-#[derive(Deserialize, utoipa::IntoParams)]
-pub(super) struct DownloadParams {
-    /// A version of the file (default: the current one).
-    version: Option<Uuid>,
-}
+/// Most files in one download request.
+const DOWNLOAD_BATCH: usize = 100;
 
-/// A version's chunks (the current one by default), in order, with presigned
-/// download URLs.
-#[utoipa::path(get, path = "/api/v1/files/{id}/download", params(("id" = Uuid, Path), DownloadParams), responses(
-    (status = 200, body = api::Download),
-    (status = 404, body = api::ApiError),
+/// Files' chunks, in order, with presigned download URLs: each file's current
+/// version, or the one asked. The outcomes come in the request's order.
+#[utoipa::path(post, path = "/api/v1/files/download", request_body = api::Downloads, responses(
+    (status = 200, body = Vec<api::DownloadOutcome>),
+    (status = 400, description = "`batch_too_large`", body = api::ApiError),
 ))]
 async fn download(
     State(state): State<AppState>,
     user: CurrentAccount,
-    Path(id): Path<Uuid>,
-    Query(params): Query<DownloadParams>,
-) -> Result<Json<api::Download>, HttpError> {
-    let node = db::library::node_access(&state.pool, &user, id)
+    ApiJson(req): ApiJson<api::Downloads>,
+) -> Result<Json<Vec<api::DownloadOutcome>>, HttpError> {
+    if req.files.len() > DOWNLOAD_BATCH {
+        return Err(HttpError::bad_request(
+            "batch_too_large",
+            format!("at most {DOWNLOAD_BATCH} files per request"),
+        ));
+    }
+    let mut outcomes = Vec::with_capacity(req.files.len());
+    for file in &req.files {
+        outcomes.push(match download_one(&state, &user, file).await {
+            Ok(download) => api::DownloadOutcome {
+                download: Some(download),
+                error: None,
+                status: None,
+            },
+            Err(e) => {
+                let (status, error) = e.into_parts();
+                api::DownloadOutcome {
+                    download: None,
+                    error: Some(error),
+                    status: Some(status.as_u16()),
+                }
+            }
+        });
+    }
+    Ok(Json(outcomes))
+}
+
+/// One file's version, its chunks with their URLs.
+async fn download_one(
+    state: &AppState,
+    user: &CurrentAccount,
+    req: &api::DownloadFile,
+) -> Result<api::Download, HttpError> {
+    let node = db::library::node_access(&state.pool, user, req.file)
         .await?
         .filter(|n| n.is_file)
         .ok_or_else(|| HttpError::not_found("file"))?;
-    let version = match params.version {
+    let version = match req.version {
         Some(version) => db::node::version_of(&state.pool, node.node, version).await?,
         None => node.current_version,
     }
@@ -464,7 +544,7 @@ async fn download(
     let lifetime = state.settings.get().presigned_url_lifetime;
     let mut out = Vec::with_capacity(chunks.len());
     for c in chunks {
-        let url = backend(&state, c.storage)
+        let url = backend(state, c.storage)
             .await?
             .download_url(&state.signer, c.uuid, lifetime)
             .await?;
@@ -476,10 +556,10 @@ async fn download(
             url,
         });
     }
-    Ok(Json(api::Download {
+    Ok(api::Download {
         version,
         chunks: out,
-    }))
+    })
 }
 
 #[derive(Deserialize)]

@@ -1,6 +1,18 @@
 # Changelog
 
 Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
+## [0.5.0] - 2026-10-06
+
+### Features
+
+- **client**: A staged upload engine for many files; feat(core): batch commits
+- **core**: Commits only in batches; feat(client): cancelling one file of the upload engine (**breaking**)
+- **core**: Lists everywhere (POST /files/commit, POST /files/download); feat(client): a staged download engine (**breaking**)
+- **core**: GET /limits; feat(client): the upload window follows the server, 16 transfers at once
+
+### Fixes
+
+- **ci**: Release notes keep their line breaks (curl -d strips them)
 ## [0.4.0] - 2026-10-06
 
 ### Features

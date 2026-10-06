@@ -80,6 +80,7 @@ pub struct AppState {
         oidc::callback,
         oidc::identities,
         oidc::unlink,
+        v1::limits,
         v1::create_library,
         v1::list_libraries,
         v1::update_library,

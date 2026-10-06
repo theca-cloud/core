@@ -11,7 +11,8 @@ use std::time::Duration;
 use serde_json::json;
 use sqlx::PgPool;
 use theca_client::{
-    Cancel, Client, DownloadOptions, MemorySource, Target, UploadOptions, download, upload,
+    Cancel, Client, DownloadOptions, Downloader, FileSink, MemorySink, MemorySource, Target,
+    UploadOptions, UploadProgress, Uploader, download, upload,
 };
 use theca_common::api;
 use theca_common::name::Name;
@@ -95,15 +96,20 @@ fn data(len: usize, seed: u64) -> Vec<u8> {
 }
 
 async fn fetch(client: &Client, file: uuid::Uuid, version: Option<uuid::Uuid>) -> Vec<u8> {
-    let mut out = Vec::new();
-    let options = DownloadOptions {
+    let out = MemorySink::default();
+    let options = DownloadOptions::default();
+    download(
+        client,
+        file,
         version,
-        ..Default::default()
-    };
-    download(client, file, &mut out, &options, |_| {})
-        .await
-        .unwrap();
-    out
+        &out,
+        &options,
+        |_| {},
+        &Cancel::default(),
+    )
+    .await
+    .unwrap();
+    out.0.into_inner().unwrap()
 }
 
 async fn scenario(pool: PgPool, storage: serde_json::Value) {
@@ -369,8 +375,10 @@ async fn commit_recovers_lost_chunks(pool: PgPool) {
         parent: library.root,
         name: Name::new("lost.bin").unwrap(),
     };
+    // One chunk at a time: the first is announced before the last is read.
     let options = UploadOptions {
         parallel: 1,
+        window: Some(1),
         ..Default::default()
     };
     let never = Cancel::default();
@@ -394,5 +402,280 @@ async fn commit_recovers_lost_chunks(pool: PgPool) {
     .await
     .expect("the upload and the interference finish");
     let committed = committed.unwrap();
+    assert_eq!(fetch(&client, committed.file, None).await, bytes);
+}
+
+/// Many files through one engine: each committed (or failing on its own),
+/// identical content uploaded once, the results each file's own.
+#[sqlx::test]
+async fn many_files_at_once(pool: PgPool) {
+    let server = start(&pool).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut client = Client::new(&server.url).unwrap();
+    let setup: api::Setup = serde_json::from_value(json!({
+        "admin_email": "admin@test.theca", "admin_password": "a long password", "organization": "Acme",
+        "storages": [{ "name": "main", "implementation": "filesystem", "path": dir.path() }],
+    }))
+    .unwrap();
+    let me = client.setup(&setup, None).await.unwrap();
+    let library = client
+        .create_library(me.organizations[0].organization, "Docs")
+        .await
+        .unwrap();
+    let target = |name: &str| Target::New {
+        library: library.id,
+        parent: library.root,
+        name: Name::new(name).unwrap(),
+    };
+    // A name taken before the batch: that file alone fails.
+    upload(
+        &client,
+        &MemorySource(b"first".to_vec()),
+        target("taken.txt"),
+        &UploadOptions::default(),
+        |_| {},
+        &Cancel::default(),
+    )
+    .await
+    .unwrap();
+
+    let mut sources: Vec<(String, MemorySource)> = (0..30)
+        .map(|i| {
+            (
+                format!("small-{i}.bin"),
+                MemorySource(data(10_000 + i, i as u64 + 10)),
+            )
+        })
+        .collect();
+    let big = data(5 * 1024 * 1024, 7);
+    sources.push(("big.bin".into(), MemorySource(big.clone())));
+    sources.push(("big-copy.bin".into(), MemorySource(big.clone())));
+    sources.push(("empty.txt".into(), MemorySource(Vec::new())));
+    sources.push(("taken.txt".into(), MemorySource(b"second".to_vec())));
+
+    let options = UploadOptions::default();
+    let cancel = Cancel::default();
+    let mut last = Default::default();
+    let (uploader, run) = Uploader::new(&client, &options, &cancel, |p: &UploadProgress| {
+        last = p.clone()
+    });
+    let results: Vec<_> = sources
+        .iter()
+        .map(|(name, source)| uploader.submit(source, target(name)))
+        .collect();
+    drop(uploader);
+    let ((), results) = tokio::time::timeout(Duration::from_secs(60), async {
+        tokio::join!(run, futures::future::join_all(results))
+    })
+    .await
+    .expect("the engine finishes");
+
+    for ((name, source), result) in sources.iter().zip(results) {
+        if name == "taken.txt" {
+            assert_eq!(result.unwrap_err().code(), Some("name_taken"));
+            continue;
+        }
+        let committed = result.unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(
+            fetch(&client, committed.file, None).await,
+            source.0,
+            "{name}"
+        );
+    }
+    assert_eq!((last.files, last.files_done), (34, 34));
+    assert_eq!(
+        last.uploaded + last.skipped,
+        last.total - big.len() as u64,
+        "the copy's chunks were never sent twice: {last:?}"
+    );
+
+    // All of them down through one engine, into files; a file that doesn't
+    // exist fails alone. Then again: every file already identical.
+    let committed: Vec<(String, uuid::Uuid, Vec<u8>)> = {
+        let listed = client.children(library.root).await.unwrap();
+        sources
+            .iter()
+            .filter(|(name, _)| name != "taken.txt")
+            .map(|(name, source)| {
+                let node = listed.iter().find(|n| &n.name == name).unwrap();
+                (name.clone(), node.id, source.0.clone())
+            })
+            .collect()
+    };
+    let out = tempfile::tempdir().unwrap();
+    for round in ["fresh", "again"] {
+        let options = DownloadOptions {
+            skip_identical: true,
+            ..Default::default()
+        };
+        let sinks: Vec<FileSink> = committed
+            .iter()
+            .map(|(name, _, _)| FileSink::new(&out.path().join(name)))
+            .collect();
+        let missing = FileSink::new(&out.path().join("missing"));
+        let (downloader, run) = Downloader::new(
+            &client,
+            &options,
+            &cancel,
+            |_: &theca_client::DownloadProgress| {},
+        );
+        let results: Vec<_> = committed
+            .iter()
+            .zip(&sinks)
+            .map(|((_, id, _), sink)| downloader.submit(*id, None, sink))
+            .collect();
+        let gone = downloader.submit(uuid::Uuid::nil(), None, &missing);
+        drop(downloader);
+        let ((), results, gone) = tokio::time::timeout(Duration::from_secs(60), async {
+            tokio::join!(run, futures::future::join_all(results), gone)
+        })
+        .await
+        .expect("the engine finishes");
+        assert_eq!(gone.unwrap_err().code(), Some("not_found"));
+        for ((name, _, bytes), result) in committed.iter().zip(results) {
+            let downloaded = result.unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(downloaded.unchanged, round == "again", "{round}: {name}");
+            assert_eq!(
+                &std::fs::read(out.path().join(name)).unwrap(),
+                bytes,
+                "{name}"
+            );
+        }
+    }
+    let leftovers: Vec<_> = std::fs::read_dir(out.path())
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".theca-part"))
+        .collect();
+    assert!(leftovers.is_empty(), "no partial file left");
+}
+
+/// One file cancelled among others: it alone ends `cancelled`, the others
+/// commit, and the chunks it had uploaded are freed on the server.
+#[sqlx::test]
+async fn cancel_one_file(pool: PgPool) {
+    let server = start(&pool).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut client = Client::new(&server.url).unwrap();
+    let setup: api::Setup = serde_json::from_value(json!({
+        "admin_email": "admin@test.theca", "admin_password": "a long password", "organization": "Acme",
+        "storages": [{ "name": "main", "implementation": "filesystem", "path": dir.path() }],
+    }))
+    .unwrap();
+    let me = client.setup(&setup, None).await.unwrap();
+    let library = client
+        .create_library(me.organizations[0].organization, "Docs")
+        .await
+        .unwrap();
+    let target = |name: &str| Target::New {
+        library: library.id,
+        parent: library.root,
+        name: Name::new(name).unwrap(),
+    };
+    let big = MemorySource(data(6 * 1024 * 1024, 8));
+    let small = MemorySource(data(20_000, 9));
+    // One chunk at a time: the big file is still going when its first chunk
+    // is confirmed.
+    let options = UploadOptions {
+        parallel: 1,
+        window: Some(1),
+        ..Default::default()
+    };
+    let cancel = Cancel::default();
+    let confirmed = std::sync::atomic::AtomicBool::new(false);
+    let (uploader, run) = Uploader::new(&client, &options, &cancel, |p: &UploadProgress| {
+        if p.uploaded > 0 {
+            confirmed.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    });
+    let big_upload = uploader.submit(&big, target("big.bin"));
+    let small_upload = uploader.submit(&small, target("small.bin"));
+    drop(uploader);
+    let cancel_big = async {
+        while !confirmed.load(std::sync::atomic::Ordering::Relaxed) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        big_upload.cancel();
+        big_upload.await
+    };
+    let ((), big_result, small_result) = tokio::time::timeout(Duration::from_secs(60), async {
+        tokio::join!(run, cancel_big, small_upload)
+    })
+    .await
+    .expect("the engine finishes");
+    assert!(
+        matches!(big_result, Err(theca_client::Error::Cancelled)),
+        "{big_result:?}"
+    );
+    let small_committed = small_result.unwrap();
+    assert_eq!(fetch(&client, small_committed.file, None).await, small.0);
+
+    // Its confirmed chunks were freed: everything goes again.
+    let mut again = UploadProgress::default();
+    upload(
+        &client,
+        &big,
+        target("big.bin"),
+        &UploadOptions::default(),
+        |p| again = p.clone(),
+        &Cancel::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        again.skipped, 0,
+        "the cancelled file's chunks were freed: {again:?}"
+    );
+}
+
+/// The upload engine sizes its window by the server's `max_pending_uploads`
+/// (`GET /limits`, live): a window larger than the cap would have every
+/// declaration refused, forever.
+#[sqlx::test]
+async fn the_window_follows_the_server(pool: PgPool) {
+    let server = start(&pool).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut client = Client::new(&server.url).unwrap();
+    let setup: api::Setup = serde_json::from_value(json!({
+        "admin_email": "admin@test.theca", "admin_password": "a long password", "organization": "Acme",
+        "storages": [{ "name": "main", "implementation": "filesystem", "path": dir.path() }],
+    }))
+    .unwrap();
+    let me = client.setup(&setup, None).await.unwrap();
+    let library = client
+        .create_library(me.organizations[0].organization, "Docs")
+        .await
+        .unwrap();
+    assert_eq!(client.limits().await.unwrap().max_pending_uploads, 15);
+    let _: serde_json::Value = client
+        .call(
+            reqwest::Method::PATCH,
+            "/api/v1/admin/settings",
+            Some(&json!({ "max_pending_uploads": "2" })),
+        )
+        .await
+        .unwrap();
+    assert_eq!(client.limits().await.unwrap().max_pending_uploads, 2);
+
+    let bytes = data(8 * 1024 * 1024, 11);
+    let target = Target::New {
+        library: library.id,
+        parent: library.root,
+        name: Name::new("big.bin").unwrap(),
+    };
+    let committed = tokio::time::timeout(
+        Duration::from_secs(60),
+        upload(
+            &client,
+            &MemorySource(bytes.clone()),
+            target,
+            &UploadOptions::default(),
+            |_| {},
+            &Cancel::default(),
+        ),
+    )
+    .await
+    .expect("declarations within the server's window are never refused")
+    .unwrap();
     assert_eq!(fetch(&client, committed.file, None).await, bytes);
 }

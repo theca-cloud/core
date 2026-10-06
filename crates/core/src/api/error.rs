@@ -40,6 +40,11 @@ impl HttpError {
         error
     }
 
+    /// The error as a status and a body, e.g. one item's outcome in a batch.
+    pub fn into_parts(self) -> (StatusCode, ApiError) {
+        (self.status, self.body)
+    }
+
     /// Replaces the error code (e.g. a `forbidden` with a more specific code).
     pub fn into_code(mut self, code: &str) -> Self {
         self.body.code = code.into();

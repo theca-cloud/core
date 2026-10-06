@@ -4,10 +4,10 @@
 
 use std::io;
 
-use crate::rt::BoxFuture;
+use crate::rt::{BoxFuture, MaybeSync};
 
 /// Something to upload, read by range.
-pub trait Source {
+pub trait Source: MaybeSync {
     /// Its size in bytes.
     fn len(&self) -> u64;
 

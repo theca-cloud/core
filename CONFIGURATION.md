@@ -35,7 +35,7 @@ Changed through the admin API (`PATCH /api/v1/admin/settings`), which validates 
 | `instance_name` | `Theca` | Shown in emails and the web app. |
 | `gc_grace_period_secs` | `86400` (24 h) | How long an unreferenced chunk, untouched, is kept before garbage collection deletes it (abandoned uploads). |
 | `presigned_url_lifetime_secs` | `900` (15 min) | How long presigned upload and download URLs stay valid. |
-| `max_pending_uploads` | `15` | Most chunks a user may have being uploaded at once (declared, upload URL still valid, not uploaded yet). Requesting more upload URLs is refused (`429`); clients upload in batches. |
+| `max_pending_uploads` | `15` | Most chunks a user may have being uploaded at once (declared, upload URL still valid, not uploaded yet). Requesting more upload URLs is refused (`429`); clients read it (`GET /api/v1/limits`) and size their upload window by it, so raising it speeds every client up, lowering it never makes them fail. |
 | `registration` | `closed` | `open`: anyone can create an account (verified by email, so it needs SMTP). `closed`: accounts come from invitations (and the setup). |
 | `smtp_host` | | The SMTP server. Unset: emails stay queued (and registration and invitations are unavailable). Changes apply to the next sending run, no restart needed. |
 | `smtp_port` | `587` | Its port. |
