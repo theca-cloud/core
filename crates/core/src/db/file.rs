@@ -36,15 +36,19 @@ impl From<sqlx::Error> for CommitError {
     }
 }
 
-/// The committed version: `(file, version, conflict)`.
+/// The committed version: `(file, version, conflict, unchanged)`.
 pub struct Committed {
     pub file: Uuid,
     pub version: Uuid,
     pub conflict: bool,
+    /// The content was the current version's: nothing was created.
+    pub unchanged: bool,
 }
 
 /// Creates the file if needed and a new version with the given chunks (in
 /// order), and makes it current. `conflict`: the base wasn't the current version.
+/// The same chunks as the base, still current: nothing is created, the current
+/// version is returned (`unchanged`; the message is dropped).
 pub async fn commit(
     tx: &mut Transaction<'_, Postgres>,
     access: &Access,
@@ -153,6 +157,27 @@ pub async fn commit(
         .map(|u| allowed.iter().find(|a| a.uuid == *u).expect("allowed").pk)
         .collect();
 
+    // Uploading a folder again only versions what changed.
+    if base.is_some() && base == current {
+        let same: Vec<i64> = sqlx::query_scalar!(
+            "SELECT chunk FROM chunk_in_version WHERE version = $1 ORDER BY position",
+            base
+        )
+        .fetch_all(&mut **tx)
+        .await?;
+        if same == pks {
+            let version = sqlx::query_scalar!("SELECT uuid FROM version WHERE pk = $1", base)
+                .fetch_one(&mut **tx)
+                .await?;
+            return Ok(Committed {
+                file: file_uuid,
+                version,
+                conflict: false,
+                unchanged: true,
+            });
+        }
+    }
+
     let version = sqlx::query!(
         "INSERT INTO version (organization, file, parent_version, message, author)
          VALUES ($1, $2, $3, $4, $5) RETURNING pk, uuid",
@@ -186,6 +211,7 @@ pub async fn commit(
         file: file_uuid,
         version: version.uuid,
         conflict: current != base,
+        unchanged: false,
     })
 }
 

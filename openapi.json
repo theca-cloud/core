@@ -3618,6 +3618,10 @@
             "format": "uuid",
             "description": "The file."
           },
+          "unchanged": {
+            "type": "boolean",
+            "description": "The same content as the base, still current: no version was created,\n`version` is the current one."
+          },
           "version": {
             "type": "string",
             "format": "uuid",
@@ -4411,6 +4415,14 @@
           "is_file"
         ],
         "properties": {
+          "current_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "A file's current version (the base of a new one)."
+          },
           "id": {
             "type": "string",
             "format": "uuid",
