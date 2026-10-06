@@ -3406,7 +3406,7 @@ dependencies = [
 
 [[package]]
 name = "theca-client"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "futures",
  "gloo-timers",
@@ -3427,7 +3427,7 @@ dependencies = [
 
 [[package]]
 name = "theca-common"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "fastcdc",
  "futures",
@@ -3444,7 +3444,7 @@ dependencies = [
 
 [[package]]
 name = "theca-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "argon2",
  "askama",
