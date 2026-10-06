@@ -385,10 +385,6 @@ impl Client {
         .await
     }
 
-    pub async fn commit(&self, commit: &api::Commit) -> Result<api::Committed, Error> {
-        self.post("/api/v1/files/commit", commit).await
-    }
-
     /// Several commits, each in its own transaction (at most 100): each one's
     /// outcome, in order.
     pub async fn commit_batch(

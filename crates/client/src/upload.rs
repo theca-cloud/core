@@ -197,6 +197,8 @@ struct Chunk {
     /// The lookup asked us to upload it: a cancel frees it on the server
     /// (unless a committed version uses it).
     ours: bool,
+    /// Open files that need it: none left after a cancel, it's dropped.
+    users: usize,
 }
 
 struct File<'a> {
@@ -231,6 +233,9 @@ struct State<'a, P> {
     open: usize,
     input_closed: bool,
     cancelled: bool,
+    /// Chunks of cancelled files to free on the server (the cancel watch
+    /// sends them).
+    to_free: Vec<Uuid>,
     progress: UploadProgress,
     report: P,
     queues: Queues,
@@ -243,11 +248,42 @@ impl<P: FnMut(&UploadProgress)> State<'_, P> {
 
     fn resolve(&mut self, f: usize, result: Result<api::Committed, Error>) {
         if let Some(done) = self.files[f].done.take() {
+            let cancelled = matches!(result, Err(Error::Cancelled));
             let _ = done.send(result);
+            self.release(f, cancelled);
             self.open -= 1;
             self.progress.files_done += 1;
             self.notify();
             self.finish_if_done();
+        }
+    }
+
+    /// A file resolved no longer needs its chunks. Cancelled: those no other
+    /// open file needs are dropped, and freed on the server if we uploaded
+    /// them. (Failed otherwise, they stay: committing them under another name
+    /// needs no upload.)
+    fn release(&mut self, f: usize, cancelled: bool) {
+        let library = self.files[f].target.library();
+        let mut seen = Vec::new();
+        for part in &self.files[f].parts {
+            let key = (library, part.hash);
+            if seen.contains(&key) {
+                continue;
+            }
+            seen.push(key);
+            let Some(chunk) = self.chunks.get_mut(&key) else {
+                continue;
+            };
+            chunk.users = chunk.users.saturating_sub(1);
+            chunk.waiters.retain(|w| *w != f);
+            if cancelled && chunk.users == 0 {
+                if chunk.ours
+                    && let Some(id) = chunk.id
+                {
+                    self.to_free.push(id);
+                }
+                self.chunks.remove(&key);
+            }
         }
     }
 
@@ -296,6 +332,7 @@ impl<P: FnMut(&UploadProgress)> State<'_, P> {
             waiters: Vec::new(),
             from: (f, part),
             ours: false,
+            users: 0,
         });
         chunk.waiters.push(f);
         self.files[f].waiting += 1;
@@ -357,6 +394,7 @@ impl<'a, P: FnMut(&UploadProgress) + MaybeSync + 'a> Uploader<'a, P> {
             open: 0,
             input_closed: false,
             cancelled: false,
+            to_free: Vec::new(),
             progress: UploadProgress::default(),
             report: progress,
             queues: Queues {
@@ -384,18 +422,17 @@ impl<'a, P: FnMut(&UploadProgress) + MaybeSync + 'a> Uploader<'a, P> {
         (Self { state, files }, run)
     }
 
-    /// Adds a file: its result once committed (or failed).
-    pub fn submit(
-        &self,
-        source: &'a dyn Source,
-        target: Target,
-    ) -> impl Future<Output = Result<api::Committed, Error>> + 'a {
+    /// Adds a file: a handle to await its result (once committed, or
+    /// failed), or to cancel it alone.
+    pub fn submit(&self, source: &'a dyn Source, target: Target) -> Submitted<'a, P> {
         let (done, result) = oneshot::channel();
         let mut state = self.state.lock().expect("engine state");
+        let mut file = None;
         if state.cancelled {
             let _ = done.send(Err(Error::Cancelled));
         } else {
             let f = state.files.len();
+            file = Some(f);
             state.files.push(File {
                 source,
                 target,
@@ -410,7 +447,41 @@ impl<'a, P: FnMut(&UploadProgress) + MaybeSync + 'a> Uploader<'a, P> {
             state.notify();
             let _ = self.files.unbounded_send(f);
         }
-        async move { result.await.unwrap_or(Err(Error::Cancelled)) }
+        drop(state);
+        Submitted {
+            state: self.state.clone(),
+            file,
+            result,
+        }
+    }
+}
+
+/// A submitted file: await it for its result, or cancel it alone (the others
+/// go on; its chunks no other file needs are freed on the server).
+pub struct Submitted<'a, P> {
+    state: Shared<'a, P>,
+    file: Option<usize>,
+    result: oneshot::Receiver<Result<api::Committed, Error>>,
+}
+
+impl<P: FnMut(&UploadProgress)> Submitted<'_, P> {
+    pub fn cancel(&self) {
+        if let Some(f) = self.file {
+            lock(&self.state).resolve(f, Err(Error::Cancelled));
+        }
+    }
+}
+
+impl<P> Future for Submitted<'_, P> {
+    type Output = Result<api::Committed, Error>;
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        std::pin::Pin::new(&mut self.result)
+            .poll(cx)
+            .map(|r| r.unwrap_or(Err(Error::Cancelled)))
     }
 }
 
@@ -463,6 +534,8 @@ async fn hash_stage<P: FnMut(&UploadProgress)>(
             let mut s = lock(state);
             match parts {
                 Err(e) => s.resolve(f, Err(e)),
+                // Cancelled while it was being read.
+                Ok(_) if s.files[f].done.is_none() => {}
                 Ok(parts) => {
                     let library = s.files[f].target.library();
                     s.files[f].parts = parts.clone();
@@ -480,6 +553,9 @@ async fn hash_stage<P: FnMut(&UploadProgress)>(
                                 s.files[f].waiting += 1;
                             }
                             None => s.look_up(key, f, part),
+                        }
+                        if let Some(chunk) = s.chunks.get_mut(&key) {
+                            chunk.users += 1;
                         }
                     }
                     if s.files[f].waiting == 0
@@ -738,7 +814,8 @@ async fn declare<P: FnMut(&UploadProgress)>(
     for key in keys {
         let (source, part, id) = {
             let s = lock(state);
-            let Some(chunk) = s.chunks.get(key) else {
+            // Gone, or no open file needs it anymore (cancelled).
+            let Some(chunk) = s.chunks.get(key).filter(|c| c.users > 0) else {
                 continue;
             };
             let (f, part) = chunk.from;
@@ -1033,12 +1110,16 @@ async fn cancel_watch<P: FnMut(&UploadProgress)>(
 ) {
     // ponytail: polled; a waker in `Cancel` if a tenth of a second matters.
     loop {
+        free(state, client).await;
         if cancel.is_cancelled() {
             break;
         }
         match select(Box::pin(rt::sleep(CANCEL_POLL)), stop.next()).await {
             Either::Left(_) => {}
-            Either::Right(_) => return,
+            Either::Right(_) => {
+                free(state, client).await;
+                return;
+            }
         }
     }
     let pending: Vec<Uuid> = {
@@ -1058,5 +1139,14 @@ async fn cancel_watch<P: FnMut(&UploadProgress)>(
     };
     if !pending.is_empty() {
         let _ = client.cancel(&pending).await;
+    }
+    lock(state).to_free.clear();
+}
+
+/// Frees the chunks of cancelled files on the server.
+async fn free<P>(state: &Shared<'_, P>, client: &Client) {
+    let ids = std::mem::take(&mut lock(state).to_free);
+    if !ids.is_empty() {
+        let _ = client.cancel(&ids).await;
     }
 }

@@ -176,7 +176,7 @@ pub struct ChunkUrl {
     pub headers: BTreeMap<String, String>,
 }
 
-/// `POST /files/commit`: either `file` (a new version of an existing file) or
+/// One commit of `POST /files/commit-batch`: either `file` (a new version of an existing file) or
 /// `parent` + `name` (a new file).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -219,7 +219,8 @@ pub struct Committed {
     pub unchanged: bool,
 }
 
-/// `POST /files/commit-batch`: several commits, each in its own transaction.
+/// `POST /files/commit-batch`: commits, each in its own transaction (one
+/// commit is a batch of one).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CommitBatch {
@@ -227,18 +228,17 @@ pub struct CommitBatch {
     pub commits: Vec<Commit>,
 }
 
-/// One commit's outcome in a batch: committed, or why not (the same errors as
-/// `POST /files/commit`).
+/// One commit's outcome in a batch: committed, or why not.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CommitOutcome {
     /// Committed (or `unchanged`).
     #[serde(default)]
     pub committed: Option<Committed>,
-    /// Refused: the error `POST /files/commit` would have answered.
+    /// Refused, and why.
     #[serde(default)]
     pub error: Option<ApiError>,
-    /// With `error`: the HTTP status `POST /files/commit` would have answered.
+    /// With `error`: its HTTP status, as a call of its own would have answered.
     #[serde(default)]
     pub status: Option<u16>,
 }

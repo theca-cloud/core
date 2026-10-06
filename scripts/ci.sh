@@ -60,7 +60,7 @@ s3() {
 }
 
 # openapi.json against the last release's: no breaking change to /api/v1 (a
-# client built against any 1.x keeps working).
+# client built against any 1.x keeps working). From 1.0 on: betas may break.
 api_compatibility() {
     if ! command -v oasdiff >/dev/null 2>&1; then
         echo "oasdiff missing: API compatibility not checked here (the CI checks it)"
@@ -71,6 +71,13 @@ api_compatibility() {
         echo "no release yet: no API to stay compatible with"
         return
     }
+    case "$last" in
+    v0.*)
+        # Beta (decisions.md, Versions): the API may still break until 1.0.
+        echo "last release $last is beta (0.x): breaking API changes allowed until 1.0"
+        return
+        ;;
+    esac
     git show "$last:openapi.json" >target/released-openapi.json
     oasdiff breaking target/released-openapi.json openapi.json --fail-on ERR
 }

@@ -474,7 +474,26 @@ impl Client {
                 .map(|(h, _)| entry(h).chunk)
                 .collect::<Vec<_>>()
         );
-        self.json("POST", "/api/v1/files/commit", &commit).await
+        self.commit(&commit).await
+    }
+
+    /// One commit: a batch of one, its outcome as a single call's answer.
+    async fn commit(&self, commit: &Value) -> Result<api::Committed, Failure> {
+        let mut outcomes: Vec<api::CommitOutcome> = self
+            .json(
+                "POST",
+                "/api/v1/files/commit-batch",
+                &json!({ "commits": [commit] }),
+            )
+            .await?;
+        let outcome = outcomes.remove(0);
+        match (outcome.committed, outcome.error) {
+            (Some(committed), _) => Ok(committed),
+            (None, error) => Err((
+                StatusCode::from_u16(outcome.status.unwrap_or(500)).unwrap(),
+                serde_json::to_value(error).unwrap(),
+            )),
+        }
     }
 
     /// Downloads a file's current version, checking every chunk's hash.

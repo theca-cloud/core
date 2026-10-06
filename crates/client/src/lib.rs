@@ -18,4 +18,4 @@ pub use download::{DownloadOptions, DownloadProgress, download};
 #[cfg(not(target_arch = "wasm32"))]
 pub use source::FileSource;
 pub use source::{MemorySource, Source};
-pub use upload::{Cancel, Target, UploadOptions, UploadProgress, Uploader, upload};
+pub use upload::{Cancel, Submitted, Target, UploadOptions, UploadProgress, Uploader, upload};

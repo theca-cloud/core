@@ -1791,63 +1791,12 @@
         }
       }
     },
-    "/api/v1/files/commit": {
-      "post": {
-        "tags": [
-          "v1"
-        ],
-        "summary": "Commit a version: a new file (`parent` + `name`) or a new version (`file`).",
-        "operationId": "commit",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Commit"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Committed"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Chunks not allowed (`chunk_not_allowed`)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "`name_taken`, `chunk_missing`",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/files/commit-batch": {
       "post": {
         "tags": [
           "v1"
         ],
-        "summary": "Commit several versions, each in its own transaction: one failing never\nundoes the others. The outcomes come in the request's order.",
+        "summary": "Commit versions: each a new file (`parent` + `name`) or a new version\n(`file`), in its own transaction, so one failing never undoes the others.\nThe outcomes come in the request's order; one commit is a batch of one.\nAn outcome's error: `name_taken`, `chunk_missing` (with the chunks to\nupload again), `chunk_not_allowed`, `not_found` (file, folder, base\nversion), `invalid_target`.",
         "operationId": "commit_batch",
         "requestBody": {
           "content": {
@@ -3766,7 +3715,7 @@
       },
       "Commit": {
         "type": "object",
-        "description": "`POST /files/commit`: either `file` (a new version of an existing file) or\n`parent` + `name` (a new file).",
+        "description": "One commit of `POST /files/commit-batch`: either `file` (a new version of an existing file) or\n`parent` + `name` (a new file).",
         "required": [
           "library",
           "chunks"
@@ -3827,7 +3776,7 @@
       },
       "CommitBatch": {
         "type": "object",
-        "description": "`POST /files/commit-batch`: several commits, each in its own transaction.",
+        "description": "`POST /files/commit-batch`: commits, each in its own transaction (one\ncommit is a batch of one).",
         "required": [
           "commits"
         ],
@@ -3843,7 +3792,7 @@
       },
       "CommitOutcome": {
         "type": "object",
-        "description": "One commit's outcome in a batch: committed, or why not (the same errors as\n`POST /files/commit`).",
+        "description": "One commit's outcome in a batch: committed, or why not.",
         "properties": {
           "committed": {
             "oneOf": [
@@ -3863,7 +3812,7 @@
               },
               {
                 "$ref": "#/components/schemas/ApiError",
-                "description": "Refused: the error `POST /files/commit` would have answered."
+                "description": "Refused, and why."
               }
             ]
           },
@@ -3873,7 +3822,7 @@
               "null"
             ],
             "format": "int32",
-            "description": "With `error`: the HTTP status `POST /files/commit` would have answered.",
+            "description": "With `error`: its HTTP status, as a call of its own would have answered.",
             "minimum": 0
           }
         }

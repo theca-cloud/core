@@ -484,3 +484,81 @@ async fn many_files_at_once(pool: PgPool) {
         "the copy's chunks were never sent twice: {last:?}"
     );
 }
+
+/// One file cancelled among others: it alone ends `cancelled`, the others
+/// commit, and the chunks it had uploaded are freed on the server.
+#[sqlx::test]
+async fn cancel_one_file(pool: PgPool) {
+    let server = start(&pool).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut client = Client::new(&server.url).unwrap();
+    let setup: api::Setup = serde_json::from_value(json!({
+        "admin_email": "admin@test.theca", "admin_password": "a long password", "organization": "Acme",
+        "storages": [{ "name": "main", "implementation": "filesystem", "path": dir.path() }],
+    }))
+    .unwrap();
+    let me = client.setup(&setup, None).await.unwrap();
+    let library = client
+        .create_library(me.organizations[0].organization, "Docs")
+        .await
+        .unwrap();
+    let target = |name: &str| Target::New {
+        library: library.id,
+        parent: library.root,
+        name: Name::new(name).unwrap(),
+    };
+    let big = MemorySource(data(6 * 1024 * 1024, 8));
+    let small = MemorySource(data(20_000, 9));
+    // One chunk at a time: the big file is still going when its first chunk
+    // is confirmed.
+    let options = UploadOptions {
+        parallel: 1,
+        window: 1,
+        ..Default::default()
+    };
+    let cancel = Cancel::default();
+    let confirmed = std::sync::atomic::AtomicBool::new(false);
+    let (uploader, run) = Uploader::new(&client, &options, &cancel, |p: &UploadProgress| {
+        if p.uploaded > 0 {
+            confirmed.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    });
+    let big_upload = uploader.submit(&big, target("big.bin"));
+    let small_upload = uploader.submit(&small, target("small.bin"));
+    drop(uploader);
+    let cancel_big = async {
+        while !confirmed.load(std::sync::atomic::Ordering::Relaxed) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        big_upload.cancel();
+        big_upload.await
+    };
+    let ((), big_result, small_result) = tokio::time::timeout(Duration::from_secs(60), async {
+        tokio::join!(run, cancel_big, small_upload)
+    })
+    .await
+    .expect("the engine finishes");
+    assert!(
+        matches!(big_result, Err(theca_client::Error::Cancelled)),
+        "{big_result:?}"
+    );
+    let small_committed = small_result.unwrap();
+    assert_eq!(fetch(&client, small_committed.file, None).await, small.0);
+
+    // Its confirmed chunks were freed: everything goes again.
+    let mut again = UploadProgress::default();
+    upload(
+        &client,
+        &big,
+        target("big.bin"),
+        &UploadOptions::default(),
+        |p| again = p.clone(),
+        &Cancel::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        again.skipped, 0,
+        "the cancelled file's chunks were freed: {again:?}"
+    );
+}

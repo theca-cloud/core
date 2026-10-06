@@ -398,12 +398,7 @@ async fn cancel_tombstones(kind: Kind, pool: PgPool) {
     assert_ne!(again.declare.chunk, pending);
     let commit =
         json!({ "library": lib.id, "parent": lib.root, "name": "c.bin", "chunks": [pending] });
-    assert!(
-        alice
-            .json::<api::Committed>("POST", "/api/v1/files/commit", &commit)
-            .await
-            .is_err()
-    );
+    assert!(alice.commit(&commit).await.is_err());
     // The filesystem endpoint refuses uploads to a tombstoned chunk; on S3 the
     // object may land, and the GC deletes it once the URL has expired.
     if let Kind::Filesystem = kind {
@@ -675,10 +670,7 @@ async fn commit_refuses_chunks_outside_the_dedup_scope(kind: Kind, pool: PgPool)
     let stolen = alice.file_chunks(file).await;
     let commit =
         json!({ "library": other.id, "parent": other.root, "name": "x.bin", "chunks": stolen });
-    let (status, error) = alice
-        .json::<api::Committed>("POST", "/api/v1/files/commit", &commit)
-        .await
-        .unwrap_err();
+    let (status, error) = alice.commit(&commit).await.unwrap_err();
     assert_eq!(
         (status, error["code"].as_str()),
         (StatusCode::FORBIDDEN, Some("chunk_not_allowed"))
@@ -716,10 +708,7 @@ async fn commit_errors(kind: Kind, pool: PgPool) {
     let pending = alice.looked_up(lib.id, b"never").await.declare.chunk;
     let commit =
         json!({ "library": lib.id, "parent": lib.root, "name": "p.bin", "chunks": [pending] });
-    let (status, error) = alice
-        .json::<api::Committed>("POST", "/api/v1/files/commit", &commit)
-        .await
-        .unwrap_err();
+    let (status, error) = alice.commit(&commit).await.unwrap_err();
     assert_eq!(
         (status, error["code"].as_str()),
         (StatusCode::CONFLICT, Some("chunk_missing"))

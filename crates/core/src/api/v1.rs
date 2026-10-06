@@ -33,7 +33,6 @@ pub fn router() -> Router<AppState> {
         .route("/chunks/upload-urls", post(upload_urls))
         .route("/chunks/announce", post(announce))
         .route("/chunks/cancel", post(cancel))
-        .route("/files/commit", post(commit))
         .route("/files/commit-batch", post(commit_batch))
         .route("/files/{id}/download", get(download))
         .route(
@@ -368,25 +367,15 @@ async fn cancel(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Commit a version: a new file (`parent` + `name`) or a new version (`file`).
-#[utoipa::path(post, path = "/api/v1/files/commit", request_body = api::Commit, responses(
-    (status = 200, body = api::Committed),
-    (status = 403, description = "Chunks not allowed (`chunk_not_allowed`)", body = api::ApiError),
-    (status = 409, description = "`name_taken`, `chunk_missing`", body = api::ApiError),
-))]
-async fn commit(
-    State(state): State<AppState>,
-    user: CurrentAccount,
-    ApiJson(req): ApiJson<api::Commit>,
-) -> Result<Json<api::Committed>, HttpError> {
-    Ok(Json(commit_one(&state, &user, &req).await?))
-}
-
 /// Most commits in one batch.
 const COMMIT_BATCH: usize = 100;
 
-/// Commit several versions, each in its own transaction: one failing never
-/// undoes the others. The outcomes come in the request's order.
+/// Commit versions: each a new file (`parent` + `name`) or a new version
+/// (`file`), in its own transaction, so one failing never undoes the others.
+/// The outcomes come in the request's order; one commit is a batch of one.
+/// An outcome's error: `name_taken`, `chunk_missing` (with the chunks to
+/// upload again), `chunk_not_allowed`, `not_found` (file, folder, base
+/// version), `invalid_target`.
 #[utoipa::path(post, path = "/api/v1/files/commit-batch", request_body = api::CommitBatch, responses(
     (status = 200, body = Vec<api::CommitOutcome>),
     (status = 400, description = "`batch_too_large`", body = api::ApiError),
