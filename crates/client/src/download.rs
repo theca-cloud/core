@@ -12,7 +12,7 @@ use theca_common::hash::ChunkHash;
 use uuid::Uuid;
 
 use crate::api::{Client, Error};
-use crate::upload::retry;
+use crate::rt::retry;
 
 /// How a download behaves.
 #[derive(Debug, Clone)]

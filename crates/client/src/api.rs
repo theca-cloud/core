@@ -389,6 +389,33 @@ impl Client {
         self.post("/api/v1/files/commit", commit).await
     }
 
+    /// Several commits, each in its own transaction (at most 100): each one's
+    /// outcome, in order.
+    pub async fn commit_batch(
+        &self,
+        commits: &[api::Commit],
+    ) -> Result<Vec<Result<api::Committed, Error>>, Error> {
+        let outcomes: Vec<api::CommitOutcome> = self
+            .post(
+                "/api/v1/files/commit-batch",
+                &api::CommitBatch {
+                    commits: commits.to_vec(),
+                },
+            )
+            .await?;
+        Ok(outcomes
+            .into_iter()
+            .map(|o| match (o.committed, o.error) {
+                (Some(committed), _) => Ok(committed),
+                (None, Some(error)) => Err(Error::Api {
+                    status: o.status.unwrap_or(409),
+                    error,
+                }),
+                (None, None) => Err(Error::Decode("an empty commit outcome".into())),
+            })
+            .collect())
+    }
+
     /// A version's chunks with their presigned URLs (the current one by default).
     pub async fn download_manifest(
         &self,

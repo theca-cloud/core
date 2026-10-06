@@ -34,6 +34,7 @@ pub fn router() -> Router<AppState> {
         .route("/chunks/announce", post(announce))
         .route("/chunks/cancel", post(cancel))
         .route("/files/commit", post(commit))
+        .route("/files/commit-batch", post(commit_batch))
         .route("/files/{id}/download", get(download))
         .route(
             "/blobs/{chunk}",
@@ -378,8 +379,58 @@ async fn commit(
     user: CurrentAccount,
     ApiJson(req): ApiJson<api::Commit>,
 ) -> Result<Json<api::Committed>, HttpError> {
+    Ok(Json(commit_one(&state, &user, &req).await?))
+}
+
+/// Most commits in one batch.
+const COMMIT_BATCH: usize = 100;
+
+/// Commit several versions, each in its own transaction: one failing never
+/// undoes the others. The outcomes come in the request's order.
+#[utoipa::path(post, path = "/api/v1/files/commit-batch", request_body = api::CommitBatch, responses(
+    (status = 200, body = Vec<api::CommitOutcome>),
+    (status = 400, description = "`batch_too_large`", body = api::ApiError),
+))]
+async fn commit_batch(
+    State(state): State<AppState>,
+    user: CurrentAccount,
+    ApiJson(req): ApiJson<api::CommitBatch>,
+) -> Result<Json<Vec<api::CommitOutcome>>, HttpError> {
+    if req.commits.len() > COMMIT_BATCH {
+        return Err(HttpError::bad_request(
+            "batch_too_large",
+            format!("at most {COMMIT_BATCH} commits per batch"),
+        ));
+    }
+    let mut outcomes = Vec::with_capacity(req.commits.len());
+    for commit in &req.commits {
+        outcomes.push(match commit_one(&state, &user, commit).await {
+            Ok(committed) => api::CommitOutcome {
+                committed: Some(committed),
+                error: None,
+                status: None,
+            },
+            Err(e) => {
+                let (status, error) = e.into_parts();
+                api::CommitOutcome {
+                    committed: None,
+                    error: Some(error),
+                    status: Some(status.as_u16()),
+                }
+            }
+        });
+    }
+    Ok(Json(outcomes))
+}
+
+/// One commit, in its own transaction.
+async fn commit_one(
+    state: &AppState,
+    user: &CurrentAccount,
+    req: &api::Commit,
+) -> Result<api::Committed, HttpError> {
     use db::file::{CommitError, Target};
-    let access = library_access(&state, &user, req.library).await?;
+    let access = library_access(state, user, req.library).await?;
     require_write(&access)?;
     let target = match (req.file, req.parent, req.name.as_ref()) {
         (Some(file), None, None) => Target::File {
@@ -425,12 +476,12 @@ async fn commit(
         CommitError::Db(e) => e.into(),
     })?;
     tx.commit().await?;
-    Ok(Json(api::Committed {
+    Ok(api::Committed {
         file: committed.file,
         version: committed.version,
         conflict: committed.conflict,
         unchanged: committed.unchanged,
-    }))
+    })
 }
 
 #[derive(Deserialize, utoipa::IntoParams)]

@@ -11,7 +11,8 @@ use std::time::Duration;
 use serde_json::json;
 use sqlx::PgPool;
 use theca_client::{
-    Cancel, Client, DownloadOptions, MemorySource, Target, UploadOptions, download, upload,
+    Cancel, Client, DownloadOptions, MemorySource, Target, UploadOptions, UploadProgress, Uploader,
+    download, upload,
 };
 use theca_common::api;
 use theca_common::name::Name;
@@ -369,8 +370,10 @@ async fn commit_recovers_lost_chunks(pool: PgPool) {
         parent: library.root,
         name: Name::new("lost.bin").unwrap(),
     };
+    // One chunk at a time: the first is announced before the last is read.
     let options = UploadOptions {
         parallel: 1,
+        window: 1,
         ..Default::default()
     };
     let never = Cancel::default();
@@ -395,4 +398,89 @@ async fn commit_recovers_lost_chunks(pool: PgPool) {
     .expect("the upload and the interference finish");
     let committed = committed.unwrap();
     assert_eq!(fetch(&client, committed.file, None).await, bytes);
+}
+
+/// Many files through one engine: each committed (or failing on its own),
+/// identical content uploaded once, the results each file's own.
+#[sqlx::test]
+async fn many_files_at_once(pool: PgPool) {
+    let server = start(&pool).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut client = Client::new(&server.url).unwrap();
+    let setup: api::Setup = serde_json::from_value(json!({
+        "admin_email": "admin@test.theca", "admin_password": "a long password", "organization": "Acme",
+        "storages": [{ "name": "main", "implementation": "filesystem", "path": dir.path() }],
+    }))
+    .unwrap();
+    let me = client.setup(&setup, None).await.unwrap();
+    let library = client
+        .create_library(me.organizations[0].organization, "Docs")
+        .await
+        .unwrap();
+    let target = |name: &str| Target::New {
+        library: library.id,
+        parent: library.root,
+        name: Name::new(name).unwrap(),
+    };
+    // A name taken before the batch: that file alone fails.
+    upload(
+        &client,
+        &MemorySource(b"first".to_vec()),
+        target("taken.txt"),
+        &UploadOptions::default(),
+        |_| {},
+        &Cancel::default(),
+    )
+    .await
+    .unwrap();
+
+    let mut sources: Vec<(String, MemorySource)> = (0..30)
+        .map(|i| {
+            (
+                format!("small-{i}.bin"),
+                MemorySource(data(10_000 + i, i as u64 + 10)),
+            )
+        })
+        .collect();
+    let big = data(5 * 1024 * 1024, 7);
+    sources.push(("big.bin".into(), MemorySource(big.clone())));
+    sources.push(("big-copy.bin".into(), MemorySource(big.clone())));
+    sources.push(("empty.txt".into(), MemorySource(Vec::new())));
+    sources.push(("taken.txt".into(), MemorySource(b"second".to_vec())));
+
+    let options = UploadOptions::default();
+    let cancel = Cancel::default();
+    let mut last = Default::default();
+    let (uploader, run) = Uploader::new(&client, &options, &cancel, |p: &UploadProgress| {
+        last = p.clone()
+    });
+    let results: Vec<_> = sources
+        .iter()
+        .map(|(name, source)| uploader.submit(source, target(name)))
+        .collect();
+    drop(uploader);
+    let ((), results) = tokio::time::timeout(Duration::from_secs(60), async {
+        tokio::join!(run, futures::future::join_all(results))
+    })
+    .await
+    .expect("the engine finishes");
+
+    for ((name, source), result) in sources.iter().zip(results) {
+        if name == "taken.txt" {
+            assert_eq!(result.unwrap_err().code(), Some("name_taken"));
+            continue;
+        }
+        let committed = result.unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(
+            fetch(&client, committed.file, None).await,
+            source.0,
+            "{name}"
+        );
+    }
+    assert_eq!((last.files, last.files_done), (34, 34));
+    assert_eq!(
+        last.uploaded + last.skipped,
+        last.total - big.len() as u64,
+        "the copy's chunks were never sent twice: {last:?}"
+    );
 }

@@ -1842,6 +1842,50 @@
         }
       }
     },
+    "/api/v1/files/commit-batch": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Commit several versions, each in its own transaction: one failing never\nundoes the others. The outcomes come in the request's order.",
+        "operationId": "commit_batch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommitBatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CommitOutcome"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`batch_too_large`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/files/{id}/content": {
       "get": {
         "tags": [
@@ -3778,6 +3822,59 @@
             ],
             "format": "uuid",
             "description": "The folder of a new file."
+          }
+        }
+      },
+      "CommitBatch": {
+        "type": "object",
+        "description": "`POST /files/commit-batch`: several commits, each in its own transaction.",
+        "required": [
+          "commits"
+        ],
+        "properties": {
+          "commits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Commit"
+            },
+            "description": "At most 100."
+          }
+        }
+      },
+      "CommitOutcome": {
+        "type": "object",
+        "description": "One commit's outcome in a batch: committed, or why not (the same errors as\n`POST /files/commit`).",
+        "properties": {
+          "committed": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Committed",
+                "description": "Committed (or `unchanged`)."
+              }
+            ]
+          },
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ApiError",
+                "description": "Refused: the error `POST /files/commit` would have answered."
+              }
+            ]
+          },
+          "status": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "With `error`: the HTTP status `POST /files/commit` would have answered.",
+            "minimum": 0
           }
         }
       },

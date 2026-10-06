@@ -734,3 +734,53 @@ async fn library_trash(pool: PgPool) {
         .unwrap();
     assert_eq!(left, 0);
 }
+
+#[sqlx::test]
+async fn commit_batches(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let mut alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    let taken = alice
+        .upload(&docs, new_file(&docs, "taken.txt"), &data(100, 1))
+        .await
+        .unwrap();
+    let commit =
+        |name: &str| json!({ "library": docs.id, "parent": docs.root, "name": name, "chunks": [] });
+    // Each commit its own outcome, in order: one refused, the others committed.
+    let outcomes: Vec<api::CommitOutcome> = alice
+        .json(
+            "POST",
+            "/api/v1/files/commit-batch",
+            &json!({ "commits": [commit("a.txt"), commit("taken.txt"), commit("b.txt")] }),
+        )
+        .await
+        .unwrap();
+    assert!(outcomes[0].committed.is_some() && outcomes[2].committed.is_some());
+    let refused = &outcomes[1];
+    assert_eq!(
+        (
+            refused.error.as_ref().unwrap().code.as_str(),
+            refused.status
+        ),
+        ("name_taken", Some(409))
+    );
+    assert_eq!(
+        alice.children(docs.root).await,
+        ["a.txt", "b.txt", "taken.txt"]
+    );
+    assert_eq!(alice.versions(taken.file).await.len(), 1);
+
+    let too_many: Vec<Value> = (0..101).map(|i| commit(&format!("f{i}"))).collect();
+    let refused = alice
+        .json::<Vec<api::CommitOutcome>>(
+            "POST",
+            "/api/v1/files/commit-batch",
+            &json!({ "commits": too_many }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        code(refused),
+        (StatusCode::BAD_REQUEST, "batch_too_large".into())
+    );
+}

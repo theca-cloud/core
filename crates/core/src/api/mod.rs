@@ -92,6 +92,7 @@ pub struct AppState {
         v1::announce,
         v1::cancel,
         v1::commit,
+        v1::commit_batch,
         v1::download,
         content::content,
         nodes::info,

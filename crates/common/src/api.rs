@@ -219,6 +219,30 @@ pub struct Committed {
     pub unchanged: bool,
 }
 
+/// `POST /files/commit-batch`: several commits, each in its own transaction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CommitBatch {
+    /// At most 100.
+    pub commits: Vec<Commit>,
+}
+
+/// One commit's outcome in a batch: committed, or why not (the same errors as
+/// `POST /files/commit`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CommitOutcome {
+    /// Committed (or `unchanged`).
+    #[serde(default)]
+    pub committed: Option<Committed>,
+    /// Refused: the error `POST /files/commit` would have answered.
+    #[serde(default)]
+    pub error: Option<ApiError>,
+    /// With `error`: the HTTP status `POST /files/commit` would have answered.
+    #[serde(default)]
+    pub status: Option<u16>,
+}
+
 /// One chunk of a download, in order.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
