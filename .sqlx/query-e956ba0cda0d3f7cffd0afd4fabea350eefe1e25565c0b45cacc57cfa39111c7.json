@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE library SET deleted_at = NULL, name = $2 WHERE pk = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e956ba0cda0d3f7cffd0afd4fabea350eefe1e25565c0b45cacc57cfa39111c7"
+}

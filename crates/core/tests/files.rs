@@ -441,6 +441,24 @@ async fn versions(pool: PgPool) {
         Some(c2.version)
     );
 
+    // RCS-style numbers: c2 continues c1's line, c3 branches, c4 follows c2.
+    let numbers: Vec<(Uuid, String)> = alice
+        .versions(f)
+        .await
+        .into_iter()
+        .map(|v| (v.id, v.number))
+        .collect();
+    assert_eq!(
+        numbers,
+        [
+            (c1.version, "1".to_owned()),
+            (c2.version, "2".to_owned()),
+            (c4.version, "3".to_owned()),
+            (c3.version, "1.1.1".to_owned()),
+        ],
+        "tree order"
+    );
+
     // Another file's version: unknown here.
     let g = alice
         .upload(&docs, new_file(&docs, "g.txt"), &one)
@@ -505,4 +523,214 @@ async fn search(pool: PgPool) {
         code(alice.search("ab").await.unwrap_err()),
         (StatusCode::BAD_REQUEST, "query_too_short".into())
     );
+}
+
+#[sqlx::test]
+async fn moves_onto_files_merge_histories(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let mut alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    let other = alice.create_library("Other").await;
+    let b1 = alice
+        .upload(&docs, new_file(&docs, "b.txt"), &data(500, 1))
+        .await
+        .unwrap();
+    let a1 = alice
+        .upload(&docs, new_file(&docs, "a.txt"), &data(500, 2))
+        .await
+        .unwrap();
+    let a2 = alice
+        .upload(
+            &docs,
+            json!({ "file": a1.file, "base_version": a1.version }),
+            &data(500, 3),
+        )
+        .await
+        .unwrap();
+
+    // Without `replace`: refused.
+    assert_eq!(
+        code(
+            alice
+                .patch(a1.file, json!({ "name": "b.txt" }))
+                .await
+                .unwrap_err()
+        ),
+        (StatusCode::CONFLICT, "name_taken".into())
+    );
+    let merged = alice
+        .patch(a1.file, json!({ "name": "B.TXT", "replace": true }))
+        .await
+        .unwrap();
+    assert_eq!(merged.id, b1.file, "it is b.txt now");
+    assert_eq!(alice.download(b1.file).await.unwrap(), data(500, 3));
+    let tree: Vec<(Uuid, String, bool)> = alice
+        .versions(b1.file)
+        .await
+        .into_iter()
+        .map(|v| (v.id, v.number, v.current))
+        .collect();
+    assert_eq!(
+        tree,
+        [
+            (b1.version, "1".to_owned(), false),
+            (a1.version, "2".to_owned(), false),
+            (a2.version, "3".to_owned(), true),
+        ]
+    );
+    assert_eq!(
+        code(alice.info(a1.file).await.unwrap_err()).0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(alice.children(docs.root).await, ["b.txt"]);
+
+    // Across libraries of the organization, the same.
+    let c = alice
+        .upload(&other, new_file(&other, "b.txt"), &data(500, 4))
+        .await
+        .unwrap();
+    let merged = alice
+        .patch(b1.file, json!({ "parent": other.root, "replace": true }))
+        .await
+        .unwrap();
+    assert_eq!((merged.id, merged.library), (c.file, other.id));
+    assert_eq!(alice.versions(c.file).await.len(), 4);
+    assert_eq!(alice.download(c.file).await.unwrap(), data(500, 3));
+
+    // Folders are never replaced.
+    let folder = alice.mkdir(other.root, "f").await;
+    assert_eq!(
+        code(
+            alice
+                .patch(folder, json!({ "name": "b.txt", "replace": true }))
+                .await
+                .unwrap_err()
+        ),
+        (StatusCode::CONFLICT, "name_taken".into())
+    );
+}
+
+#[sqlx::test]
+async fn copies_onto_files_add_a_version(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let mut alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    let b = alice
+        .upload(&docs, new_file(&docs, "b.txt"), &data(500, 1))
+        .await
+        .unwrap();
+    let a = alice
+        .upload(&docs, new_file(&docs, "a.txt"), &data(500, 2))
+        .await
+        .unwrap();
+    let copy: api::NodeInfo = alice
+        .json(
+            "POST",
+            &format!("/api/v1/nodes/{}/copy", a.file),
+            &json!({ "parent": docs.root, "name": "b.txt", "replace": true }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(copy.id, b.file);
+    assert_eq!(alice.download(b.file).await.unwrap(), data(500, 2));
+    let tree = alice.versions(b.file).await;
+    assert_eq!(tree.len(), 2);
+    assert_eq!(tree[1].parent, Some(b.version), "based on its current one");
+    assert_eq!(
+        alice.download(a.file).await.unwrap(),
+        data(500, 2),
+        "the source stays"
+    );
+}
+
+#[sqlx::test]
+async fn library_trash(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let mut alice = w.as_user(1).await;
+    let photos = alice.create_library("Photos").await;
+    let file = alice
+        .upload(&photos, new_file(&photos, "a.jpg"), &data(500, 1))
+        .await
+        .unwrap();
+    let names = |libraries: Vec<api::Library>| -> Vec<String> {
+        libraries.into_iter().map(|l| l.name).collect()
+    };
+
+    // Renamed, then a taken name refused.
+    let renamed: api::Library = alice
+        .json(
+            "PATCH",
+            &format!("/api/v1/libraries/{}", photos.id),
+            &json!({ "name": "Pictures" }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(renamed.name, "Pictures");
+    alice.create_library("Taken").await;
+    let refused = alice
+        .json::<api::Library>(
+            "PATCH",
+            &format!("/api/v1/libraries/{}", photos.id),
+            &json!({ "name": "taken" }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        code(refused),
+        (StatusCode::CONFLICT, "library_name_taken".into())
+    );
+
+    // Trashed: out of reach, its name free.
+    assert_eq!(
+        alice
+            .delete(&format!("/api/v1/libraries/{}", photos.id))
+            .await,
+        StatusCode::NO_CONTENT
+    );
+    let listed: Vec<api::Library> = alice.get("/api/v1/libraries").await.unwrap();
+    assert_eq!(names(listed), ["Taken"]);
+    assert_eq!(
+        code(alice.info(file.file).await.unwrap_err()).0,
+        StatusCode::NOT_FOUND
+    );
+    let trash: Vec<api::TrashedLibrary> = alice
+        .get(&format!("/api/v1/organizations/{}/trash", alice.org))
+        .await
+        .unwrap();
+    assert_eq!((trash.len(), trash[0].name.as_str()), (1, "Pictures"));
+    alice.create_library("Pictures").await;
+
+    // Restored under another name, its files back.
+    let back: api::Library = alice
+        .json(
+            "POST",
+            &format!("/api/v1/libraries/{}/restore", photos.id),
+            &json!({}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(back.name, "Pictures (restored)");
+    assert_eq!(alice.download(file.file).await.unwrap(), data(500, 1));
+
+    // Purged: gone for good, its chunks left to the GC.
+    alice
+        .delete(&format!("/api/v1/libraries/{}", photos.id))
+        .await;
+    assert_eq!(
+        alice
+            .delete(&format!("/api/v1/libraries/{}?permanent=true", photos.id))
+            .await,
+        StatusCode::NO_CONTENT
+    );
+    let trash: Vec<api::TrashedLibrary> = alice
+        .get(&format!("/api/v1/organizations/{}/trash", alice.org))
+        .await
+        .unwrap();
+    assert!(trash.is_empty());
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM library WHERE uuid = $1")
+        .bind(photos.id)
+        .fetch_one(&w.pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
 }

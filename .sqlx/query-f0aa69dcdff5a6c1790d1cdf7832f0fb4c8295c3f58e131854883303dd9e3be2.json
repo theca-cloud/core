@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT pk, is_file, current_version FROM node\n         WHERE parent = $1 AND lower(name) = lower($2) AND deleted_at IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "is_file",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "current_version",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "f0aa69dcdff5a6c1790d1cdf7832f0fb4c8295c3f58e131854883303dd9e3be2"
+}

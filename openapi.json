@@ -7,7 +7,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "paths": {
     "/api/health": {
@@ -2161,6 +2161,152 @@
         }
       }
     },
+    "/api/v1/libraries/{id}": {
+      "delete": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Put a library, with everything in it, in its organization's trash (a\n`write` member); or (`permanent`, from the trash) delete it for good.",
+        "operationId": "delete_library",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "permanent",
+            "in": "path",
+            "description": "Delete for good (a library already in the trash only).",
+            "required": true,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Rename a library (a `write` member).",
+        "operationId": "update_library",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateLibrary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Library"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`library_name_taken`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/libraries/{id}/restore": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Take a library out of the trash (renamed ` (restored)` if its name was\ntaken since).",
+        "operationId": "restore_library",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Library"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/libraries/{id}/trash": {
       "get": {
         "tags": [
@@ -3132,6 +3278,41 @@
         }
       }
     },
+    "/api/v1/organizations/{id}/trash": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "An organization's trashed libraries (those the account is a member of).",
+        "operationId": "organization_trash",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TrashedLibrary"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/search": {
       "get": {
         "tags": [
@@ -3647,6 +3828,10 @@
             "type": "string",
             "format": "uuid",
             "description": "The folder to copy into (in any library of the same organization)."
+          },
+          "replace": {
+            "type": "boolean",
+            "description": "A file of that name exists there: the copy is a new version of it\n(based on its current one). Otherwise `name_taken`. Folders are never\nreplaced."
           }
         }
       },
@@ -5045,6 +5230,30 @@
           }
         }
       },
+      "TrashedLibrary": {
+        "type": "object",
+        "description": "A library in its organization's trash.",
+        "required": [
+          "id",
+          "name",
+          "deleted_at"
+        ],
+        "properties": {
+          "deleted_at": {
+            "type": "string",
+            "description": "When it was trashed."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The library."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          }
+        }
+      },
       "UpdateAccount": {
         "type": "object",
         "description": "`PATCH /admin/accounts/{id}`: only the fields given change.",
@@ -5062,6 +5271,19 @@
               "null"
             ],
             "description": "Suspend or lift the suspension."
+          }
+        }
+      },
+      "UpdateLibrary": {
+        "type": "object",
+        "description": "`PATCH /libraries/{id}`: rename.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The new name (same rules as file names)."
           }
         }
       },
@@ -5083,6 +5305,10 @@
             ],
             "format": "uuid",
             "description": "The new folder (in any library of the same organization)."
+          },
+          "replace": {
+            "type": "boolean",
+            "description": "A file of that name exists there: merge into it (its history gains\nthis file's versions after its current one, this file's current version\nbecomes current, this node goes). Otherwise `name_taken`. Folders are\nnever replaced."
           }
         }
       },
@@ -5157,6 +5383,10 @@
               "null"
             ],
             "description": "Its description."
+          },
+          "number": {
+            "type": "string",
+            "description": "Its number in the tree, RCS-style: `1`, `2`, `3` along a line; a\nversion's oldest child continues its line, later ones start branches\n(`2.1.1`, `2.1.2`, `2.2.1`). Never changes."
           },
           "parent": {
             "type": [

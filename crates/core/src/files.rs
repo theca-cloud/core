@@ -31,6 +31,8 @@ pub enum FileError {
     OtherOrganization,
     #[error("a file or folder with this name exists")]
     NameTaken,
+    #[error("a library with this name exists")]
+    LibraryNameTaken,
     #[error("a folder can't move into itself")]
     MoveIntoItself,
     #[error("invalid name")]
@@ -52,6 +54,7 @@ impl From<sqlx::Error> for FileError {
     fn from(e: sqlx::Error) -> Self {
         match e.as_database_error().and_then(|d| d.constraint()) {
             Some("node_name") => FileError::NameTaken,
+            Some("library_name") => FileError::LibraryNameTaken,
             Some("node_no_cycle") => FileError::MoveIntoItself,
             Some("node_name_valid") => FileError::InvalidName,
             _ => FileError::Db(e),
@@ -103,12 +106,15 @@ pub async fn create_folder(
 }
 
 /// Renames and/or moves a node (into any library of the same organization).
+/// `replace`: a file onto a file of that name merges into it (decisions.md,
+/// Moves and copies). Returns the node it now is.
 pub async fn rename_move(
     state: &AppState,
     node: &NodeAccess,
     name: Option<&str>,
     parent: Option<&NodeAccess>,
-) -> Result<(), FileError> {
+    replace: bool,
+) -> Result<i64, FileError> {
     writable(&node.access)?;
     not_root(node)?;
     if let Some(parent) = parent {
@@ -116,24 +122,95 @@ pub async fn rename_move(
         writable(&parent.access)?;
         same_organization(node, parent)?;
     }
-    Ok(db::node::update(&state.pool, node, name, parent).await?)
+    if replace && node.is_file {
+        let folder = parent
+            .map_or(node.parent, |p| Some(p.node))
+            .expect("not the root");
+        let name = match name {
+            Some(name) => name.to_owned(),
+            None => db::node::info(&state.pool, node.node).await?.name,
+        };
+        if let Some((dest, true, _)) = db::node::child_named(&state.pool, folder, &name).await?
+            && dest != node.node
+        {
+            let mut tx = state.pool.begin().await?;
+            db::node::graft(&mut tx, node.node, dest).await?;
+            tx.commit().await?;
+            return Ok(dest);
+        }
+    }
+    db::node::update(&state.pool, node, name, parent).await?;
+    Ok(node.node)
 }
 
 /// Copies a node into a folder (same organization), reusing its chunks.
+/// `replace`: a file onto a file of that name becomes a new version of it.
+/// Returns the copy (or the replaced file).
 pub async fn copy(
     state: &AppState,
     source: &NodeAccess,
     parent: &NodeAccess,
     name: Option<&str>,
-) -> Result<Uuid, FileError> {
+    replace: bool,
+) -> Result<i64, FileError> {
     not_root(source)?;
     folder(parent)?;
     writable(&parent.access)?;
     same_organization(source, parent)?;
+    if replace && source.is_file {
+        let name = match name {
+            Some(name) => name.to_owned(),
+            None => db::node::info(&state.pool, source.node).await?.name,
+        };
+        if let Some((dest, true, _)) =
+            db::node::child_named(&state.pool, parent.node, &name).await?
+            && dest != source.node
+        {
+            let mut tx = state.pool.begin().await?;
+            let content = source.current_version.expect("a file has a version");
+            db::node::add_version(&mut tx, &parent.access, dest, content).await?;
+            tx.commit().await?;
+            return Ok(dest);
+        }
+    }
     let mut tx = state.pool.begin().await?;
     let copy = db::node::copy(&mut tx, source, parent, name).await?;
     tx.commit().await?;
     Ok(copy)
+}
+
+/// Renames a library.
+pub async fn rename_library(
+    state: &AppState,
+    library: &Access,
+    name: &str,
+) -> Result<(), FileError> {
+    writable(library)?;
+    Ok(db::library::rename(&state.pool, library.library, name).await?)
+}
+
+/// Puts a library and everything in it in its organization's trash.
+pub async fn trash_library(state: &AppState, library: &Access) -> Result<(), FileError> {
+    writable(library)?;
+    Ok(db::library::trash(&state.pool, library.library).await?)
+}
+
+/// Takes a trashed library out of the trash (renamed if its name was taken).
+pub async fn restore_library(state: &AppState, library: &Access) -> Result<(), FileError> {
+    writable(library)?;
+    let mut tx = state.pool.begin().await?;
+    db::library::restore(&mut tx, library.library).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Deletes a trashed library for good (its chunks go with the GC).
+pub async fn purge_library(state: &AppState, library: &Access) -> Result<(), FileError> {
+    writable(library)?;
+    let mut tx = state.pool.begin().await?;
+    db::library::purge(&mut tx, library.library).await?;
+    tx.commit().await?;
+    Ok(())
 }
 
 /// Puts a node in the trash.

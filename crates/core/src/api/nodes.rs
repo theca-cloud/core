@@ -100,8 +100,8 @@ pub async fn update(
         None => None,
     };
     let name = req.name.as_ref().map(|n| n.as_str());
-    files::rename_move(&state, &node, name, parent.as_ref()).await?;
-    Ok(Json(db::node::info(&state.pool, node.node).await?))
+    let now = files::rename_move(&state, &node, name, parent.as_ref(), req.replace).await?;
+    Ok(Json(db::node::info(&state.pool, now).await?))
 }
 
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
@@ -155,11 +155,10 @@ pub async fn copy(
     let source = node(&state, &user, id).await?;
     let dest = node(&state, &user, req.parent).await?;
     let name = req.name.as_ref().map(|n| n.as_str());
-    let copy = files::copy(&state, &source, &dest, name).await?;
-    let copy = node(&state, &user, copy).await?;
+    let copy = files::copy(&state, &source, &dest, name, req.replace).await?;
     Ok((
         StatusCode::CREATED,
-        Json(db::node::info(&state.pool, copy.node).await?),
+        Json(db::node::info(&state.pool, copy).await?),
     ))
 }
 

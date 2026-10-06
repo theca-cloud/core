@@ -224,3 +224,125 @@ pub async fn children(pool: &PgPool, folder: i64) -> sqlx::Result<Vec<api::Node>
     .fetch_all(pool)
     .await
 }
+
+/// A library as the API shows it.
+pub async fn get(pool: &PgPool, library: i64) -> sqlx::Result<api::Library> {
+    sqlx::query_as!(
+        api::Library,
+        r#"SELECT l.uuid AS id, o.uuid AS organization, l.name, n.uuid AS root
+           FROM library l
+           JOIN organization o ON o.pk = l.owner
+           JOIN node n ON n.library = l.pk AND n.parent IS NULL
+           WHERE l.pk = $1"#,
+        library
+    )
+    .fetch_one(pool)
+    .await
+}
+
+/// A library in the trash the account reaches (`library_access_any`).
+pub async fn trashed_access(
+    pool: &PgPool,
+    who: &Credential,
+    library: Uuid,
+) -> sqlx::Result<Option<Access>> {
+    let row = sqlx::query!(
+        r#"SELECT l.pk, l.owner, l.storage, a."user" AS "user!", a.can_write AS "can_write!"
+           FROM library l JOIN library_access_any($1) a ON a.library = l.pk
+           WHERE l.uuid = $2 AND l.deleted_at IS NOT NULL"#,
+        who.token,
+        library
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| Access {
+        library: r.pk,
+        organization: r.owner,
+        storage: r.storage,
+        user: r.user,
+        can_write: r.can_write,
+    }))
+}
+
+pub async fn rename(pool: &PgPool, library: i64, name: &str) -> sqlx::Result<()> {
+    sqlx::query!("UPDATE library SET name = $2 WHERE pk = $1", library, name)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Puts a library in its organization's trash: it and everything in it are
+/// out of reach (`library_access`), its name free.
+pub async fn trash(pool: &PgPool, library: i64) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE library SET deleted_at = now() WHERE pk = $1",
+        library
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Takes a library out of the trash, renamed ` (restored)` (then
+/// ` (restored 2)`, ...) if its name was taken since.
+pub async fn restore(tx: &mut Transaction<'_, Postgres>, library: i64) -> sqlx::Result<()> {
+    let row = sqlx::query!("SELECT owner, name FROM library WHERE pk = $1", library)
+        .fetch_one(&mut **tx)
+        .await?;
+    let taken: Vec<String> = sqlx::query_scalar!(
+        r#"SELECT lower(name) AS "name!" FROM library WHERE owner = $1 AND deleted_at IS NULL"#,
+        row.owner
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+    let name = (0..)
+        .map(|n| super::node::restored_name(&row.name, false, n))
+        .find(|candidate| !taken.contains(&candidate.to_lowercase()))
+        .expect("a free name");
+    sqlx::query!(
+        "UPDATE library SET deleted_at = NULL, name = $2 WHERE pk = $1",
+        library,
+        name
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// Deletes a library for good: its nodes, versions and chunk references
+/// (the chunks go with the GC), memberships, namespaces and scoped tokens.
+pub async fn purge(tx: &mut Transaction<'_, Postgres>, library: i64) -> sqlx::Result<()> {
+    let root = sqlx::query_scalar!(
+        "SELECT pk FROM node WHERE library = $1 AND parent IS NULL",
+        library
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    super::node::purge(tx, root).await?;
+    // Members, namespaces and tokens go by cascade; pending chunks forget it.
+    sqlx::query!("DELETE FROM library WHERE pk = $1", library)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+/// An organization's trashed libraries the account reaches.
+pub async fn trash_list(
+    pool: &PgPool,
+    who: &Credential,
+    organization: Uuid,
+) -> sqlx::Result<Vec<api::TrashedLibrary>> {
+    sqlx::query_as!(
+        api::TrashedLibrary,
+        r#"SELECT l.uuid AS id, l.name, l.deleted_at::text AS "deleted_at!"
+           FROM library_access_any($1) a
+           JOIN library l ON l.pk = a.library
+           JOIN organization o ON o.pk = l.owner
+           WHERE o.uuid = $2 AND l.deleted_at IS NOT NULL
+           ORDER BY l.deleted_at DESC"#,
+        who.token,
+        organization
+    )
+    .fetch_all(pool)
+    .await
+}

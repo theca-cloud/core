@@ -465,9 +465,16 @@ impl GuardedFileSystem<Who> for Fs {
                 return Err(FsError::Forbidden);
             };
             let name = Name::new(&name).map_err(|_| FsError::Forbidden)?;
-            files::rename_move(&self.state, &node, Some(name.as_str()), Some(&parent))
-                .await
-                .map_err(map)
+            files::rename_move(
+                &self.state,
+                &node,
+                Some(name.as_str()),
+                Some(&parent),
+                false,
+            )
+            .await
+            .map(|_| ())
+            .map_err(map)
         }
         .boxed()
     }
@@ -482,7 +489,7 @@ impl GuardedFileSystem<Who> for Fs {
                 return Err(FsError::Forbidden);
             };
             let name = Name::new(&name).map_err(|_| FsError::Forbidden)?;
-            files::copy(&self.state, &node, &parent, Some(name.as_str()))
+            files::copy(&self.state, &node, &parent, Some(name.as_str()), false)
                 .await
                 .map_err(map)?;
             Ok(())
