@@ -1,6 +1,11 @@
 # Changelog
 
 Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
+## [0.4.0] - 2026-10-06
+
+### Features
+
+- **core**: Library trash and rename, moves and copies onto files, RCS version numbers
 ## [0.3.0] - 2026-10-06
 
 ### Features
