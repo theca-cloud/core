@@ -482,7 +482,7 @@ impl Client {
         let mut outcomes: Vec<api::CommitOutcome> = self
             .json(
                 "POST",
-                "/api/v1/files/commit-batch",
+                "/api/v1/files/commit",
                 &json!({ "commits": [commit] }),
             )
             .await?;
@@ -496,9 +496,29 @@ impl Client {
         }
     }
 
+    /// One file's manifest (a list of one), its outcome as a single call's
+    /// answer.
+    async fn manifest(&self, file: Uuid, version: Option<Uuid>) -> Result<api::Download, Failure> {
+        let mut outcomes: Vec<api::DownloadOutcome> = self
+            .json(
+                "POST",
+                "/api/v1/files/download",
+                &json!({ "files": [{ "file": file, "version": version }] }),
+            )
+            .await?;
+        let outcome = outcomes.remove(0);
+        match (outcome.download, outcome.error) {
+            (Some(download), _) => Ok(download),
+            (None, error) => Err((
+                StatusCode::from_u16(outcome.status.unwrap_or(500)).unwrap(),
+                serde_json::to_value(error).unwrap(),
+            )),
+        }
+    }
+
     /// Downloads a file's current version, checking every chunk's hash.
     async fn download(&self, file: Uuid) -> Result<Vec<u8>, Failure> {
-        let download: api::Download = self.get(&format!("/api/v1/files/{file}/download")).await?;
+        let download = self.manifest(file, None).await?;
         let mut data = Vec::new();
         for chunk in download.chunks {
             let plain = decompress(chunk.compression, &self.fetch(&chunk.url).await).unwrap();
@@ -510,10 +530,7 @@ impl Client {
 
     /// The chunks of a file's current version.
     async fn file_chunks(&self, file: Uuid) -> Vec<Uuid> {
-        let download: api::Download = self
-            .get(&format!("/api/v1/files/{file}/download"))
-            .await
-            .unwrap();
+        let download = self.manifest(file, None).await.unwrap();
         download.chunks.iter().map(|c| c.chunk).collect()
     }
 

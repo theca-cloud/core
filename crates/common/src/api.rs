@@ -176,7 +176,7 @@ pub struct ChunkUrl {
     pub headers: BTreeMap<String, String>,
 }
 
-/// One commit of `POST /files/commit-batch`: either `file` (a new version of an existing file) or
+/// One commit of `POST /files/commit`: either `file` (a new version of an existing file) or
 /// `parent` + `name` (a new file).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -219,11 +219,11 @@ pub struct Committed {
     pub unchanged: bool,
 }
 
-/// `POST /files/commit-batch`: commits, each in its own transaction (one
+/// `POST /files/commit`: commits, each in its own transaction (one
 /// commit is a batch of one).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct CommitBatch {
+pub struct Commits {
     /// At most 100.
     pub commits: Vec<Commit>,
 }
@@ -261,7 +261,41 @@ pub struct DownloadChunk {
     pub url: String,
 }
 
-/// `GET /files/{id}/download`.
+/// `POST /files/download`: files whose chunks to download (at most 100).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Downloads {
+    /// The files, at most 100.
+    pub files: Vec<DownloadFile>,
+}
+
+/// A file to download: its current version, or another one.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct DownloadFile {
+    /// The file.
+    pub file: Uuid,
+    /// One of its versions (default: the current one).
+    #[serde(default)]
+    pub version: Option<Uuid>,
+}
+
+/// One file's outcome in `POST /files/download`: its chunks, or why not.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct DownloadOutcome {
+    /// The version's chunks.
+    #[serde(default)]
+    pub download: Option<Download>,
+    /// Refused, and why (`not_found`: the file or the version).
+    #[serde(default)]
+    pub error: Option<ApiError>,
+    /// With `error`: its HTTP status.
+    #[serde(default)]
+    pub status: Option<u16>,
+}
+
+/// A file's version to download (an outcome of `POST /files/download`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct Download {

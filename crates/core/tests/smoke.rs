@@ -11,8 +11,8 @@ use std::time::Duration;
 use serde_json::json;
 use sqlx::PgPool;
 use theca_client::{
-    Cancel, Client, DownloadOptions, MemorySource, Target, UploadOptions, UploadProgress, Uploader,
-    download, upload,
+    Cancel, Client, DownloadOptions, Downloader, FileSink, MemorySink, MemorySource, Target,
+    UploadOptions, UploadProgress, Uploader, download, upload,
 };
 use theca_common::api;
 use theca_common::name::Name;
@@ -96,15 +96,20 @@ fn data(len: usize, seed: u64) -> Vec<u8> {
 }
 
 async fn fetch(client: &Client, file: uuid::Uuid, version: Option<uuid::Uuid>) -> Vec<u8> {
-    let mut out = Vec::new();
-    let options = DownloadOptions {
+    let out = MemorySink::default();
+    let options = DownloadOptions::default();
+    download(
+        client,
+        file,
         version,
-        ..Default::default()
-    };
-    download(client, file, &mut out, &options, |_| {})
-        .await
-        .unwrap();
-    out
+        &out,
+        &options,
+        |_| {},
+        &Cancel::default(),
+    )
+    .await
+    .unwrap();
+    out.0.into_inner().unwrap()
 }
 
 async fn scenario(pool: PgPool, storage: serde_json::Value) {
@@ -483,6 +488,66 @@ async fn many_files_at_once(pool: PgPool) {
         last.total - big.len() as u64,
         "the copy's chunks were never sent twice: {last:?}"
     );
+
+    // All of them down through one engine, into files; a file that doesn't
+    // exist fails alone. Then again: every file already identical.
+    let committed: Vec<(String, uuid::Uuid, Vec<u8>)> = {
+        let listed = client.children(library.root).await.unwrap();
+        sources
+            .iter()
+            .filter(|(name, _)| name != "taken.txt")
+            .map(|(name, source)| {
+                let node = listed.iter().find(|n| &n.name == name).unwrap();
+                (name.clone(), node.id, source.0.clone())
+            })
+            .collect()
+    };
+    let out = tempfile::tempdir().unwrap();
+    for round in ["fresh", "again"] {
+        let options = DownloadOptions {
+            skip_identical: true,
+            ..Default::default()
+        };
+        let sinks: Vec<FileSink> = committed
+            .iter()
+            .map(|(name, _, _)| FileSink::new(&out.path().join(name)))
+            .collect();
+        let missing = FileSink::new(&out.path().join("missing"));
+        let (downloader, run) = Downloader::new(
+            &client,
+            &options,
+            &cancel,
+            |_: &theca_client::DownloadProgress| {},
+        );
+        let results: Vec<_> = committed
+            .iter()
+            .zip(&sinks)
+            .map(|((_, id, _), sink)| downloader.submit(*id, None, sink))
+            .collect();
+        let gone = downloader.submit(uuid::Uuid::nil(), None, &missing);
+        drop(downloader);
+        let ((), results, gone) = tokio::time::timeout(Duration::from_secs(60), async {
+            tokio::join!(run, futures::future::join_all(results), gone)
+        })
+        .await
+        .expect("the engine finishes");
+        assert_eq!(gone.unwrap_err().code(), Some("not_found"));
+        for ((name, _, bytes), result) in committed.iter().zip(results) {
+            let downloaded = result.unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(downloaded.unchanged, round == "again", "{round}: {name}");
+            assert_eq!(
+                &std::fs::read(out.path().join(name)).unwrap(),
+                bytes,
+                "{name}"
+            );
+        }
+    }
+    let leftovers: Vec<_> = std::fs::read_dir(out.path())
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".theca-part"))
+        .collect();
+    assert!(leftovers.is_empty(), "no partial file left");
 }
 
 /// One file cancelled among others: it alone ends `cancelled`, the others

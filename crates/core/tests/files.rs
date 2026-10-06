@@ -404,13 +404,7 @@ async fn versions(pool: PgPool) {
     );
     assert!(tree.iter().find(|x| x.id == c3.version).unwrap().current);
     assert!(tree.iter().all(|v| v.author.as_deref() == Some("a@x.ch")));
-    let old: api::Download = alice
-        .get(&format!(
-            "/api/v1/files/{f}/download?version={}",
-            c1.version
-        ))
-        .await
-        .unwrap();
+    let old = alice.manifest(f, Some(c1.version)).await.unwrap();
     assert_eq!(old.version, c1.version);
 
     // Restoring only moves the current version; the next commit branches from it.
@@ -472,9 +466,8 @@ async fn versions(pool: PgPool) {
             .0,
         StatusCode::NOT_FOUND
     );
-    let wrong = format!("/api/v1/files/{f}/download?version={}", g.version);
     assert_eq!(
-        alice.call("GET", &wrong, None, true).await.0,
+        alice.manifest(f, Some(g.version)).await.unwrap_err().0,
         StatusCode::NOT_FOUND
     );
 }
@@ -750,7 +743,7 @@ async fn commit_batches(pool: PgPool) {
     let outcomes: Vec<api::CommitOutcome> = alice
         .json(
             "POST",
-            "/api/v1/files/commit-batch",
+            "/api/v1/files/commit",
             &json!({ "commits": [commit("a.txt"), commit("taken.txt"), commit("b.txt")] }),
         )
         .await
@@ -774,8 +767,27 @@ async fn commit_batches(pool: PgPool) {
     let refused = alice
         .json::<Vec<api::CommitOutcome>>(
             "POST",
-            "/api/v1/files/commit-batch",
+            "/api/v1/files/commit",
             &json!({ "commits": too_many }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        code(refused),
+        (StatusCode::BAD_REQUEST, "batch_too_large".into())
+    );
+}
+
+#[sqlx::test]
+async fn download_lists(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let alice = w.as_user(1).await;
+    let files: Vec<Value> = (0..101).map(|_| json!({ "file": Uuid::nil() })).collect();
+    let refused = alice
+        .json::<Vec<api::DownloadOutcome>>(
+            "POST",
+            "/api/v1/files/download",
+            &json!({ "files": files }),
         )
         .await
         .unwrap_err();

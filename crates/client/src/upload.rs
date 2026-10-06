@@ -39,7 +39,7 @@ use theca_common::name::Name;
 use uuid::Uuid;
 
 use crate::api::{Client, Error};
-use crate::rt::{self, MaybeSync};
+use crate::rt::{self, MaybeSync, next_batch};
 use crate::source::Source;
 
 /// How uploads behave.
@@ -128,7 +128,7 @@ impl Cancel {
         self.0.store(true, Ordering::Relaxed);
     }
 
-    fn is_cancelled(&self) -> bool {
+    pub(crate) fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::Relaxed)
     }
 
@@ -489,30 +489,6 @@ type Shared<'a, P> = Arc<Mutex<State<'a, P>>>;
 
 fn lock<'s, 'a, P>(state: &'s Shared<'a, P>) -> std::sync::MutexGuard<'s, State<'a, P>> {
     state.lock().expect("engine state")
-}
-
-/// The next batch from a queue: up to `max` items, waiting at most `flush`
-/// after the first one. `None` once the queue is closed and empty.
-async fn next_batch<T>(
-    rx: &mut mpsc::UnboundedReceiver<T>,
-    max: usize,
-    flush: Duration,
-) -> Option<Vec<T>> {
-    let first = rx.next().await?;
-    let mut batch = vec![first];
-    let mut deadline = Box::pin(rt::sleep(flush));
-    while batch.len() < max {
-        match rx.try_recv() {
-            Ok(item) => batch.push(item),
-            Err(TryRecvError::Closed) => break,
-            // Empty for now: wait for more, until the deadline.
-            Err(TryRecvError::Empty) => match select(rx.next(), &mut deadline).await {
-                Either::Left((Some(item), _)) => batch.push(item),
-                _ => break,
-            },
-        }
-    }
-    Some(batch)
 }
 
 /// Stage 1: reads and hashes a few files at once, then registers their chunks.
@@ -968,7 +944,7 @@ async fn commit_stage<P: FnMut(&UploadProgress)>(
             continue;
         }
         let requests: Vec<api::Commit> = commits.iter().map(|(_, c)| c.clone()).collect();
-        let answer = rt::retry(options.retries, || client.commit_batch(&requests)).await;
+        let answer = rt::retry(options.retries, || client.commit(&requests)).await;
         let mut s = lock(state);
         let outcomes = match answer {
             Ok(outcomes) => outcomes,

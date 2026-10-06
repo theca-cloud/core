@@ -387,14 +387,14 @@ impl Client {
 
     /// Several commits, each in its own transaction (at most 100): each one's
     /// outcome, in order.
-    pub async fn commit_batch(
+    pub async fn commit(
         &self,
         commits: &[api::Commit],
     ) -> Result<Vec<Result<api::Committed, Error>>, Error> {
         let outcomes: Vec<api::CommitOutcome> = self
             .post(
-                "/api/v1/files/commit-batch",
-                &api::CommitBatch {
+                "/api/v1/files/commit",
+                &api::Commits {
                     commits: commits.to_vec(),
                 },
             )
@@ -412,19 +412,31 @@ impl Client {
             .collect())
     }
 
-    /// A version's chunks with their presigned URLs (the current one by default).
-    pub async fn download_manifest(
+    /// Files' chunks with their presigned URLs (each file's current version,
+    /// or the one asked; at most 100): each one's outcome, in order.
+    pub async fn manifests(
         &self,
-        file: Uuid,
-        version: Option<Uuid>,
-    ) -> Result<api::Download, Error> {
-        match version {
-            Some(v) => {
-                self.get(&format!("/api/v1/files/{file}/download?version={v}"))
-                    .await
-            }
-            None => self.get(&format!("/api/v1/files/{file}/download")).await,
-        }
+        files: &[api::DownloadFile],
+    ) -> Result<Vec<Result<api::Download, Error>>, Error> {
+        let outcomes: Vec<api::DownloadOutcome> = self
+            .post(
+                "/api/v1/files/download",
+                &api::Downloads {
+                    files: files.to_vec(),
+                },
+            )
+            .await?;
+        Ok(outcomes
+            .into_iter()
+            .map(|o| match (o.download, o.error) {
+                (Some(download), _) => Ok(download),
+                (None, Some(error)) => Err(Error::Api {
+                    status: o.status.unwrap_or(404),
+                    error,
+                }),
+                (None, None) => Err(Error::Decode("an empty download outcome".into())),
+            })
+            .collect())
     }
 
     /// The raw HTTP client, for presigned URLs (no `Authorization`: the URL is

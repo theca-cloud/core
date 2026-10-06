@@ -2,6 +2,10 @@
 
 use std::time::Duration;
 
+use futures::StreamExt;
+use futures::channel::mpsc::{self, TryRecvError};
+use futures::future::{Either, select};
+
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn sleep(duration: Duration) {
     tokio::time::sleep(duration).await;
@@ -48,4 +52,28 @@ where
             result => return result,
         }
     }
+}
+
+/// The next batch from a queue: up to `max` items, waiting at most `flush`
+/// after the first one. `None` once the queue is closed and empty.
+pub(crate) async fn next_batch<T>(
+    rx: &mut mpsc::UnboundedReceiver<T>,
+    max: usize,
+    flush: Duration,
+) -> Option<Vec<T>> {
+    let first = rx.next().await?;
+    let mut batch = vec![first];
+    let mut deadline = Box::pin(sleep(flush));
+    while batch.len() < max {
+        match rx.try_recv() {
+            Ok(item) => batch.push(item),
+            Err(TryRecvError::Closed) => break,
+            // Empty for now: wait for more, until the deadline.
+            Err(TryRecvError::Empty) => match select(rx.next(), &mut deadline).await {
+                Either::Left((Some(item), _)) => batch.push(item),
+                _ => break,
+            },
+        }
+    }
+    Some(batch)
 }
