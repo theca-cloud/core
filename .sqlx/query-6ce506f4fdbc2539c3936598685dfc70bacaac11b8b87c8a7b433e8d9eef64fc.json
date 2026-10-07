@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH RECURSIVE tree (pk, path) AS (\n               SELECT pk, name FROM node WHERE parent = $1 AND deleted_at IS NULL\n               UNION ALL\n               SELECT n.pk, t.path || '/' || n.name\n               FROM node n JOIN tree t ON n.parent = t.pk\n               WHERE n.deleted_at IS NULL\n           )\n           SELECT n.uuid AS id, t.path AS \"path!\", n.is_file,\n                  v.created_at::text AS modified, v.uuid AS \"current_version?\"\n           FROM tree t\n           JOIN node n ON n.pk = t.pk\n           LEFT JOIN version v ON v.pk = n.current_version\n           ORDER BY t.path",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "path!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "is_file",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "modified",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "current_version?",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      false,
+      null,
+      false
+    ]
+  },
+  "hash": "6ce506f4fdbc2539c3936598685dfc70bacaac11b8b87c8a7b433e8d9eef64fc"
+}

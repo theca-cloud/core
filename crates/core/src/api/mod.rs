@@ -97,6 +97,7 @@ pub struct AppState {
         content::content,
         nodes::info,
         nodes::create_folder,
+        nodes::tree,
         nodes::update,
         nodes::delete,
         nodes::copy,

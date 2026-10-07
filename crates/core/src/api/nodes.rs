@@ -22,6 +22,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/nodes/{id}", get(info).patch(update).delete(delete))
         .route("/nodes/{id}/folders", post(create_folder))
+        .route("/nodes/{id}/tree", get(tree))
         .route("/nodes/{id}/copy", post(copy))
         .route("/nodes/{id}/restore", post(restore))
         .route("/libraries/{id}/trash", get(trash))
@@ -62,21 +63,95 @@ pub async fn info(
     Ok(Json(db::node::info(&state.pool, node.node).await?))
 }
 
-/// Create a folder.
-#[utoipa::path(post, path = "/api/v1/nodes/{id}/folders", params(("id" = Uuid, Path)), request_body = api::CreateFolder, responses(
-    (status = 201, body = api::Node),
+/// Most paths in one folders request.
+const FOLDERS_BATCH: usize = 1000;
+
+/// Create folders below a folder, like `mkdir -p`: each path's missing
+/// folders created, existing ones kept, all in one transaction. Each path's
+/// folder, in order.
+#[utoipa::path(post, path = "/api/v1/nodes/{id}/folders", params(("id" = Uuid, Path)), request_body = api::CreateFolders, responses(
+    (status = 200, body = Vec<api::FolderPath>),
+    (status = 400, description = "`name_invalid`, `batch_too_large`", body = api::ApiError),
     (status = 404, body = api::ApiError),
-    (status = 409, description = "`name_taken`", body = api::ApiError),
+    (status = 409, description = "`name_taken` (a file has a path's name)", body = api::ApiError),
 ))]
 pub async fn create_folder(
     State(state): State<AppState>,
     user: CurrentAccount,
     Path(id): Path<Uuid>,
-    ApiJson(req): ApiJson<api::CreateFolder>,
-) -> Result<(StatusCode, Json<api::Node>), HttpError> {
+    ApiJson(req): ApiJson<api::CreateFolders>,
+) -> Result<Json<Vec<api::FolderPath>>, HttpError> {
+    if req.paths.len() > FOLDERS_BATCH {
+        return Err(HttpError::bad_request(
+            "batch_too_large",
+            format!("at most {FOLDERS_BATCH} paths per request"),
+        ));
+    }
     let parent = node(&state, &user, id).await?;
-    let created = files::create_folder(&state, &parent, req.name.as_str()).await?;
-    Ok((StatusCode::CREATED, Json(created)))
+    Ok(Json(
+        files::create_folders(&state, &parent, &req.paths).await?,
+    ))
+}
+
+/// How long the tree's stream waits on a client not reading before giving up
+/// (freeing its database connection).
+const TREE_STALL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// A folder's whole subtree (outside the trash) in one streamed answer: NDJSON,
+/// one `{"node": ...}` line per node, parents before their children, then
+/// `{"end": {"count": n}}`, or `{"error": ...}` if it fails midway. A stream
+/// without its end line was cut.
+#[utoipa::path(get, path = "/api/v1/nodes/{id}/tree", params(("id" = Uuid, Path)), responses(
+    (status = 200, description = "NDJSON lines", body = api::TreeLine, content_type = "application/x-ndjson"),
+    (status = 400, description = "`not_a_folder`", body = api::ApiError),
+    (status = 404, body = api::ApiError),
+))]
+pub async fn tree(
+    State(state): State<AppState>,
+    user: CurrentAccount,
+    Path(id): Path<Uuid>,
+) -> Result<axum::response::Response, HttpError> {
+    use axum::response::IntoResponse;
+    use futures::{SinkExt, StreamExt};
+
+    let folder = node(&state, &user, id).await?;
+    if folder.is_file {
+        return Err(HttpError::bad_request("not_a_folder", "a file has no tree"));
+    }
+    // Bounded: a slow client slows the query down, never fills memory.
+    let (mut lines, body) = futures::channel::mpsc::channel::<axum::body::Bytes>(64);
+    let pool = state.pool.clone();
+    tokio::spawn(async move {
+        let mut send = async |line: api::TreeLine| -> bool {
+            let mut bytes = serde_json::to_vec(&line).expect("serializable");
+            bytes.push(b'\n');
+            matches!(
+                tokio::time::timeout(TREE_STALL, lines.send(bytes.into())).await,
+                Ok(Ok(()))
+            )
+        };
+        let mut rows = std::pin::pin!(db::node::tree(&pool, folder.node));
+        let mut count = 0;
+        let end = loop {
+            match rows.next().await {
+                Some(Ok(node)) => {
+                    count += 1;
+                    // Gone, or stalled: the query stops here.
+                    if !send(api::TreeLine::Node(node)).await {
+                        return;
+                    }
+                }
+                Some(Err(e)) => break api::TreeLine::Error(HttpError::internal(e).into_parts().1),
+                None => break api::TreeLine::End { count },
+            }
+        };
+        send(end).await;
+    });
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "application/x-ndjson")],
+        axum::body::Body::from_stream(body.map(Ok::<_, std::convert::Infallible>)),
+    )
+        .into_response())
 }
 
 /// Rename and/or move a file or folder. Within a library a move is one row;

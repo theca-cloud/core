@@ -575,13 +575,58 @@ pub struct NodeInfo {
     pub current_version: Option<Uuid>,
 }
 
-/// `POST /nodes/{parent}/folders`.
+/// `POST /nodes/{parent}/folders`: folders to create in a folder, like
+/// `mkdir -p` (missing ones created, existing ones kept).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct CreateFolder {
-    /// Its name.
-    #[cfg_attr(feature = "openapi", schema(value_type = String))]
-    pub name: Name,
+pub struct CreateFolders {
+    /// Paths relative to the folder, `/`-separated (`a`, `a/b`); at most 1000.
+    pub paths: Vec<String>,
+}
+
+/// A folder of `POST /nodes/{parent}/folders`, in the request's order.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct FolderPath {
+    /// The path asked (names as stored).
+    pub path: String,
+    /// The folder.
+    pub id: Uuid,
+    /// Created by this request (false: it existed).
+    pub created: bool,
+}
+
+/// A node of `GET /nodes/{id}/tree`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TreeNode {
+    /// The node.
+    pub id: Uuid,
+    /// Its path below the listed folder (`a`, `a/b.txt`).
+    pub path: String,
+    /// A file (true) or a folder (false).
+    pub is_file: bool,
+    /// A file's current version date.
+    pub modified: Option<String>,
+    /// A file's current version.
+    pub current_version: Option<Uuid>,
+}
+
+/// One line of `GET /nodes/{id}/tree` (NDJSON): a node, then the end (with
+/// how many nodes came) or an error. A stream without its end line is cut.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum TreeLine {
+    /// A node, parents before their children.
+    Node(TreeNode),
+    /// Every node was sent.
+    End {
+        /// How many.
+        count: u64,
+    },
+    /// The listing failed midway.
+    Error(ApiError),
 }
 
 /// `PATCH /nodes/{id}`: rename and/or move.

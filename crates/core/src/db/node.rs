@@ -50,6 +50,66 @@ pub async fn create_folder(
     .await
 }
 
+/// A folder's subtree outside the trash, as it streams from the database:
+/// paths below the folder, parents before their children (byte order puts a
+/// path before its extensions).
+pub fn tree(
+    pool: &PgPool,
+    folder: i64,
+) -> impl futures::Stream<Item = sqlx::Result<api::TreeNode>> + '_ {
+    sqlx::query_as!(
+        api::TreeNode,
+        r#"WITH RECURSIVE tree (pk, path) AS (
+               SELECT pk, name FROM node WHERE parent = $1 AND deleted_at IS NULL
+               UNION ALL
+               SELECT n.pk, t.path || '/' || n.name
+               FROM node n JOIN tree t ON n.parent = t.pk
+               WHERE n.deleted_at IS NULL
+           )
+           SELECT n.uuid AS id, t.path AS "path!", n.is_file,
+                  v.created_at::text AS modified, v.uuid AS "current_version?"
+           FROM tree t
+           JOIN node n ON n.pk = t.pk
+           LEFT JOIN version v ON v.pk = n.current_version
+           ORDER BY t.path"#,
+        folder
+    )
+    .fetch(pool)
+}
+
+/// The child of `parent` named `name` (ignoring case, outside the trash), or
+/// a new folder of that name: `(pk, uuid, created)`. A file of that name:
+/// `None`.
+pub async fn folder_child(
+    tx: &mut Transaction<'_, Postgres>,
+    parent: &NodeAccess,
+    under: i64,
+    name: &str,
+) -> sqlx::Result<Option<(i64, Uuid, bool)>> {
+    let existing = sqlx::query!(
+        "SELECT pk, uuid, is_file FROM node
+         WHERE parent = $1 AND lower(name) = lower($2) AND deleted_at IS NULL",
+        under,
+        name
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+    if let Some(node) = existing {
+        return Ok((!node.is_file).then_some((node.pk, node.uuid, false)));
+    }
+    let created = sqlx::query!(
+        "INSERT INTO node (organization, library, parent, name, is_file)
+         VALUES ($1, $2, $3, $4, false) RETURNING pk, uuid",
+        parent.access.organization,
+        parent.access.library,
+        under,
+        name
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(Some((created.pk, created.uuid, true)))
+}
+
 /// Renames and/or moves a node. To another library (same organization,
 /// checked by the caller), its `library` changes and the database cascades it
 /// to the subtree (`node_parent`), so the history follows.

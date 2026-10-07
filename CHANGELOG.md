@@ -1,7 +1,12 @@
 # Changelog
 
 Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
-## [0.5.0] - 2026-10-06
+## [0.6.0] - 2026-10-07
+
+### Features
+
+- **core**: GET /nodes/{id}/tree streamed; folders created from a list of paths (**breaking**)
+## [0.5.0] - 2026-10-07
 
 ### Features
 
@@ -13,6 +18,7 @@ Every release of `core`: the server image, the crates, the browser package, `ope
 ### Fixes
 
 - **ci**: Release notes keep their line breaks (curl -d strips them)
+- **ci**: The release JSON sent as is (sh's echo turned its \n into line breaks: 422)
 ## [0.4.0] - 2026-10-06
 
 ### Features
