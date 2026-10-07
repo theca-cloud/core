@@ -5,9 +5,10 @@
 when:
   - event: push
     branch: [dev, prod]
-    # Nothing built or tested changed: docs, the roadmap, try/, repo housekeeping.
+    # Nothing built or tested changed: docs (not CONFIGURATION.md, a test reads it),
+    # the roadmap, try/, repo housekeeping.
     path:
-      exclude: ["**/*.md", "roadmap/**", "try/**", "LICENSE", ".gitignore", ".githooks/**", "docker-compose.yml", "cliff.toml"]
+      exclude: ["README.md", "CLAUDE.md", "CONTRIBUTING.md", "CHANGELOG.md", "roadmap/**", "try/**", "LICENSE", ".gitignore", ".githooks/**", "docker-compose.yml", "cliff.toml"]
     # Not the release merge coming back into dev: prod just tested that very code.
     evaluate: 'not (CI_COMMIT_BRANCH == "dev" && CI_COMMIT_MESSAGE startsWith "Merge branch ''dev'' into prod")'
   - event: manual
