@@ -552,7 +552,7 @@ pub async fn runs(
 ) -> sqlx::Result<Vec<theca_common::api::JobRun>> {
     sqlx::query_as!(
         theca_common::api::JobRun,
-        r#"SELECT uuid AS id, started_at::text AS "started_at!", finished_at::text AS finished_at,
+        r#"SELECT uuid AS id, started_at, finished_at,
                   status, items, error
            FROM job_run WHERE job = $1 ORDER BY started_at DESC LIMIT $2"#,
         job.name(),

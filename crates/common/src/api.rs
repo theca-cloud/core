@@ -1,6 +1,7 @@
 //! Request and response types of the HTTP API (`/api/v1`), shared by the server
 //! and every client. The server derives their OpenAPI schemas (feature `openapi`).
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -56,7 +57,7 @@ pub struct TrashedLibrary {
     /// Its name.
     pub name: String,
     /// When it was trashed.
-    pub deleted_at: String,
+    pub deleted_at: DateTime<Utc>,
 }
 
 /// A library.
@@ -84,7 +85,7 @@ pub struct Node {
     /// A file (true) or a folder (false).
     pub is_file: bool,
     /// A file's current version date.
-    pub modified: Option<String>,
+    pub modified: Option<DateTime<Utc>>,
     /// A file's current version (the base of a new one).
     #[serde(default)]
     pub current_version: Option<Uuid>,
@@ -375,9 +376,9 @@ pub struct Session {
     /// The address it was opened from.
     pub ip: Option<String>,
     /// When it was opened.
-    pub created_at: String,
+    pub created_at: DateTime<Utc>,
     /// When it was last used.
-    pub last_seen: Option<String>,
+    pub last_seen: Option<DateTime<Utc>>,
     /// The organization it is restricted to, if opened through an organization's identity provider.
     pub restricted_to: Option<Uuid>,
     /// This session.
@@ -417,9 +418,9 @@ pub struct AppPassword {
     /// Read only.
     pub read_only: bool,
     /// When it was created.
-    pub created_at: String,
+    pub created_at: DateTime<Utc>,
     /// Last used (precise to a few minutes), if ever.
-    pub last_seen: Option<String>,
+    pub last_seen: Option<DateTime<Utc>>,
 }
 
 /// A new app password: the secret is shown only this once.
@@ -615,7 +616,7 @@ pub struct TreeNode {
     /// A file (true) or a folder (false).
     pub is_file: bool,
     /// A file's current version date.
-    pub modified: Option<String>,
+    pub modified: Option<DateTime<Utc>>,
     /// A file's current version.
     pub current_version: Option<Uuid>,
     /// A file's size in bytes (its current version's); none for a folder or a
@@ -694,7 +695,7 @@ pub struct TrashEntry {
     #[serde(default)]
     pub size: Option<i64>,
     /// When it was trashed.
-    pub deleted_at: String,
+    pub deleted_at: DateTime<Utc>,
 }
 
 /// Where a restored node landed.
@@ -725,7 +726,7 @@ pub struct Version {
     /// Who committed it (their email), unless they left the organization.
     pub author: Option<String>,
     /// When.
-    pub created_at: String,
+    pub created_at: DateTime<Utc>,
     /// Its description.
     pub message: Option<String>,
     /// The file's size in bytes at this version.
@@ -774,9 +775,9 @@ pub struct JobRun {
     /// The run.
     pub id: Uuid,
     /// When it started.
-    pub started_at: String,
+    pub started_at: DateTime<Utc>,
     /// When it ended (none while running).
-    pub finished_at: Option<String>,
+    pub finished_at: Option<DateTime<Utc>>,
     /// `running`, `success`, `failure` or `interrupted` (cut off by a stop).
     pub status: String,
     /// How many items it handled.
@@ -937,7 +938,7 @@ pub struct AdminAccount {
     /// Suspended: it can't log in, its tokens are refused.
     pub suspended: bool,
     /// When it was created.
-    pub created_at: String,
+    pub created_at: DateTime<Utc>,
 }
 
 /// `PATCH /admin/accounts/{id}`: only the fields given change.
@@ -1068,7 +1069,7 @@ pub struct ExportedAccount {
     /// TOTP is on.
     pub totp: bool,
     /// When it was created.
-    pub created_at: String,
+    pub created_at: DateTime<Utc>,
 }
 
 /// A file of an export.

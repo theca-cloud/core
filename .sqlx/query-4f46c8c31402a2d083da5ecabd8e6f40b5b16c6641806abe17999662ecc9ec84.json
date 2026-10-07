@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT uuid AS id, email, verified, instance_admin, suspended_at IS NOT NULL AS \"suspended!\",\n                  created_at::text AS \"created_at!\"\n           FROM account WHERE $1::text IS NULL OR email ILIKE '%' || $1 || '%'\n           ORDER BY lower(email) LIMIT 200",
+  "query": "SELECT uuid AS id, email, verified, instance_admin, suspended_at IS NOT NULL AS \"suspended!\",\n                  created_at\n           FROM account WHERE $1::text IS NULL OR email ILIKE '%' || $1 || '%'\n           ORDER BY lower(email) LIMIT 200",
   "describe": {
     "columns": [
       {
@@ -30,8 +30,8 @@
       },
       {
         "ordinal": 5,
-        "name": "created_at!",
-        "type_info": "Text"
+        "name": "created_at",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
@@ -45,8 +45,8 @@
       false,
       false,
       null,
-      null
+      false
     ]
   },
-  "hash": "2de2defbd2f854f696869ce8aed21c6985a0cdac093f6713a0f0ee97e6b82cb5"
+  "hash": "4f46c8c31402a2d083da5ecabd8e6f40b5b16c6641806abe17999662ecc9ec84"
 }

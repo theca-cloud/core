@@ -124,12 +124,12 @@ impl Backend {
         }
     }
 
-    /// Every object: `(key, last modified in Unix seconds)`, as a stream (a
-    /// backend can hold millions).
+    /// Every chunk object: `(key, last modified in Unix seconds)`, as a stream
+    /// (a backend can hold millions).
     pub fn list(&self) -> futures::stream::BoxStream<'static, Result<(String, i64), BackendError>> {
         use futures::StreamExt;
         self.store()
-            .list(None)
+            .list(Some(&Path::from(CHUNKS)))
             .map(|meta| {
                 let meta = meta?;
                 Ok((meta.location.to_string(), meta.last_modified.timestamp()))
@@ -197,12 +197,20 @@ impl Backend {
 
 /// The chunk an object key is for, if it is one.
 pub fn chunk_of(key: &str) -> Option<Uuid> {
-    Uuid::parse_str(key).ok().filter(|u| key == u.to_string())
+    let chunk = Uuid::parse_str(key.rsplit('/').next()?).ok()?;
+    (self::key(chunk).as_ref() == key).then_some(chunk)
 }
 
-fn key(chunk: Uuid) -> Path {
-    Path::from(chunk.to_string())
+/// Where a chunk's object lives: `chunks/<aa>/<bb>/<uuid>`, `aa` and `bb` the
+/// UUID's last four hex digits (UUIDv7's random part: recent chunks spread
+/// evenly), so no directory grows huge (decisions.md, Storage backends).
+pub fn key(chunk: Uuid) -> Path {
+    let hex = chunk.simple().to_string();
+    Path::from(format!("{CHUNKS}/{}/{}/{chunk}", &hex[28..30], &hex[30..]))
 }
+
+/// The prefix of every chunk object; nothing else is ever listed.
+const CHUNKS: &str = "chunks";
 
 /// The backends, built once per storage (an S3 client holds connections).
 #[derive(Clone)]
@@ -373,6 +381,21 @@ pub async fn probe(implementation: &str, details: &serde_json::Value) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chunk_keys() {
+        let chunk: Uuid = "01a10e63-d658-7be1-8a89-e852b2e921d5".parse().unwrap();
+        let key = super::key(chunk).to_string();
+        assert_eq!(key, "chunks/21/d5/01a10e63-d658-7be1-8a89-e852b2e921d5");
+        assert_eq!(chunk_of(&key), Some(chunk));
+        // Anything else in the backend is never taken for a chunk.
+        assert_eq!(chunk_of("01a10e63-d658-7be1-8a89-e852b2e921d5"), None);
+        assert_eq!(
+            chunk_of("chunks/00/00/01a10e63-d658-7be1-8a89-e852b2e921d5"),
+            None
+        );
+        assert_eq!(chunk_of("chunks/21/d5/notes.txt"), None);
+    }
 
     #[test]
     fn signed_urls() {

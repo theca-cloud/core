@@ -253,8 +253,8 @@ pub async fn sessions(
 ) -> sqlx::Result<Vec<api::Session>> {
     let (idle, max) = lifetime.secs();
     let rows = sqlx::query!(
-        r#"SELECT t.uuid, t.name, t.user_agent, host(t.ip) AS "ip?", t.created_at::text AS "created_at!",
-                  t.last_seen::text AS "last_seen?", o.uuid AS "organization?"
+        r#"SELECT t.uuid, t.name, t.user_agent, host(t.ip) AS "ip?", t.created_at,
+                  t.last_seen, o.uuid AS "organization?"
            FROM token t LEFT JOIN organization o ON o.pk = t.organization
            WHERE t.resource = $1 AND t.usage = 'session' AND t.revoked_at IS NULL
              AND t.last_seen > now() - make_interval(secs => $2)
@@ -398,7 +398,7 @@ pub async fn app_passwords(pool: &PgPool, who: &Credential) -> sqlx::Result<Vec<
     sqlx::query_as!(
         api::AppPassword,
         r#"SELECT t.uuid AS id, t.name, o.uuid AS "organization?", l.uuid AS "library?", t.read_only,
-                  t.created_at::text AS "created_at!", t.last_seen::text AS last_seen
+                  t.created_at, t.last_seen
            FROM token t
            LEFT JOIN organization o ON o.pk = t.organization
            LEFT JOIN library l ON l.pk = t.library

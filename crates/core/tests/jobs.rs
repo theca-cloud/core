@@ -257,13 +257,20 @@ async fn orphan_check(pool: PgPool) {
     let (old, young) = (Uuid::now_v7(), Uuid::now_v7());
     backend.put(old, b"leaked".to_vec()).await.unwrap();
     backend.put(young, b"in flight".to_vec()).await.unwrap();
+    // Not chunks: outside `chunks/`, and inside it under a name no chunk has.
+    let stray = dir.join("chunks/00/00/notes.txt");
+    std::fs::create_dir_all(stray.parent().unwrap()).unwrap();
+    std::fs::write(&stray, "not a chunk").unwrap();
     std::fs::write(dir.join("notes.txt"), "not a chunk").unwrap();
+    let object = |chunk: Uuid| dir.join(theca_core::storage::key(chunk).as_ref());
     let two_days_ago = std::time::SystemTime::now() - Duration::from_secs(2 * 86400);
-    for name in [old.to_string(), real.to_string(), "notes.txt".into()] {
-        let f = std::fs::File::options()
-            .write(true)
-            .open(dir.join(name))
-            .unwrap();
+    for path in [
+        object(old),
+        object(real),
+        stray.clone(),
+        dir.join("notes.txt"),
+    ] {
+        let f = std::fs::File::options().write(true).open(path).unwrap();
         f.set_modified(two_days_ago).unwrap();
     }
 
@@ -276,6 +283,7 @@ async fn orphan_check(pool: PgPool) {
     );
     assert!(w.stored(real).await);
     assert!(dir.join("notes.txt").exists());
+    assert!(stray.exists());
 }
 
 #[sqlx::test]

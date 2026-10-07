@@ -951,6 +951,16 @@ async fn sizes(pool: PgPool) {
         .map(|v| v.size)
         .collect();
     assert_eq!(versions, [1000, 300]);
+    // Dates on the wire: RFC 3339 in UTC, whatever the database's time zone.
+    let raw: Value = alice
+        .get(&format!("/api/v1/files/{}/versions", first.file))
+        .await
+        .unwrap();
+    let date = raw[0]["created_at"].as_str().unwrap();
+    assert!(
+        date.len() > 20 && date.as_bytes()[10] == b'T' && date.ends_with('Z'),
+        "{date}"
+    );
     let found: Vec<api::SearchResult> = alice.get("/api/v1/search?q=a.txt").await.unwrap();
     assert_eq!(found[0].size, Some(300));
 

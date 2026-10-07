@@ -3568,6 +3568,7 @@
         "properties": {
           "created_at": {
             "type": "string",
+            "format": "date-time",
             "description": "When it was created."
           },
           "email": {
@@ -3693,6 +3694,7 @@
         "properties": {
           "created_at": {
             "type": "string",
+            "format": "date-time",
             "description": "When it was created."
           },
           "id": {
@@ -3705,6 +3707,7 @@
               "string",
               "null"
             ],
+            "format": "date-time",
             "description": "Last used (precise to a few minutes), if ever."
           },
           "library": {
@@ -4313,6 +4316,7 @@
         "properties": {
           "created_at": {
             "type": "string",
+            "format": "date-time",
             "description": "When it was created."
           },
           "email": {
@@ -4495,6 +4499,7 @@
               "string",
               "null"
             ],
+            "format": "date-time",
             "description": "When it ended (none while running)."
           },
           "id": {
@@ -4509,6 +4514,7 @@
           },
           "started_at": {
             "type": "string",
+            "format": "date-time",
             "description": "When it started."
           },
           "status": {
@@ -4860,6 +4866,7 @@
               "string",
               "null"
             ],
+            "format": "date-time",
             "description": "A file's current version date."
           },
           "name": {
@@ -5158,6 +5165,7 @@
         "properties": {
           "created_at": {
             "type": "string",
+            "format": "date-time",
             "description": "When it was opened."
           },
           "current": {
@@ -5181,6 +5189,7 @@
               "string",
               "null"
             ],
+            "format": "date-time",
             "description": "When it was last used."
           },
           "name": {
@@ -5471,6 +5480,7 @@
         "properties": {
           "deleted_at": {
             "type": "string",
+            "format": "date-time",
             "description": "When it was trashed."
           },
           "id": {
@@ -5511,6 +5521,7 @@
         "properties": {
           "deleted_at": {
             "type": "string",
+            "format": "date-time",
             "description": "When it was trashed."
           },
           "id": {
@@ -5610,6 +5621,7 @@
               "string",
               "null"
             ],
+            "format": "date-time",
             "description": "A file's current version date."
           },
           "path": {
@@ -5738,6 +5750,7 @@
           },
           "created_at": {
             "type": "string",
+            "format": "date-time",
             "description": "When."
           },
           "current": {

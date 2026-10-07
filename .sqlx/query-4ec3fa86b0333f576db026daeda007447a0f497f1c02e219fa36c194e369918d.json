@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT t.uuid, t.name, t.user_agent, host(t.ip) AS \"ip?\", t.created_at::text AS \"created_at!\",\n                  t.last_seen::text AS \"last_seen?\", o.uuid AS \"organization?\"\n           FROM token t LEFT JOIN organization o ON o.pk = t.organization\n           WHERE t.resource = $1 AND t.usage = 'session' AND t.revoked_at IS NULL\n             AND t.last_seen > now() - make_interval(secs => $2)\n             AND ($3::float8 IS NULL OR t.created_at > now() - make_interval(secs => $3))\n           ORDER BY t.last_seen DESC",
+  "query": "SELECT t.uuid, t.name, t.user_agent, host(t.ip) AS \"ip?\", t.created_at,\n                  t.last_seen, o.uuid AS \"organization?\"\n           FROM token t LEFT JOIN organization o ON o.pk = t.organization\n           WHERE t.resource = $1 AND t.usage = 'session' AND t.revoked_at IS NULL\n             AND t.last_seen > now() - make_interval(secs => $2)\n             AND ($3::float8 IS NULL OR t.created_at > now() - make_interval(secs => $3))\n           ORDER BY t.last_seen DESC",
   "describe": {
     "columns": [
       {
@@ -25,13 +25,13 @@
       },
       {
         "ordinal": 4,
-        "name": "created_at!",
-        "type_info": "Text"
+        "name": "created_at",
+        "type_info": "Timestamptz"
       },
       {
         "ordinal": 5,
-        "name": "last_seen?",
-        "type_info": "Text"
+        "name": "last_seen",
+        "type_info": "Timestamptz"
       },
       {
         "ordinal": 6,
@@ -51,10 +51,10 @@
       false,
       true,
       null,
-      null,
-      null,
+      false,
+      true,
       false
     ]
   },
-  "hash": "81e099edda183e382f3307466dfc863a0ad005634ef36cea009877b2d6a25099"
+  "hash": "4ec3fa86b0333f576db026daeda007447a0f497f1c02e219fa36c194e369918d"
 }
