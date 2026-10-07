@@ -1,0 +1,55 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO node (organization, library, parent, name, is_file)\n           VALUES ($1, $2, $3, $4, false)\n           RETURNING uuid AS id, name, is_file, NULL::timestamptz AS modified,\n                     NULL::uuid AS current_version, NULL::bigint AS size",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "is_file",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "modified",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "current_version",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "size",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "1a7d788d222595dee355646eaddfcba8a12382e74848ea9fd313e3fd902e00db"
+}

@@ -1,8 +1,17 @@
 # Release candidates (dev) and releases (prod), once the checks passed. The
 # version is Cargo.toml's, written by scripts/release.sh (see the release
 # process in docs/CONTRIBUTING.md).
+# Pushes filtered as the checks are (ci.yaml), manual runs always.
 when:
-  - event: [push, manual]
+  - event: push
+    branch: [dev, prod]
+    # Nothing built or tested changed: docs (not CONFIGURATION.md, a test reads it),
+    # the roadmap, try/, repo housekeeping.
+    path:
+      exclude: ["README.md", "CLAUDE.md", "CONTRIBUTING.md", "CHANGELOG.md", "roadmap/**", "try/**", "LICENSE", ".gitignore", ".githooks/**", "docker-compose.yml", "cliff.toml"]
+    # Not the release merge coming back into dev: prod just tested that very code.
+    evaluate: 'not (CI_COMMIT_BRANCH == "dev" && CI_COMMIT_MESSAGE startsWith "Merge branch ''dev'' into prod")'
+  - event: manual
     branch: [dev, prod]
 
 depends_on: [ci]

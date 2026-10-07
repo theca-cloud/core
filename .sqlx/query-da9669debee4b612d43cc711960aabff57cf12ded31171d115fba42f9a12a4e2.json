@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT v.pk, v.parent_version, v.uuid AS id, p.uuid AS \"parent?\", a.email AS \"author?\",\n                  v.created_at::text AS \"created_at!\", v.message, v.size,\n                  v.pk = n.current_version AS \"current!\"\n           FROM version v\n           JOIN node n ON n.pk = v.file\n           LEFT JOIN version p ON p.pk = v.parent_version\n           LEFT JOIN \"user\" u ON u.pk = v.author\n           LEFT JOIN account a ON a.pk = u.account\n           WHERE v.file = $1 ORDER BY v.pk",
+  "query": "SELECT v.pk, v.parent_version, v.uuid AS id, p.uuid AS \"parent?\", a.email AS \"author?\",\n                  v.created_at, v.message, v.size,\n                  v.pk = n.current_version AS \"current!\"\n           FROM version v\n           JOIN node n ON n.pk = v.file\n           LEFT JOIN version p ON p.pk = v.parent_version\n           LEFT JOIN \"user\" u ON u.pk = v.author\n           LEFT JOIN account a ON a.pk = u.account\n           WHERE v.file = $1 ORDER BY v.pk",
   "describe": {
     "columns": [
       {
@@ -30,8 +30,8 @@
       },
       {
         "ordinal": 5,
-        "name": "created_at!",
-        "type_info": "Text"
+        "name": "created_at",
+        "type_info": "Timestamptz"
       },
       {
         "ordinal": 6,
@@ -60,11 +60,11 @@
       false,
       false,
       false,
-      null,
+      false,
       true,
       false,
       null
     ]
   },
-  "hash": "48857bf6dfc3ad8a47cd78dc5a1b6cbb3b1dce1f7590be8d18c57577a791b8f1"
+  "hash": "da9669debee4b612d43cc711960aabff57cf12ded31171d115fba42f9a12a4e2"
 }

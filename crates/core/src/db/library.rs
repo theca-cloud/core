@@ -215,7 +215,7 @@ pub async fn list(pool: &PgPool, who: &Credential) -> sqlx::Result<Vec<api::Libr
 pub async fn children(pool: &PgPool, folder: i64) -> sqlx::Result<Vec<api::Node>> {
     sqlx::query_as!(
         api::Node,
-        r#"SELECT n.uuid AS id, n.name, n.is_file, v.created_at::text AS modified,
+        r#"SELECT n.uuid AS id, n.name, n.is_file, v.created_at AS "modified?",
                   v.uuid AS "current_version?", v.size AS "size?"
            FROM node n LEFT JOIN version v ON v.pk = n.current_version
            WHERE n.parent = $1 AND n.deleted_at IS NULL ORDER BY n.is_file, lower(n.name)"#,
@@ -334,7 +334,7 @@ pub async fn trash_list(
 ) -> sqlx::Result<Vec<api::TrashedLibrary>> {
     sqlx::query_as!(
         api::TrashedLibrary,
-        r#"SELECT l.uuid AS id, l.name, l.deleted_at::text AS "deleted_at!"
+        r#"SELECT l.uuid AS id, l.name, l.deleted_at AS "deleted_at!"
            FROM library_access_any($1) a
            JOIN library l ON l.pk = a.library
            JOIN organization o ON o.pk = l.owner

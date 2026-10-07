@@ -280,7 +280,7 @@ pub async fn export(
 ) -> Result<Json<api::Export>, HttpError> {
     account.require_full_session()?;
     let row = sqlx::query!(
-        r#"SELECT uuid, email, verified, created_at::text AS "created_at!",
+        r#"SELECT uuid, email, verified, created_at,
                   EXISTS (SELECT 1 FROM identity WHERE account = $1 AND kind = 'totp'
                           AND details->>'confirmed' = 'true') AS "totp!"
            FROM account WHERE pk = $1"#,

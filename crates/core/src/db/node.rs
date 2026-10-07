@@ -39,7 +39,7 @@ pub async fn create_folder(
         api::Node,
         r#"INSERT INTO node (organization, library, parent, name, is_file)
            VALUES ($1, $2, $3, $4, false)
-           RETURNING uuid AS id, name, is_file, NULL::text AS modified,
+           RETURNING uuid AS id, name, is_file, NULL::timestamptz AS modified,
                      NULL::uuid AS current_version, NULL::bigint AS size"#,
         parent.access.organization,
         parent.access.library,
@@ -67,7 +67,7 @@ pub fn tree(
                WHERE n.deleted_at IS NULL
            )
            SELECT n.uuid AS id, t.path AS "path!", n.is_file,
-                  v.created_at::text AS modified, v.uuid AS "current_version?", v.size AS "size?"
+                  v.created_at AS "modified?", v.uuid AS "current_version?", v.size AS "size?"
            FROM tree t
            JOIN node n ON n.pk = t.pk
            LEFT JOIN version v ON v.pk = n.current_version
@@ -352,7 +352,7 @@ pub async fn trash_list(pool: &PgPool, library: i64) -> sqlx::Result<Vec<api::Tr
     sqlx::query_as!(
         api::TrashEntry,
         r#"SELECT n.uuid AS id, n.name, n.is_file, node_path(n.pk) AS "path!", v.size AS "size?",
-                  n.deleted_at::text AS "deleted_at!"
+                  n.deleted_at AS "deleted_at!"
            FROM node n LEFT JOIN version v ON v.pk = n.current_version
            WHERE n.library = $1 AND n.deleted_at IS NOT NULL ORDER BY n.deleted_at DESC"#,
         library
@@ -460,7 +460,7 @@ pub async fn purge(tx: &mut Transaction<'_, Postgres>, node: i64) -> sqlx::Resul
 pub async fn versions(pool: &PgPool, file: i64) -> sqlx::Result<Vec<api::Version>> {
     let rows = sqlx::query!(
         r#"SELECT v.pk, v.parent_version, v.uuid AS id, p.uuid AS "parent?", a.email AS "author?",
-                  v.created_at::text AS "created_at!", v.message, v.size,
+                  v.created_at, v.message, v.size,
                   v.pk = n.current_version AS "current!"
            FROM version v
            JOIN node n ON n.pk = v.file
@@ -482,7 +482,7 @@ pub async fn versions(pool: &PgPool, file: i64) -> sqlx::Result<Vec<api::Version
                 number,
                 parent: r.parent,
                 author: r.author.clone(),
-                created_at: r.created_at.clone(),
+                created_at: r.created_at,
                 message: r.message.clone(),
                 size: r.size,
                 current: r.current,

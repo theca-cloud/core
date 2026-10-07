@@ -91,7 +91,7 @@ pub async fn accounts(pool: &PgPool, query: Option<&str>) -> sqlx::Result<Vec<ap
     sqlx::query_as!(
         api::AdminAccount,
         r#"SELECT uuid AS id, email, verified, instance_admin, suspended_at IS NOT NULL AS "suspended!",
-                  created_at::text AS "created_at!"
+                  created_at
            FROM account WHERE $1::text IS NULL OR email ILIKE '%' || $1 || '%'
            ORDER BY lower(email) LIMIT 200"#,
         query

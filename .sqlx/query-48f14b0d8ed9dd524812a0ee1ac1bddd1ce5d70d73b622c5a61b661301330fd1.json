@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT l.uuid AS id, l.name, l.deleted_at::text AS \"deleted_at!\"\n           FROM library_access_any($1) a\n           JOIN library l ON l.pk = a.library\n           JOIN organization o ON o.pk = l.owner\n           WHERE o.uuid = $2 AND l.deleted_at IS NOT NULL\n           ORDER BY l.deleted_at DESC",
+  "query": "SELECT l.uuid AS id, l.name, l.deleted_at AS \"deleted_at!\"\n           FROM library_access_any($1) a\n           JOIN library l ON l.pk = a.library\n           JOIN organization o ON o.pk = l.owner\n           WHERE o.uuid = $2 AND l.deleted_at IS NOT NULL\n           ORDER BY l.deleted_at DESC",
   "describe": {
     "columns": [
       {
@@ -16,7 +16,7 @@
       {
         "ordinal": 2,
         "name": "deleted_at!",
-        "type_info": "Text"
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
@@ -28,8 +28,8 @@
     "nullable": [
       false,
       false,
-      null
+      true
     ]
   },
-  "hash": "9b06e81da5101cb67e6b1d063d5624a2426d4873d475149ec2cd9cc7a855df90"
+  "hash": "48f14b0d8ed9dd524812a0ee1ac1bddd1ce5d70d73b622c5a61b661301330fd1"
 }

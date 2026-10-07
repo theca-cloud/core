@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT uuid AS id, started_at::text AS \"started_at!\", finished_at::text AS finished_at,\n                  status, items, error\n           FROM job_run WHERE job = $1 ORDER BY started_at DESC LIMIT $2",
+  "query": "SELECT uuid AS id, started_at, finished_at,\n                  status, items, error\n           FROM job_run WHERE job = $1 ORDER BY started_at DESC LIMIT $2",
   "describe": {
     "columns": [
       {
@@ -10,13 +10,13 @@
       },
       {
         "ordinal": 1,
-        "name": "started_at!",
-        "type_info": "Text"
+        "name": "started_at",
+        "type_info": "Timestamptz"
       },
       {
         "ordinal": 2,
         "name": "finished_at",
-        "type_info": "Text"
+        "type_info": "Timestamptz"
       },
       {
         "ordinal": 3,
@@ -42,12 +42,12 @@
     },
     "nullable": [
       false,
-      null,
-      null,
+      false,
+      true,
       false,
       false,
       true
     ]
   },
-  "hash": "e92210cdaa7425d006d393c3215e872d592b9bcf54c93044369551503b8eafd4"
+  "hash": "15f02709bf3c08fb6ba7a83d189d4ddd6a8094b21d86685dc91b44964559a42e"
 }

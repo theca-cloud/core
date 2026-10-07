@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT t.uuid AS id, t.name, o.uuid AS \"organization?\", l.uuid AS \"library?\", t.read_only,\n                  t.created_at::text AS \"created_at!\", t.last_seen::text AS last_seen\n           FROM token t\n           LEFT JOIN organization o ON o.pk = t.organization\n           LEFT JOIN library l ON l.pk = t.library\n           WHERE t.resource = $1 AND t.usage = 'app_password' AND t.revoked_at IS NULL\n             AND ($2::bigint IS NULL OR t.organization = $2)\n           ORDER BY t.created_at",
+  "query": "SELECT t.uuid AS id, t.name, o.uuid AS \"organization?\", l.uuid AS \"library?\", t.read_only,\n                  t.created_at, t.last_seen\n           FROM token t\n           LEFT JOIN organization o ON o.pk = t.organization\n           LEFT JOIN library l ON l.pk = t.library\n           WHERE t.resource = $1 AND t.usage = 'app_password' AND t.revoked_at IS NULL\n             AND ($2::bigint IS NULL OR t.organization = $2)\n           ORDER BY t.created_at",
   "describe": {
     "columns": [
       {
@@ -30,13 +30,13 @@
       },
       {
         "ordinal": 5,
-        "name": "created_at!",
-        "type_info": "Text"
+        "name": "created_at",
+        "type_info": "Timestamptz"
       },
       {
         "ordinal": 6,
         "name": "last_seen",
-        "type_info": "Text"
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
@@ -51,9 +51,9 @@
       false,
       false,
       false,
-      null,
-      null
+      false,
+      true
     ]
   },
-  "hash": "8478887efc4297edc5314fb18e1ae2883a1cc806da03b4028b05b0e382a91a9d"
+  "hash": "29fb25a1db66d79f216b5bdd68781af6822d26300be8274223ae0d33d18b4946"
 }

@@ -1,6 +1,16 @@
 # Changelog
 
 Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
+## [0.8.0] - 2026-10-07
+
+### Features
+
+- **core**: One-way doors reviewed (step 15): object layout, RFC 3339 dates (**breaking**)
+
+### Fixes
+
+- **ci**: Skip pushes that change nothing built, and the release merge back into dev
+- **ci**: CONFIGURATION.md triggers the checks (a test reads it)
 ## [0.7.0] - 2026-10-07
 
 ### Features

@@ -971,14 +971,24 @@ async fn every_stored_byte_is_billed(kind: Kind, pool: PgPool) {
         }
     }
     if let Kind::Filesystem = kind {
+        // Every file, wherever it is: each must be a known chunk at its key.
         for dir in &w._dirs {
-            for entry in std::fs::read_dir(dir.path()).unwrap() {
-                let entry = entry.unwrap();
-                let name = entry.file_name().to_string_lossy().into_owned();
-                let known = rows.iter().find(|(chunk, _, _)| chunk.to_string() == name);
-                let (_, _, size) =
-                    known.unwrap_or_else(|| panic!("object {name} has no chunk row"));
-                assert_eq!(Some(entry.metadata().unwrap().len() as i64), *size);
+            let mut todo = vec![dir.path().to_owned()];
+            while let Some(folder) = todo.pop() {
+                for entry in std::fs::read_dir(folder).unwrap() {
+                    let path = entry.unwrap().path();
+                    if path.is_dir() {
+                        todo.push(path);
+                        continue;
+                    }
+                    let name = path.strip_prefix(dir.path()).unwrap().to_string_lossy();
+                    let known = rows
+                        .iter()
+                        .find(|(chunk, _, _)| theca_core::storage::key(*chunk).as_ref() == name);
+                    let (_, _, size) =
+                        known.unwrap_or_else(|| panic!("object {name} has no chunk row"));
+                    assert_eq!(Some(path.metadata().unwrap().len() as i64), *size);
+                }
             }
         }
     }

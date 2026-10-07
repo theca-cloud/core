@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO node (organization, library, parent, name, is_file)\n           VALUES ($1, $2, $3, $4, false)\n           RETURNING uuid AS id, name, is_file, NULL::text AS modified,\n                     NULL::uuid AS current_version, NULL::bigint AS size",
+  "query": "SELECT n.uuid AS id, n.name, n.is_file, node_path(n.pk) AS \"path!\", v.size AS \"size?\",\n                  n.deleted_at AS \"deleted_at!\"\n           FROM node n LEFT JOIN version v ON v.pk = n.current_version\n           WHERE n.library = $1 AND n.deleted_at IS NOT NULL ORDER BY n.deleted_at DESC",
   "describe": {
     "columns": [
       {
@@ -20,26 +20,23 @@
       },
       {
         "ordinal": 3,
-        "name": "modified",
+        "name": "path!",
         "type_info": "Text"
       },
       {
         "ordinal": 4,
-        "name": "current_version",
-        "type_info": "Uuid"
+        "name": "size?",
+        "type_info": "Int8"
       },
       {
         "ordinal": 5,
-        "name": "size",
-        "type_info": "Int8"
+        "name": "deleted_at!",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Int8",
-        "Int8",
-        "Int8",
-        "Text"
+        "Int8"
       ]
     },
     "nullable": [
@@ -47,9 +44,9 @@
       false,
       false,
       null,
-      null,
-      null
+      false,
+      true
     ]
   },
-  "hash": "dca01ed72f5def47016206ec3ef18e3e32ffbe222b2bfb04599769808956ffb2"
+  "hash": "b05440ee714de5a39dd9f7a19a5743868341cb6a1ae1a9017e96b60844d3c355"
 }

@@ -1,10 +1,14 @@
-# Every branch (dev and prod included) and pull request, except changes that
-# only touch documentation. Each step is a part of scripts/ci.sh, so a red step
-# says what failed; steps share the workspace (target/ carries over).
+# Every branch (dev and prod included) and pull request, when something built
+# or tested changed; manual runs always. Each step is a part of scripts/ci.sh,
+# so a red step says what failed; steps share the workspace (target/ carries over).
 when:
   - event: [push, pull_request]
+    # Nothing built or tested changed: docs (not CONFIGURATION.md, a test reads it),
+    # the roadmap, try/, repo housekeeping.
     path:
-      exclude: ["roadmap/**", "**/*.md"]
+      exclude: ["README.md", "CLAUDE.md", "CONTRIBUTING.md", "CHANGELOG.md", "roadmap/**", "try/**", "LICENSE", ".gitignore", ".githooks/**", "docker-compose.yml", "cliff.toml"]
+    # Not the release merge coming back into dev: prod just tested that very code.
+    evaluate: 'not (CI_COMMIT_BRANCH == "dev" && CI_COMMIT_MESSAGE startsWith "Merge branch ''dev'' into prod")'
   - event: manual
 
 services:
