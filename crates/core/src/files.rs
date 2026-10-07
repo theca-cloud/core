@@ -3,12 +3,14 @@
 //! core function"). Callers resolve the nodes (by uuid, or by path) and map
 //! [`FileError`] to their protocol.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use theca_common::api;
 use theca_common::chunking::chunks;
 use theca_common::compression::{CompressionPolicy, compress};
 use theca_common::hash::{ChunkHash, Sha256};
+use theca_common::name::Name;
 use uuid::Uuid;
 
 use crate::api::AppState;
@@ -103,6 +105,52 @@ pub async fn create_folder(
     folder(parent)?;
     writable(&parent.access)?;
     Ok(db::node::create_folder(&state.pool, parent, name).await?)
+}
+
+/// Folders below `parent`, like `mkdir -p`: each path's missing folders
+/// created, existing ones kept, in one transaction. Each path's folder, and
+/// whether this created it.
+pub async fn create_folders(
+    state: &AppState,
+    parent: &NodeAccess,
+    paths: &[String],
+) -> Result<Vec<api::FolderPath>, FileError> {
+    folder(parent)?;
+    writable(&parent.access)?;
+    let mut tx = state.pool.begin().await?;
+    // Folders already walked, by their path in lower case.
+    let mut known: HashMap<String, (i64, Uuid, bool)> = HashMap::new();
+    let mut out = Vec::with_capacity(paths.len());
+    for path in paths {
+        let mut under = parent.node;
+        let mut walked: Vec<String> = Vec::new();
+        let mut last = None;
+        for segment in path.split('/').filter(|s| !s.is_empty()) {
+            let name = Name::new(segment).map_err(|_| FileError::InvalidName)?;
+            walked.push(name.as_str().to_owned());
+            let key = walked.join("/").to_lowercase();
+            let folder = match known.get(&key) {
+                Some(folder) => *folder,
+                None => {
+                    let folder = db::node::folder_child(&mut tx, parent, under, name.as_str())
+                        .await?
+                        .ok_or(FileError::NameTaken)?;
+                    known.insert(key, folder);
+                    folder
+                }
+            };
+            under = folder.0;
+            last = Some(folder);
+        }
+        let (_, id, created) = last.ok_or(FileError::InvalidName)?;
+        out.push(api::FolderPath {
+            path: walked.join("/"),
+            id,
+            created,
+        });
+    }
+    tx.commit().await?;
+    Ok(out)
 }
 
 /// Renames and/or moves a node (into any library of the same organization).

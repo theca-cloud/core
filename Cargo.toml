@@ -26,7 +26,7 @@ hmac = "0.13"
 # S3 with ring (not the "aws" feature, which pulls aws-lc-rs).
 object_store = { version = "0.14", default-features = false, features = ["fs", "aws-base", "reqwest", "ring"] }
 # rustls-no-provider: the "rustls" feature would pull aws-lc-rs; ring is installed in main.
-reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2", "stream"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 http = "1"
 base64 = "0.22"

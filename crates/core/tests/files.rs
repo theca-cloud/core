@@ -11,15 +11,34 @@ async fn fs_world(pool: PgPool) -> World {
 
 impl Client {
     async fn mkdir(&self, parent: Uuid, name: &str) -> Uuid {
-        let node: api::Node = self
-            .json(
-                "POST",
-                &format!("/api/v1/nodes/{parent}/folders"),
-                &json!({ "name": name }),
-            )
-            .await
-            .unwrap();
-        node.id
+        self.folders(parent, &[name]).await.unwrap()[0].id
+    }
+
+    async fn folders(&self, parent: Uuid, paths: &[&str]) -> Result<Vec<api::FolderPath>, Failure> {
+        self.json(
+            "POST",
+            &format!("/api/v1/nodes/{parent}/folders"),
+            &json!({ "paths": paths }),
+        )
+        .await
+    }
+
+    /// `GET /nodes/{id}/tree`, its NDJSON lines.
+    async fn tree(&self, folder: Uuid) -> Result<Vec<api::TreeLine>, Failure> {
+        let (status, bytes) = self
+            .call("GET", &format!("/api/v1/nodes/{folder}/tree"), None, true)
+            .await;
+        if !status.is_success() {
+            return Err((
+                status,
+                serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+            ));
+        }
+        Ok(bytes
+            .split(|b| *b == b'\n')
+            .filter(|line| !line.is_empty())
+            .map(|line| serde_json::from_slice(line).unwrap())
+            .collect())
     }
 
     async fn info(&self, node: Uuid) -> Result<api::NodeInfo, Failure> {
@@ -93,15 +112,9 @@ async fn folders_renames_moves(pool: PgPool) {
     let docs = alice.create_library("Docs").await;
     let a = alice.mkdir(docs.root, "A").await;
     let b = alice.mkdir(docs.root, "B").await;
-    let taken = alice
-        .json::<Value>(
-            "POST",
-            &format!("/api/v1/nodes/{}/folders", docs.root),
-            &json!({ "name": "a" }),
-        )
-        .await
-        .unwrap_err();
-    assert_eq!(code(taken), (StatusCode::CONFLICT, "name_taken".into()));
+    // An existing folder (ignoring case) is kept, like `mkdir -p`.
+    let again = alice.folders(docs.root, &["a"]).await.unwrap();
+    assert_eq!((again[0].id, again[0].created), (a, false));
     let f = alice.file(&docs, a, "x.txt", &data(1000, 1)).await;
 
     // Rename, then move a folder: its contents follow.
@@ -296,14 +309,7 @@ async fn trash(pool: PgPool) {
         .await
         .unwrap_err();
     assert_eq!(edit.0, StatusCode::NOT_FOUND);
-    let inside = alice
-        .json::<Value>(
-            "POST",
-            &format!("/api/v1/nodes/{sub}/folders"),
-            &json!({ "name": "x" }),
-        )
-        .await
-        .unwrap_err();
+    let inside = alice.folders(sub, &["x"]).await.unwrap_err();
     assert_eq!(inside.0, StatusCode::NOT_FOUND);
     assert!(alice.search("a.txt").await.unwrap().is_empty());
     let listed: Vec<api::TrashEntry> = alice
@@ -794,5 +800,87 @@ async fn download_lists(pool: PgPool) {
     assert_eq!(
         code(refused),
         (StatusCode::BAD_REQUEST, "batch_too_large".into())
+    );
+}
+
+#[sqlx::test]
+async fn folder_trees(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let mut alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    let made = alice
+        .folders(docs.root, &["a", "a/b", "c/d"])
+        .await
+        .unwrap();
+    let shown: Vec<(&str, bool)> = made.iter().map(|f| (f.path.as_str(), f.created)).collect();
+    assert_eq!(shown, [("a", true), ("a/b", true), ("c/d", true)]);
+    assert_eq!(alice.children(docs.root).await, ["a", "c"]);
+    let again = alice.folders(docs.root, &["A/B", "c/d/e"]).await.unwrap();
+    assert_eq!((again[0].id, again[0].created), (made[1].id, false));
+    assert!(again[1].created);
+
+    alice
+        .upload(&docs, new_file(&docs, "f.txt"), &data(100, 1))
+        .await
+        .unwrap();
+    let blocked = alice
+        .folders(docs.root, &["new", "f.txt/x"])
+        .await
+        .unwrap_err();
+    assert_eq!(code(blocked), (StatusCode::CONFLICT, "name_taken".into()));
+    assert!(
+        !alice.children(docs.root).await.contains(&"new".to_owned()),
+        "one transaction: nothing created"
+    );
+    let invalid = alice.folders(docs.root, &["bad:name"]).await.unwrap_err();
+    assert_eq!(code(invalid).0, StatusCode::BAD_REQUEST);
+    let many: Vec<String> = (0..1001).map(|i| format!("f{i}")).collect();
+    let many: Vec<&str> = many.iter().map(String::as_str).collect();
+    assert_eq!(
+        code(alice.folders(docs.root, &many).await.unwrap_err()),
+        (StatusCode::BAD_REQUEST, "batch_too_large".into())
+    );
+}
+
+#[sqlx::test]
+async fn streamed_trees(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let mut alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    let made = alice
+        .folders(docs.root, &["a/b", "a-c", "gone/inside"])
+        .await
+        .unwrap();
+    let b = made[0].id;
+    alice.file(&docs, b, "f.txt", &data(100, 1)).await;
+    alice.file(&docs, docs.root, "top.txt", &data(100, 2)).await;
+    let gone = alice.folders(docs.root, &["gone"]).await.unwrap()[0].id;
+    alice.trash(gone).await;
+
+    let lines = alice.tree(docs.root).await.unwrap();
+    let (nodes, end) = lines.split_at(lines.len() - 1);
+    let paths: Vec<String> = nodes
+        .iter()
+        .map(|l| match l {
+            api::TreeLine::Node(n) => n.path.clone(),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    // Parents before their children; the trash left out.
+    assert_eq!(paths, ["a", "a-c", "a/b", "a/b/f.txt", "top.txt"]);
+    assert!(matches!(end[0], api::TreeLine::End { count: 5 }));
+    let file = nodes.iter().find_map(|l| match l {
+        api::TreeLine::Node(n) if n.path == "top.txt" => Some(n.clone()),
+        _ => None,
+    });
+    let file = file.unwrap();
+    assert!(file.is_file && file.current_version.is_some());
+
+    // A subfolder's own tree; a file has none.
+    let sub = alice.tree(made[0].id).await.unwrap();
+    assert_eq!(sub.len(), 2, "f.txt and the end");
+    assert_eq!(
+        code(alice.tree(file.id).await.unwrap_err()),
+        (StatusCode::BAD_REQUEST, "not_a_folder".into())
     );
 }

@@ -2715,7 +2715,7 @@
         "tags": [
           "nodes"
         ],
-        "summary": "Create a folder.",
+        "summary": "Create folders below a folder, like `mkdir -p`: each path's missing\nfolders created, existing ones kept, all in one transaction. Each path's\nfolder, in order.",
         "operationId": "create_folder",
         "parameters": [
           {
@@ -2732,19 +2732,32 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateFolder"
+                "$ref": "#/components/schemas/CreateFolders"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "201": {
+          "200": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Node"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FolderPath"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`name_invalid`, `batch_too_large`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -2760,7 +2773,7 @@
             }
           },
           "409": {
-            "description": "`name_taken`",
+            "description": "`name_taken` (a file has a path's name)",
             "content": {
               "application/json": {
                 "schema": {
@@ -2797,6 +2810,58 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Restored"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{id}/tree": {
+      "get": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "A folder's whole subtree (outside the trash) in one streamed answer: NDJSON,\none `{\"node\": ...}` line per node, parents before their children, then\n`{\"end\": {\"count\": n}}`, or `{\"error\": ...}` if it fails midway. A stream\nwithout its end line was cut.",
+        "operationId": "tree",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "NDJSON lines",
+            "content": {
+              "application/x-ndjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/TreeLine"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`not_a_folder`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -3924,16 +3989,19 @@
           }
         }
       },
-      "CreateFolder": {
+      "CreateFolders": {
         "type": "object",
-        "description": "`POST /nodes/{parent}/folders`.",
+        "description": "`POST /nodes/{parent}/folders`: folders to create in a folder, like\n`mkdir -p` (missing ones created, existing ones kept).",
         "required": [
-          "name"
+          "paths"
         ],
         "properties": {
-          "name": {
-            "type": "string",
-            "description": "Its name."
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Paths relative to the folder, `/`-separated (`a`, `a/b`); at most 1000."
           }
         }
       },
@@ -4293,6 +4361,30 @@
             "type": "integer",
             "format": "int64",
             "description": "How many versions it has."
+          }
+        }
+      },
+      "FolderPath": {
+        "type": "object",
+        "description": "A folder of `POST /nodes/{parent}/folders`, in the request's order.",
+        "required": [
+          "path",
+          "id",
+          "created"
+        ],
+        "properties": {
+          "created": {
+            "type": "boolean",
+            "description": "Created by this request (false: it existed)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The folder."
+          },
+          "path": {
+            "type": "string",
+            "description": "The path asked (names as stored)."
           }
         }
       },
@@ -5397,6 +5489,100 @@
           "name": {
             "type": "string",
             "description": "Its name."
+          }
+        }
+      },
+      "TreeLine": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A node, parents before their children.",
+            "required": [
+              "node"
+            ],
+            "properties": {
+              "node": {
+                "$ref": "#/components/schemas/TreeNode",
+                "description": "A node, parents before their children."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Every node was sent.",
+            "required": [
+              "end"
+            ],
+            "properties": {
+              "end": {
+                "type": "object",
+                "description": "Every node was sent.",
+                "required": [
+                  "count"
+                ],
+                "properties": {
+                  "count": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "How many.",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The listing failed midway.",
+            "required": [
+              "error"
+            ],
+            "properties": {
+              "error": {
+                "$ref": "#/components/schemas/ApiError",
+                "description": "The listing failed midway."
+              }
+            }
+          }
+        ],
+        "description": "One line of `GET /nodes/{id}/tree` (NDJSON): a node, then the end (with\nhow many nodes came) or an error. A stream without its end line is cut."
+      },
+      "TreeNode": {
+        "type": "object",
+        "description": "A node of `GET /nodes/{id}/tree`.",
+        "required": [
+          "id",
+          "path",
+          "is_file"
+        ],
+        "properties": {
+          "current_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "A file's current version."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The node."
+          },
+          "is_file": {
+            "type": "boolean",
+            "description": "A file (true) or a folder (false)."
+          },
+          "modified": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A file's current version date."
+          },
+          "path": {
+            "type": "string",
+            "description": "Its path below the listed folder (`a`, `a/b.txt`)."
           }
         }
       },

@@ -222,12 +222,40 @@ impl Client {
         self.get(&format!("/api/v1/nodes/{folder}/children")).await
     }
 
-    pub async fn create_folder(&self, parent: Uuid, name: &str) -> Result<api::Node, Error> {
+    /// Folders below `parent`, like `mkdir -p` (`a`, `a/b`): each path's
+    /// folder, in order, created or existing (at most 1000 paths).
+    pub async fn create_folders(
+        &self,
+        parent: Uuid,
+        paths: &[String],
+    ) -> Result<Vec<api::FolderPath>, Error> {
         self.post(
             &format!("/api/v1/nodes/{parent}/folders"),
-            &serde_json::json!({ "name": name }),
+            &api::CreateFolders {
+                paths: paths.to_vec(),
+            },
         )
         .await
+    }
+
+    /// A folder's whole subtree, as it streams in: its nodes, parents before
+    /// their children. A stream cut before its end line ends with an error,
+    /// never passes for a complete listing.
+    pub async fn tree(
+        &self,
+        folder: Uuid,
+    ) -> Result<impl futures::Stream<Item = Result<api::TreeNode, Error>> + use<>, Error> {
+        let response = self
+            .request(Method::GET, &format!("/api/v1/nodes/{folder}/tree"))
+            .send()
+            .await?;
+        if !response.status().is_success() {
+            return Err(decode::<serde_json::Value>(response)
+                .await
+                .err()
+                .unwrap_or(Error::Decode("an error without an error".into())));
+        }
+        Ok(tree_lines(response.bytes_stream()))
     }
 
     pub async fn create_app_password(
@@ -487,4 +515,124 @@ fn session_cookie(headers: &reqwest::header::HeaderMap) -> Option<String> {
                 .map(str::to_owned)
         })
         .filter(|t| !t.is_empty())
+}
+
+/// NDJSON tree lines into nodes, checking the end line (and its count).
+fn tree_lines<B>(bytes: B) -> impl futures::Stream<Item = Result<api::TreeNode, Error>>
+where
+    B: futures::Stream<Item = reqwest::Result<bytes::Bytes>>,
+{
+    use futures::StreamExt;
+    struct Lines<B> {
+        bytes: std::pin::Pin<Box<B>>,
+        buffer: Vec<u8>,
+        received: u64,
+        over: bool,
+    }
+    let start = Lines {
+        bytes: Box::pin(bytes),
+        buffer: Vec::new(),
+        received: 0,
+        over: false,
+    };
+    futures::stream::unfold(start, |mut s| async move {
+        if s.over {
+            return None;
+        }
+        loop {
+            if let Some(end) = s.buffer.iter().position(|b| *b == b'\n') {
+                let line: Vec<u8> = s.buffer.drain(..=end).collect();
+                let item = match serde_json::from_slice::<api::TreeLine>(&line[..end]) {
+                    Ok(api::TreeLine::Node(node)) => {
+                        s.received += 1;
+                        Ok(node)
+                    }
+                    Ok(api::TreeLine::End { count }) if count == s.received => return None,
+                    Ok(api::TreeLine::End { count }) => Err(Error::Decode(format!(
+                        "the tree announced {count} nodes, {} came",
+                        s.received
+                    ))),
+                    Ok(api::TreeLine::Error(error)) => Err(Error::Api { status: 500, error }),
+                    Err(e) => Err(Error::Decode(e.to_string())),
+                };
+                s.over = item.is_err();
+                return Some((item, s));
+            }
+            match s.bytes.next().await {
+                Some(Ok(chunk)) => s.buffer.extend_from_slice(&chunk),
+                Some(Err(e)) => {
+                    s.over = true;
+                    return Some((Err(e.into()), s));
+                }
+                None => {
+                    s.over = true;
+                    return Some((
+                        Err(Error::Decode("the tree was cut before its end".into())),
+                        s,
+                    ));
+                }
+            }
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::StreamExt;
+
+    use super::*;
+
+    fn node(path: &str) -> String {
+        format!(
+            r#"{{"node":{{"id":"{}","path":"{path}","is_file":true,"modified":null,"current_version":null}}}}"#,
+            Uuid::nil()
+        )
+    }
+
+    /// The bytes as they'd come, in arbitrary pieces.
+    async fn read(pieces: Vec<String>) -> Vec<Result<String, String>> {
+        let bytes = futures::stream::iter(
+            pieces
+                .into_iter()
+                .map(|p| Ok::<_, reqwest::Error>(bytes::Bytes::from(p))),
+        );
+        tree_lines(bytes)
+            .map(|r| r.map(|n| n.path).map_err(|e| e.to_string()))
+            .collect()
+            .await
+    }
+
+    #[tokio::test]
+    async fn complete() {
+        let whole = format!(
+            "{}\n{}\n{{\"end\":{{\"count\":2}}}}\n",
+            node("a"),
+            node("a/b")
+        );
+        // Split in the middle of a line: lines are rebuilt across pieces.
+        let (one, two) = whole.split_at(30);
+        let got = read(vec![one.into(), two.into()]).await;
+        assert_eq!(got, [Ok("a".into()), Ok("a/b".into())]);
+    }
+
+    #[tokio::test]
+    async fn cut_before_the_end() {
+        let got = read(vec![format!("{}\n", node("a"))]).await;
+        assert_eq!(got[0], Ok("a".into()));
+        assert!(got[1].as_ref().unwrap_err().contains("cut before its end"));
+        assert_eq!(got.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn wrong_count_or_error() {
+        let got = read(vec![format!(
+            "{}\n{{\"end\":{{\"count\":3}}}}\n",
+            node("a")
+        )])
+        .await;
+        assert!(got[1].as_ref().unwrap_err().contains("3 nodes, 1 came"));
+        let failed = r#"{"error":{"code":"internal","message":"boom","chunks":[]}}"#;
+        let got = read(vec![format!("{failed}\n")]).await;
+        assert!(got[0].as_ref().unwrap_err().contains("boom"));
+    }
 }
