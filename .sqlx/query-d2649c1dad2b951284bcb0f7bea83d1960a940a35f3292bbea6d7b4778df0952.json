@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT n.uuid AS id, n.name,\n                  ARRAY(SELECT l.uuid FROM library_namespace ln JOIN library l ON l.pk = ln.library\n                        WHERE ln.namespace = n.pk ORDER BY lower(l.name)) AS \"libraries!\"\n           FROM namespace n WHERE n.organization = $1 ORDER BY lower(n.name)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "libraries!",
+        "type_info": "UuidArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "d2649c1dad2b951284bcb0f7bea83d1960a940a35f3292bbea6d7b4778df0952"
+}

@@ -1,9 +1,11 @@
-//! An organization's members: the owner adds (an existing account joins at
-//! once, another address is invited) and removes them.
+//! Organizations: any account creates company ones (unless the setting
+//! `organization_creation` keeps it to admins); their owner renames them and
+//! manages their members (an existing account joins at once, another address
+//! is invited).
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::{delete, get};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use theca_common::api;
 use uuid::Uuid;
@@ -17,9 +19,13 @@ use crate::db::organization::{Added, Owned, RemoveError};
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/organizations", post(create))
         .route("/organizations/{id}/members", get(members).post(add))
         .route("/organizations/{id}/members/{user}", delete(remove))
-        .route("/organizations/{id}", delete(delete_organization))
+        .route(
+            "/organizations/{id}",
+            get(organization).patch(rename).delete(delete_organization),
+        )
         .route("/organizations/{id}/owner", axum::routing::post(transfer))
         .route(
             "/organizations/{id}/identity-providers",
@@ -32,11 +38,105 @@ pub fn router() -> Router<AppState> {
 }
 
 /// The owner, from a full session.
-async fn owned(state: &AppState, account: &CurrentAccount, id: Uuid) -> Result<Owned, HttpError> {
+pub(super) async fn owned(
+    state: &AppState,
+    account: &CurrentAccount,
+    id: Uuid,
+) -> Result<Owned, HttpError> {
     account.require_full_session()?;
     db::organization::owned(&state.pool, account, id)
         .await?
         .ok_or_else(|| HttpError::not_found("organization"))
+}
+
+/// An organization's name: trimmed, not empty.
+pub(super) fn name(name: &str) -> Result<&str, HttpError> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(HttpError::bad_request(
+            "invalid_name",
+            "the organization needs a name",
+        ));
+    }
+    Ok(name)
+}
+
+/// Create a company organization, owned by the account (from a full session;
+/// instance admins only when `organization_creation` is `admins`).
+#[utoipa::path(post, path = "/api/v1/organizations", request_body = api::OrganizationName, responses(
+    (status = 201, body = api::Organization),
+    (status = 400, description = "`invalid_name`", body = api::ApiError),
+    (status = 403, description = "`organization_creation_closed`", body = api::ApiError),
+))]
+pub async fn create(
+    State(state): State<AppState>,
+    account: CurrentAccount,
+    ApiJson(request): ApiJson<api::OrganizationName>,
+) -> Result<(StatusCode, Json<api::Organization>), HttpError> {
+    account.require_full_session()?;
+    let name = name(&request.name)?;
+    if !state.settings.get().organization_creation_open {
+        let admin = sqlx::query_scalar!(
+            "SELECT instance_admin FROM account WHERE pk = $1",
+            account.account
+        )
+        .fetch_one(&state.pool)
+        .await?;
+        if !admin {
+            return Err(
+                HttpError::forbidden("only instance admins create organizations")
+                    .into_code("organization_creation_closed"),
+            );
+        }
+    }
+    let mut tx = state.pool.begin().await?;
+    let pk = db::organization::create(&mut tx, account.account, name, false).await?;
+    tx.commit().await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(db::organization::details(&state.pool, pk, account.account).await?),
+    ))
+}
+
+/// An organization, with its quota and usage (any member).
+#[utoipa::path(get, path = "/api/v1/organizations/{id}", params(("id" = Uuid, Path)), responses(
+    (status = 200, body = api::Organization),
+    (status = 404, body = api::ApiError),
+))]
+pub async fn organization(
+    State(state): State<AppState>,
+    account: CurrentAccount,
+    Path(id): Path<Uuid>,
+) -> Result<Json<api::Organization>, HttpError> {
+    let pk = db::organization::joined(&state.pool, &account, id)
+        .await?
+        .ok_or_else(|| HttpError::not_found("organization"))?;
+    Ok(Json(
+        db::organization::details(&state.pool, pk, account.account).await?,
+    ))
+}
+
+/// Rename a company organization (the owner).
+#[utoipa::path(patch, path = "/api/v1/organizations/{id}", params(("id" = Uuid, Path)), request_body = api::OrganizationName, responses(
+    (status = 200, body = api::Organization),
+    (status = 400, description = "`invalid_name`", body = api::ApiError),
+    (status = 404, body = api::ApiError),
+    (status = 409, description = "`personal_organization`", body = api::ApiError),
+))]
+pub async fn rename(
+    State(state): State<AppState>,
+    account: CurrentAccount,
+    Path(id): Path<Uuid>,
+    ApiJson(request): ApiJson<api::OrganizationName>,
+) -> Result<Json<api::Organization>, HttpError> {
+    let organization = owned(&state, &account, id).await?;
+    if organization.personal {
+        return Err(personal());
+    }
+    db::organization::rename(&state.pool, organization.pk, name(&request.name)?).await?;
+    Ok(Json(
+        db::organization::details(&state.pool, organization.pk, account.account).await?,
+    ))
 }
 
 /// The organization's members and pending invitations (any member).

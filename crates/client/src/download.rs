@@ -1,19 +1,25 @@
-//! Downloads (native): a staged engine, like uploads. Files are submitted;
-//! their manifests are fetched in batches, their chunks several at once from
-//! any files (presigned URLs), decompressed, checked against their hash, and
+//! Downloads: a staged engine, like uploads. Files are submitted; their
+//! manifests are fetched in batches, their chunks several at once from any
+//! files (presigned URLs), decompressed, checked against their hash, and
 //! written at their offset: they may arrive in any order. A file is complete
-//! once all its chunks are written. (The web app downloads through the
-//! server's streaming endpoint in V1.)
+//! once all its chunks are written.
+//!
+//! A destination written from start to end only (a browser download) takes
+//! [`stream`] instead: one file's chunks, in order.
 
-use std::io::{self, BufReader, Seek, SeekFrom, Write};
+use std::io;
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{BufReader, Seek, SeekFrom, Write};
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use futures::StreamExt;
 use futures::channel::{mpsc, oneshot};
 use futures::future::{Either, select};
+use futures::{Stream, StreamExt};
 use theca_common::api;
+#[cfg(not(target_arch = "wasm32"))]
 use theca_common::chunking::chunks;
 use theca_common::compression::decompress;
 use theca_common::hash::ChunkHash;
@@ -43,8 +49,9 @@ pub struct DownloadOptions {
 impl Default for DownloadOptions {
     fn default() -> Self {
         Self {
-            // Measured (the CLI's roadmap/07): 16 at once, 30 % faster than 8.
-            parallel: 16,
+            // Measured (the CLI's roadmap/07): 16 at once, 30 % faster than 8;
+            // a browser tab keeps 4 (memory), as for uploads.
+            parallel: if cfg!(target_arch = "wasm32") { 4 } else { 16 },
             verify: true,
             skip_identical: false,
             flush: Duration::from_millis(20),
@@ -91,15 +98,18 @@ pub trait Sink: MaybeSync {
     fn abort(&self);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// A local file, written as `<name>.theca-part` and renamed over `<name>` once
 /// complete: an interrupted download never leaves a truncated file under the
 /// real name. Opened at the first write, closed at the end.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct FileSink {
     target: PathBuf,
     part: PathBuf,
     file: Mutex<Option<std::fs::File>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl FileSink {
     pub fn new(target: &Path) -> Self {
         let mut part = target
@@ -114,6 +124,7 @@ impl FileSink {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Sink for FileSink {
     /// The local file chunked and hashed as an upload would be, compared.
     fn holds(&self, expected: &[(ChunkHash, u64)]) -> io::Result<bool> {
@@ -201,6 +212,45 @@ pub async fn download(
     let downloaded = downloader.submit(file, version, sink);
     drop(downloader);
     futures::join!(run, downloaded).1
+}
+
+/// A file's content in order (its current version, or `version`), chunk by
+/// chunk: `parallel` chunks fetched at once and at most that many held,
+/// nothing fetched until asked, so a slow reader slows the download. Each
+/// chunk is checked as in the engine; an expired URL asks the manifest again.
+pub fn stream(
+    client: Client,
+    file: Uuid,
+    version: Option<Uuid>,
+    options: DownloadOptions,
+) -> impl Stream<Item = Result<Vec<u8>, Error>> + 'static {
+    let shared = Arc::new((client, options));
+    futures::stream::once(async move {
+        let (client, options) = &*shared;
+        let requests = [api::DownloadFile { file, version }];
+        let manifest = retry(options.retries, || client.manifests(&requests))
+            .await?
+            .remove(0)?;
+        let request = api::DownloadFile {
+            file,
+            version: Some(manifest.version),
+        };
+        let parallel = options.parallel.max(1);
+        let shared = shared.clone();
+        Ok::<_, Error>(
+            futures::stream::iter(manifest.chunks)
+                .map(move |chunk| {
+                    let shared = shared.clone();
+                    async move { fetch_chunk(&shared.0, request, &chunk, &shared.1).await }
+                })
+                .buffered(parallel),
+        )
+    })
+    .map(|chunks| match chunks {
+        Ok(chunks) => chunks.left_stream(),
+        Err(e) => futures::stream::once(std::future::ready(Err(e))).right_stream(),
+    })
+    .flatten()
 }
 
 struct File<'a> {
@@ -534,15 +584,33 @@ async fn fetch_stage<P: FnMut(&DownloadProgress)>(
     .await;
 }
 
-/// One chunk: fetched from its presigned URL (an expired one is asked again
-/// with the file's manifest, once), decompressed, checked.
+/// One chunk of a file in the engine.
 async fn fetch<P: FnMut(&DownloadProgress)>(
     state: &Shared<'_, P>,
     client: &Client,
     job: &Job,
     options: &DownloadOptions,
 ) -> Result<Vec<u8>, Error> {
-    let mut url = job.chunk.url.clone();
+    let request = {
+        let s = lock(state);
+        let file = &s.files[job.file];
+        api::DownloadFile {
+            file: file.request.file,
+            version: file.version,
+        }
+    };
+    fetch_chunk(client, request, &job.chunk, options).await
+}
+
+/// One chunk of `request`'s file: fetched from its presigned URL (an expired
+/// one is asked again with the file's manifest, once), decompressed, checked.
+async fn fetch_chunk(
+    client: &Client,
+    request: api::DownloadFile,
+    chunk: &api::DownloadChunk,
+    options: &DownloadOptions,
+) -> Result<Vec<u8>, Error> {
+    let mut url = chunk.url.clone();
     let mut renewed = false;
     let stored = loop {
         let result = retry(options.retries, || async {
@@ -550,7 +618,7 @@ async fn fetch<P: FnMut(&DownloadProgress)>(
             let status = response.status();
             if !status.is_success() {
                 return Err(Error::Storage {
-                    chunk: job.chunk.chunk,
+                    chunk: chunk.chunk,
                     status: status.as_u16(),
                 });
             }
@@ -561,31 +629,23 @@ async fn fetch<P: FnMut(&DownloadProgress)>(
             // Expired (the manifest was fetched long ago): a fresh one.
             Err(Error::Storage { status: 403, .. }) if !renewed => {
                 renewed = true;
-                let request = {
-                    let s = lock(state);
-                    let file = &s.files[job.file];
-                    api::DownloadFile {
-                        file: file.request.file,
-                        version: file.version,
-                    }
-                };
                 let manifest = client.manifests(&[request]).await?.remove(0)?;
                 url = manifest
                     .chunks
                     .into_iter()
-                    .find(|c| c.chunk == job.chunk.chunk)
+                    .find(|c| c.chunk == chunk.chunk)
                     .ok_or_else(|| Error::Decode("a chunk gone from its manifest".into()))?
                     .url;
             }
             other => break other?,
         }
     };
-    let plain = decompress(job.chunk.compression, &stored)
-        .map_err(|_| Error::Corrupted(job.chunk.chunk))?;
+    let plain =
+        decompress(chunk.compression, &stored).map_err(|_| Error::Corrupted(chunk.chunk))?;
     if options.verify
-        && (plain.len() as u64 != job.chunk.plain_size || ChunkHash::of(&plain) != job.chunk.hash)
+        && (plain.len() as u64 != chunk.plain_size || ChunkHash::of(&plain) != chunk.hash)
     {
-        return Err(Error::Corrupted(job.chunk.chunk));
+        return Err(Error::Corrupted(chunk.chunk));
     }
     Ok(plain)
 }

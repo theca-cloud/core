@@ -92,6 +92,9 @@ pub enum CreateError {
     /// Not a (joined) member of the organization, outside the credential's
     /// scope, or read-only.
     NotMember,
+    /// Namespaces asked by someone other than the organization's owner: a
+    /// member could otherwise join a library's namespace to probe its content.
+    NotOwner,
     NoStorage,
     UnknownNamespaces(Vec<Uuid>),
     Db(sqlx::Error),
@@ -123,6 +126,18 @@ pub async fn create(
     .await?
     .ok_or(CreateError::NotMember)?;
     let (creator, organization_uuid, organization) = (member.pk, organization, member.organization);
+    if !namespaces.is_empty() {
+        let owner = sqlx::query_scalar!(
+            r#"SELECT owner = $2 AS "owner!" FROM organization WHERE pk = $1"#,
+            organization,
+            creator
+        )
+        .fetch_one(&mut **tx)
+        .await?;
+        if !owner {
+            return Err(CreateError::NotOwner);
+        }
+    }
 
     let storage = sqlx::query_scalar!(
         r#"SELECT COALESCE(
@@ -191,6 +206,7 @@ pub async fn create(
         organization: organization_uuid,
         name: name.to_owned(),
         root,
+        writable: true,
     })
 }
 
@@ -199,7 +215,8 @@ pub async fn create(
 pub async fn list(pool: &PgPool, who: &Credential) -> sqlx::Result<Vec<api::Library>> {
     sqlx::query_as!(
         api::Library,
-        r#"SELECT l.uuid AS id, o.uuid AS organization, l.name, n.uuid AS root
+        r#"SELECT l.uuid AS id, o.uuid AS organization, l.name, n.uuid AS root,
+                  a.can_write AS "writable!"
            FROM library_access($1) a
            JOIN library l ON l.pk = a.library
            JOIN organization o ON o.pk = l.owner
@@ -225,16 +242,18 @@ pub async fn children(pool: &PgPool, folder: i64) -> sqlx::Result<Vec<api::Node>
     .await
 }
 
-/// A library as the API shows it.
-pub async fn get(pool: &PgPool, library: i64) -> sqlx::Result<api::Library> {
+/// A library as the API shows it, to an account with `access`.
+pub async fn get(pool: &PgPool, access: &Access) -> sqlx::Result<api::Library> {
     sqlx::query_as!(
         api::Library,
-        r#"SELECT l.uuid AS id, o.uuid AS organization, l.name, n.uuid AS root
+        r#"SELECT l.uuid AS id, o.uuid AS organization, l.name, n.uuid AS root,
+                  $2::boolean AS "writable!"
            FROM library l
            JOIN organization o ON o.pk = l.owner
            JOIN node n ON n.library = l.pk AND n.parent IS NULL
            WHERE l.pk = $1"#,
-        library
+        access.library,
+        access.can_write
     )
     .fetch_one(pool)
     .await

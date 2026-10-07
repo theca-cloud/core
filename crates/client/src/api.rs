@@ -30,9 +30,34 @@ pub enum Error {
     /// The storage refused a presigned upload or download.
     #[error("the storage answered HTTP {status} for chunk {chunk}")]
     Storage { chunk: Uuid, status: u16 },
+    /// A name the server would refuse (checked before asking it).
+    #[error("invalid name: {0}")]
+    InvalidName(String),
+    /// A file goes where a folder has its name.
+    #[error("{0}: a folder has this name")]
+    FolderExists(String),
 }
 
 impl Error {
+    /// A stable code for every error, as the API's (`name_taken`,
+    /// `quota_exceeded`, ...) when the server refused, the client's otherwise:
+    /// what a UI shows its message by.
+    pub fn kind(&self) -> &str {
+        match self {
+            Error::Api { error, .. } => &error.code,
+            Error::Http(_) => "network",
+            Error::Decode(_) => "unexpected_answer",
+            Error::Io(_) => "io",
+            Error::Version => "unsupported_server",
+            Error::Cancelled => "cancelled",
+            Error::SourceChanged => "source_changed",
+            Error::Corrupted(_) => "corrupted",
+            Error::Storage { .. } => "storage",
+            Error::InvalidName(_) => "invalid_name",
+            Error::FolderExists(_) => "folder_exists",
+        }
+    }
+
     /// The server's error code (`name_taken`, `chunk_missing`, ...), if any.
     pub fn code(&self) -> Option<&str> {
         match self {

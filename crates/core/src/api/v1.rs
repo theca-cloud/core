@@ -79,7 +79,7 @@ async fn update_library(
 ) -> Result<Json<api::Library>, HttpError> {
     let access = library_access(&state, &user, id).await?;
     crate::files::rename_library(&state, &access, req.name.as_str()).await?;
-    Ok(Json(db::library::get(&state.pool, access.library).await?))
+    Ok(Json(db::library::get(&state.pool, &access).await?))
 }
 
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
@@ -124,7 +124,7 @@ async fn restore_library(
 ) -> Result<Json<api::Library>, HttpError> {
     let access = trashed_library(&state, &user, id).await?;
     crate::files::restore_library(&state, &access).await?;
-    Ok(Json(db::library::get(&state.pool, access.library).await?))
+    Ok(Json(db::library::get(&state.pool, &access).await?))
 }
 
 /// An organization's trashed libraries (those the account is a member of).
@@ -165,6 +165,7 @@ async fn backend(state: &AppState, storage: i64) -> Result<Backend, HttpError> {
 /// namespaces. Storage: the organization's default, else the instance default.
 #[utoipa::path(post, path = "/api/v1/libraries", request_body = api::CreateLibrary, responses(
     (status = 201, body = api::Library),
+    (status = 403, description = "`owner_required`: namespaces are the owner's", body = api::ApiError),
     (status = 404, description = "Unknown namespace", body = api::ApiError),
     (status = 409, description = "Name taken, or no storage configured", body = api::ApiError),
 ))]
@@ -185,6 +186,10 @@ async fn create_library(
     .await
     .map_err(|e| match e {
         CreateError::NotMember => HttpError::not_found("organization"),
+        CreateError::NotOwner => {
+            HttpError::forbidden("only the organization's owner puts libraries in namespaces")
+                .into_code("owner_required")
+        }
         CreateError::NoStorage => {
             HttpError::conflict("no_storage", "no default storage configured")
         }

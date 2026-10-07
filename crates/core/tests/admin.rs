@@ -421,3 +421,123 @@ async fn identity_providers(pool: PgPool) {
         StatusCode::NO_CONTENT
     );
 }
+
+#[sqlx::test]
+async fn organizations_by_their_users(pool: PgPool) {
+    let w = admin_world(pool).await;
+    let mut admin = w.as_user(1).await;
+    let bob = w.as_user(2).await;
+    let carol = w.as_user(3).await;
+
+    // Any account creates one, and owns it.
+    let created: api::Organization = bob
+        .json(
+            "POST",
+            "/api/v1/organizations",
+            &json!({ "name": " Bob Ltd " }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        (
+            created.name.as_str(),
+            created.owner,
+            created.personal,
+            created.used
+        ),
+        ("Bob Ltd", true, false, 0)
+    );
+    let me: api::Me = bob.get("/api/v1/me").await.unwrap();
+    assert!(
+        me.organizations
+            .iter()
+            .any(|o| o.organization == created.id && o.owner)
+    );
+    let empty = bob
+        .json::<Value>("POST", "/api/v1/organizations", &json!({ "name": " " }))
+        .await
+        .unwrap_err();
+    assert_eq!(code(empty), "invalid_name");
+
+    // Its owner renames it; others don't see it.
+    let path = format!("/api/v1/organizations/{}", created.id);
+    let renamed: api::Organization = bob
+        .json("PATCH", &path, &json!({ "name": "Bob SA" }))
+        .await
+        .unwrap();
+    assert_eq!(renamed.name, "Bob SA");
+    assert_eq!(
+        carol.get::<Value>(&path).await.unwrap_err().0,
+        StatusCode::NOT_FOUND
+    );
+    let refused = carol
+        .json::<Value>("PATCH", &path, &json!({ "name": "Mine" }))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.0, StatusCode::NOT_FOUND);
+
+    // Every member sees the quota and the usage; only the owner can rename.
+    let one = w.organizations[0];
+    let docs = admin.create_library("Docs").await;
+    admin
+        .upload(
+            &docs,
+            json!({ "parent": docs.root, "name": "a" }),
+            &data(5000, 1),
+        )
+        .await
+        .unwrap();
+    admin
+        .json::<Value>(
+            "PATCH",
+            &format!("/api/v1/admin/organizations/{one}"),
+            &json!({ "quota": 1_000_000 }),
+        )
+        .await
+        .unwrap();
+    let seen: api::Organization = bob
+        .get(&format!("/api/v1/organizations/{one}"))
+        .await
+        .unwrap();
+    assert_eq!((seen.quota, seen.owner), (Some(1_000_000), false));
+    assert!(seen.used > 0);
+    let refused = bob
+        .json::<Value>(
+            "PATCH",
+            &format!("/api/v1/organizations/{one}"),
+            &json!({ "name": "x" }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(refused.0, StatusCode::NOT_FOUND);
+
+    // `organization_creation = admins`: instance admins only.
+    admin
+        .json::<Value>(
+            "PATCH",
+            "/api/v1/admin/settings",
+            &json!({ "organization_creation": "admins" }),
+        )
+        .await
+        .unwrap();
+    let closed = bob
+        .json::<Value>(
+            "POST",
+            "/api/v1/organizations",
+            &json!({ "name": "Another" }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        (closed.0, code(closed.clone())),
+        (StatusCode::FORBIDDEN, "organization_creation_closed".into())
+    );
+    admin
+        .json::<api::Organization>(
+            "POST",
+            "/api/v1/organizations",
+            &json!({ "name": "Admin Co" }),
+        )
+        .await
+        .unwrap();
+}

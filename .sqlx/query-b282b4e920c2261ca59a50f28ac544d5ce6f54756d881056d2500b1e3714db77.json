@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT u.uuid, a.email, u.joined_at IS NOT NULL AS \"joined!\", m.role\n           FROM library_member m JOIN \"user\" u ON u.pk = m.\"user\" JOIN account a ON a.pk = u.account\n           WHERE m.library = $1 ORDER BY lower(a.email)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "joined!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "role",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      false
+    ]
+  },
+  "hash": "b282b4e920c2261ca59a50f28ac544d5ce6f54756d881056d2500b1e3714db77"
+}

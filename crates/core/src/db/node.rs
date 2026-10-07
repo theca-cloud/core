@@ -12,12 +12,22 @@ use uuid::Uuid;
 use super::account::Credential;
 use super::library::{Access, NodeAccess};
 
-/// A node with its library and path.
+/// A node with its library, its ancestors and its path: one climb to the
+/// root (as `node_path`), the path being the ancestors' names joined.
 pub async fn info(pool: &PgPool, node: i64) -> sqlx::Result<api::NodeInfo> {
-    sqlx::query_as!(
-        api::NodeInfo,
-        r#"SELECT n.uuid AS id, l.uuid AS library, n.name, n.is_file, p.uuid AS "parent?",
-                  node_path(n.pk) AS "path!", v.uuid AS "current_version?", v.size AS "size?"
+    let r = sqlx::query!(
+        r#"WITH RECURSIVE up (pk, depth) AS (
+               SELECT parent, 1 FROM node WHERE pk = $1 AND parent IS NOT NULL
+               UNION ALL
+               SELECT n.parent, up.depth + 1 FROM node n JOIN up ON n.pk = up.pk
+               WHERE n.parent IS NOT NULL
+           )
+           SELECT n.uuid AS id, l.uuid AS library, n.name, n.is_file, p.uuid AS "parent?",
+                  v.uuid AS "current_version?", v.size AS "size?",
+                  ARRAY(SELECT a.uuid FROM up JOIN node a ON a.pk = up.pk ORDER BY up.depth DESC)
+                      AS "ancestor_ids!",
+                  ARRAY(SELECT a.name FROM up JOIN node a ON a.pk = up.pk ORDER BY up.depth DESC)
+                      AS "ancestor_names!"
            FROM node n
            JOIN library l ON l.pk = n.library
            LEFT JOIN node p ON p.pk = n.parent
@@ -26,7 +36,38 @@ pub async fn info(pool: &PgPool, node: i64) -> sqlx::Result<api::NodeInfo> {
         node
     )
     .fetch_one(pool)
-    .await
+    .await?;
+    let ancestors: Vec<api::Ancestor> = r
+        .ancestor_ids
+        .into_iter()
+        .zip(r.ancestor_names)
+        .map(|(id, name)| api::Ancestor { id, name })
+        .collect();
+    let mut path = String::new();
+    for name in ancestors
+        .iter()
+        .map(|a| a.name.as_str())
+        .chain([r.name.as_str()])
+    {
+        if !name.is_empty() {
+            path.push('/');
+            path.push_str(name);
+        }
+    }
+    if path.is_empty() {
+        path.push('/');
+    }
+    Ok(api::NodeInfo {
+        id: r.id,
+        library: r.library,
+        name: r.name,
+        is_file: r.is_file,
+        parent: r.parent,
+        path,
+        ancestors,
+        current_version: r.current_version,
+        size: r.size,
+    })
 }
 
 /// Creates a folder.

@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT o.uuid AS id, o.name, o.personal_of IS NOT NULL AS \"personal!\",\n                  EXISTS (SELECT 1 FROM \"user\" u WHERE u.pk = o.owner AND u.account = $2) AS \"owner!\",\n                  o.quota,\n                  (SELECT coalesce(sum(c.stored_size), 0)::bigint FROM chunk c WHERE c.organization = o.pk)\n                      AS \"used!\"\n           FROM organization o WHERE o.pk = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "personal!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "owner!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "quota",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "used!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null,
+      true,
+      null
+    ]
+  },
+  "hash": "611ef3fed1e7674177d7e8ef156bae8bbf3fa83facee3ba1322c7ea40c3ff00e"
+}

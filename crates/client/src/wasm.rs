@@ -1,19 +1,27 @@
-//! The browser package (`wasm-pack`): a thin API over the engine for the web
-//! app. The session cookie goes with every request (`credentials: include`);
-//! JavaScript never sees it.
+//! The browser package (`wasm-pack`): a thin API over the engines for the web
+//! app, which runs it in a Web Worker. The session cookie goes with every
+//! request (`credentials: include`); JavaScript never sees it. Errors reach
+//! JavaScript as `{ code, message }` (`Error::kind`).
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::io;
 
-use theca_common::name::Name;
+use futures::channel::{mpsc, oneshot};
+use futures::future::{Either, join_all, select};
+use futures::{StreamExt, TryStreamExt};
+use serde::Serialize;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 use crate::Client;
+use crate::api::Error;
+use crate::download::{DownloadOptions, stream};
+use crate::place::place;
 use crate::rt::BoxFuture;
 use crate::source::Source;
-use crate::upload::{Cancel, Target, UploadOptions, UploadProgress, upload};
+use crate::upload::{Cancel, UploadOptions, UploadProgress, Uploader};
 
 /// A browser `Blob` (a `File` from an `<input>` or a drop), read by slices.
 struct BlobSource(web_sys::Blob);
@@ -38,67 +46,231 @@ impl Source for BlobSource {
     }
 }
 
+/// What `upload` reports to its `on_event`.
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+enum Event<'a> {
+    /// Every file's bytes together.
+    Progress {
+        total: u64,
+        hashed: u64,
+        uploaded: u64,
+        skipped: u64,
+    },
+    /// A file committed.
+    Done {
+        path: &'a str,
+        file: Uuid,
+        version: Uuid,
+        conflict: bool,
+        unchanged: bool,
+    },
+    /// A file failed (the others go on).
+    Failed {
+        path: &'a str,
+        code: &'a str,
+        message: String,
+    },
+}
+
+fn emit(on_event: &js_sys::Function, event: &Event) {
+    if let Ok(json) = serde_json::to_string(event)
+        && let Ok(value) = js_sys::JSON::parse(&json)
+    {
+        let _ = on_event.call1(&JsValue::NULL, &value);
+    }
+}
+
+fn failed(on_event: &js_sys::Function, path: &str, e: &Error) {
+    emit(
+        on_event,
+        &Event::Failed {
+            path,
+            code: e.kind(),
+            message: e.to_string(),
+        },
+    );
+}
+
+/// An error as JavaScript gets it: `{ code, message }`.
+fn js_error(e: &Error) -> JsValue {
+    let json = serde_json::json!({ "code": e.kind(), "message": e.to_string() }).to_string();
+    js_sys::JSON::parse(&json).unwrap_or(JsValue::NULL)
+}
+
+fn uuid(value: &str) -> Result<Uuid, JsValue> {
+    Uuid::parse_str(value).map_err(|e| js_error(&Error::Decode(e.to_string())))
+}
+
+/// A cancel for an upload run: one file (`Some(path)`), or all (`None`).
+type CancelSender = mpsc::UnboundedSender<Option<String>>;
+
 /// The client for the web app.
 #[wasm_bindgen]
 pub struct ThecaClient {
     client: Client,
-    cancel: RefCell<Cancel>,
+    uploads: RefCell<HashMap<u32, CancelSender>>,
 }
 
 #[wasm_bindgen]
 impl ThecaClient {
     /// A client for the server at `base_url` (usually the page's origin).
     #[wasm_bindgen(constructor)]
-    pub fn new(base_url: &str) -> Result<ThecaClient, JsError> {
+    pub fn new(base_url: &str) -> Result<ThecaClient, JsValue> {
         Ok(Self {
-            client: Client::new(base_url)?,
-            cancel: RefCell::default(),
+            client: Client::new(base_url).map_err(|e| js_error(&e))?,
+            uploads: RefCell::default(),
         })
     }
 
-    /// Uploads `file` as `name` into the folder `parent` of `library`.
-    /// `on_progress` gets `{ total, hashed, uploaded, skipped }` (bytes).
-    /// Resolves to `{ file, version, conflict }`.
+    /// Uploads `entries` (`[{ path, file }]`, `path` below the folder: `a.txt`,
+    /// or `a/b/c.txt` for a folder's files) into the folder `folder` of
+    /// `library`, as the run `id` (to cancel it). `folders`: empty folders to
+    /// create too (`a/empty`). A name already there gets a new version.
+    /// `message`: the versions' description.
+    ///
+    /// `on_event` gets `{ kind: "progress", total, hashed, uploaded, skipped }`
+    /// (bytes, every file together), and each file's outcome: `{ kind: "done",
+    /// path, file, version, conflict, unchanged }` or `{ kind: "failed", path,
+    /// code, message }`. Resolves once every file is done or failed; rejects
+    /// with `{ code, message }` when nothing could start (folders not created).
+    #[allow(clippy::too_many_arguments)]
     pub async fn upload(
         &self,
-        file: web_sys::File,
+        id: u32,
+        entries: js_sys::Array,
+        folders: Vec<String>,
         library: String,
-        parent: String,
-        name: String,
-        on_progress: js_sys::Function,
-    ) -> Result<JsValue, JsError> {
-        let cancel = Cancel::default();
-        *self.cancel.borrow_mut() = cancel.clone();
-        let target = Target::New {
-            library: Uuid::parse_str(&library)?,
-            parent: Uuid::parse_str(&parent)?,
-            name: Name::new(&name).map_err(|e| JsError::new(&e.to_string()))?,
-        };
-        let report = |p: &UploadProgress| {
-            let json = format!(
-                r#"{{"total":{},"hashed":{},"uploaded":{},"skipped":{}}}"#,
-                p.total, p.hashed, p.uploaded, p.skipped
-            );
-            if let Ok(value) = js_sys::JSON::parse(&json) {
-                let _ = on_progress.call1(&JsValue::NULL, &value);
+        folder: String,
+        message: Option<String>,
+        on_event: js_sys::Function,
+    ) -> Result<(), JsValue> {
+        let (library, folder) = (uuid(&library)?, uuid(&folder)?);
+        let mut paths = Vec::new();
+        let mut sources = Vec::new();
+        for entry in entries.iter() {
+            let path = js_sys::Reflect::get(&entry, &"path".into())?
+                .as_string()
+                .ok_or("an entry without a path")?;
+            let file: web_sys::File = js_sys::Reflect::get(&entry, &"file".into())?.dyn_into()?;
+            paths.push(path);
+            sources.push(BlobSource(file.into()));
+        }
+        let (cancels, mut cancelled) = mpsc::unbounded();
+        self.uploads.borrow_mut().insert(id, cancels);
+        let result = async {
+            let targets = place(&self.client, library, folder, &folders, &paths)
+                .await
+                .map_err(|e| js_error(&e))?;
+            let cancel = Cancel::default();
+            let options = UploadOptions {
+                message,
+                ..UploadOptions::default()
+            };
+            let report = |p: &UploadProgress| {
+                emit(
+                    &on_event,
+                    &Event::Progress {
+                        total: p.total,
+                        hashed: p.hashed,
+                        uploaded: p.uploaded,
+                        skipped: p.skipped,
+                    },
+                );
+            };
+            let (uploader, run) = Uploader::new(&self.client, &options, &cancel, report);
+            // Each file: its outcome, or its own cancel (it then fails as cancelled).
+            let mut per_file: HashMap<&str, oneshot::Sender<()>> = HashMap::new();
+            let mut files = Vec::new();
+            for ((path, source), target) in paths.iter().zip(&sources).zip(targets) {
+                let target = match target {
+                    Ok(target) => target,
+                    Err(e) => {
+                        failed(&on_event, path, &e);
+                        continue;
+                    }
+                };
+                let submitted = uploader.submit(source, target);
+                let (stop, stopped) = oneshot::channel();
+                per_file.insert(path.as_str(), stop);
+                let on_event = &on_event;
+                files.push(async move {
+                    let result = match select(submitted, stopped).await {
+                        Either::Left((result, _)) => result,
+                        Either::Right((_, submitted)) => {
+                            submitted.cancel();
+                            submitted.await
+                        }
+                    };
+                    match result {
+                        Ok(c) => emit(
+                            on_event,
+                            &Event::Done {
+                                path,
+                                file: c.file,
+                                version: c.version,
+                                conflict: c.conflict,
+                                unchanged: c.unchanged,
+                            },
+                        ),
+                        Err(e) => failed(on_event, path, &e),
+                    }
+                });
             }
-        };
-        let source = BlobSource(file.into());
-        let committed = upload(
-            &self.client,
-            &source,
-            target,
-            &UploadOptions::default(),
-            report,
-            &cancel,
-        )
-        .await?;
-        let json = serde_json::to_string(&committed).map_err(|e| JsError::new(&e.to_string()))?;
-        js_sys::JSON::parse(&json).map_err(|_| JsError::new("unreadable answer"))
+            drop(uploader);
+            // Cancels are listened to until every file is done or failed.
+            let cancels = async {
+                while let Some(path) = cancelled.next().await {
+                    match path {
+                        Some(path) => {
+                            if let Some(stop) = per_file.remove(path.as_str()) {
+                                let _ = stop.send(());
+                            }
+                        }
+                        None => cancel.cancel(),
+                    }
+                }
+            };
+            select(
+                Box::pin(async { futures::join!(run, join_all(files)) }),
+                Box::pin(cancels),
+            )
+            .await;
+            Ok(())
+        }
+        .await;
+        self.uploads.borrow_mut().remove(&id);
+        result
     }
 
-    /// Stops the upload in progress (its pending chunks are cancelled on the server).
-    pub fn cancel(&self) {
-        self.cancel.borrow().cancel();
+    /// Cancels one file of the upload run `id` (`path`), or all of it.
+    /// Cancelled files fail with the code `cancelled`; their pending chunks
+    /// are freed on the server.
+    pub fn cancel(&self, id: u32, path: Option<String>) {
+        if let Some(run) = self.uploads.borrow().get(&id) {
+            let _ = run.unbounded_send(path);
+        }
+    }
+
+    /// The content of `file` (its current version, or `version`), in order,
+    /// as a `ReadableStream` of `Uint8Array`s: fetched as it's read (a few
+    /// chunks ahead), so the reader's pace bounds the memory. A failure errors
+    /// the stream with `{ code, message }`.
+    pub fn download(
+        &self,
+        file: String,
+        version: Option<String>,
+    ) -> Result<web_sys::ReadableStream, JsValue> {
+        let file = uuid(&file)?;
+        let version = version.as_deref().map(uuid).transpose()?;
+        let chunks = stream(
+            self.client.clone(),
+            file,
+            version,
+            DownloadOptions::default(),
+        )
+        .map_ok(|bytes| JsValue::from(js_sys::Uint8Array::from(bytes.as_slice())))
+        .map_err(|e| js_error(&e));
+        Ok(wasm_streams::ReadableStream::from_stream(chunks).into_raw())
     }
 }

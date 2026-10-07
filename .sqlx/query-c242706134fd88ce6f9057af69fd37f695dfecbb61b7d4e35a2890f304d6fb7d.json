@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT l.pk, l.owner AS organization\n           FROM library l JOIN organization o ON o.pk = l.owner JOIN \"user\" u ON u.pk = o.owner\n           WHERE l.uuid = $1 AND l.deleted_at IS NULL AND u.account = $2\n             AND ($3::bigint IS NULL OR o.pk = $3)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "organization",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "c242706134fd88ce6f9057af69fd37f695dfecbb61b7d4e35a2890f304d6fb7d"
+}

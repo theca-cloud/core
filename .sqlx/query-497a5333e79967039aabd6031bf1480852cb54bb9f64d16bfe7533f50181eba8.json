@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH RECURSIVE up (pk, depth) AS (\n               SELECT parent, 1 FROM node WHERE pk = $1 AND parent IS NOT NULL\n               UNION ALL\n               SELECT n.parent, up.depth + 1 FROM node n JOIN up ON n.pk = up.pk\n               WHERE n.parent IS NOT NULL\n           )\n           SELECT n.uuid AS id, l.uuid AS library, n.name, n.is_file, p.uuid AS \"parent?\",\n                  v.uuid AS \"current_version?\", v.size AS \"size?\",\n                  ARRAY(SELECT a.uuid FROM up JOIN node a ON a.pk = up.pk ORDER BY up.depth DESC)\n                      AS \"ancestor_ids!\",\n                  ARRAY(SELECT a.name FROM up JOIN node a ON a.pk = up.pk ORDER BY up.depth DESC)\n                      AS \"ancestor_names!\"\n           FROM node n\n           JOIN library l ON l.pk = n.library\n           LEFT JOIN node p ON p.pk = n.parent\n           LEFT JOIN version v ON v.pk = n.current_version\n           WHERE n.pk = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "library",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "is_file",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "parent?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "current_version?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "size?",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "ancestor_ids!",
+        "type_info": "UuidArray"
+      },
+      {
+        "ordinal": 8,
+        "name": "ancestor_names!",
+        "type_info": "TextArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "497a5333e79967039aabd6031bf1480852cb54bb9f64d16bfe7533f50181eba8"
+}

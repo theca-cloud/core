@@ -2120,6 +2120,16 @@
               }
             }
           },
+          "403": {
+            "description": "`owner_required`: namespaces are the owner's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Unknown namespace",
             "content": {
@@ -2236,6 +2246,167 @@
           },
           "409": {
             "description": "`library_name_taken`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/libraries/{id}/members": {
+      "get": {
+        "tags": [
+          "sharing"
+        ],
+        "summary": "A library's members (its members, and the organization's owner).",
+        "operationId": "members",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LibraryMember"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/libraries/{id}/members/{user}": {
+      "put": {
+        "tags": [
+          "sharing"
+        ],
+        "summary": "Give a member of the organization access to the library, or change its\nrole (the owner). Invited members not joined yet can be added: their\naccess is ready when they accept.",
+        "operationId": "set_member",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "user",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRole"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LibraryMember"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_role`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such library, or no such member of its organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "sharing"
+        ],
+        "summary": "Take a member's access to the library away (the owner). A library may be\nleft without members: nobody reaches it until it's given some.",
+        "operationId": "remove_member",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "user",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
             "content": {
               "application/json": {
                 "schema": {
@@ -2432,6 +2603,201 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Export"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/namespaces/{id}": {
+      "delete": {
+        "tags": [
+          "sharing"
+        ],
+        "summary": "Delete a namespace (the owner): its libraries stop deduplicating with each\nother at once, and keep every chunk they already share.",
+        "operationId": "delete_namespace",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "sharing"
+        ],
+        "summary": "Rename a namespace (the owner).",
+        "operationId": "rename_namespace",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NamespaceName"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Namespace"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`namespace_name_taken`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/namespaces/{id}/libraries/{library}": {
+      "put": {
+        "tags": [
+          "sharing"
+        ],
+        "summary": "Put one of the organization's libraries in the namespace (the owner):\nfrom now on, it dedups with the namespace's other libraries, both ways.\nEvery member of each can then probe the others' content: a security\ndecision (decisions.md, Trust boundary).",
+        "operationId": "add_library",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "library",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Namespace"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "sharing"
+        ],
+        "summary": "Take a library out of the namespace (the owner): the trust is revoked at\nonce; the library keeps the chunks it already shares.",
+        "operationId": "remove_library",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "library",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Namespace"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -2879,7 +3245,98 @@
         }
       }
     },
+    "/api/v1/organizations": {
+      "post": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Create a company organization, owned by the account (from a full session;\ninstance admins only when `organization_creation` is `admins`).",
+        "operationId": "create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationName"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Organization"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_name`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`organization_creation_closed`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organizations/{id}": {
+      "get": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "An organization, with its quota and usage (any member).",
+        "operationId": "organization",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Organization"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "tags": [
           "organizations"
@@ -2913,6 +3370,76 @@
           },
           "409": {
             "description": "`personal_organization` (deleted with the account)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Rename a company organization (the owner).",
+        "operationId": "rename",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationName"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Organization"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_name`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`personal_organization`",
             "content": {
               "application/json": {
                 "schema": {
@@ -3122,6 +3649,51 @@
         }
       }
     },
+    "/api/v1/organizations/{id}/libraries": {
+      "get": {
+        "tags": [
+          "sharing"
+        ],
+        "summary": "Every library of the organization, whether the owner is a member or not\n(the owner).",
+        "operationId": "libraries",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OrganizationLibrary"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organizations/{id}/members": {
       "get": {
         "tags": [
@@ -3280,6 +3852,121 @@
           },
           "409": {
             "description": "`owner`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{id}/namespaces": {
+      "get": {
+        "tags": [
+          "sharing"
+        ],
+        "summary": "The organization's dedup namespaces and their libraries (the owner).",
+        "operationId": "namespaces",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Namespace"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "sharing"
+        ],
+        "summary": "Create a dedup namespace, empty (the owner).",
+        "operationId": "create_namespace",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NamespaceName"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Namespace"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_name`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`namespace_name_taken`",
             "content": {
               "application/json": {
                 "schema": {
@@ -3653,6 +4340,25 @@
             "type": "integer",
             "format": "int64",
             "description": "Bytes it stores (the quota's measure)."
+          }
+        }
+      },
+      "Ancestor": {
+        "type": "object",
+        "description": "A folder above a node.",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The folder."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name (empty for the library's root)."
           }
         }
       },
@@ -4579,6 +5285,39 @@
             "type": "string",
             "format": "uuid",
             "description": "Its root folder."
+          },
+          "writable": {
+            "type": "boolean",
+            "description": "Whether the account may write in it: its role, within its credential's\nscope and read-only cap."
+          }
+        }
+      },
+      "LibraryMember": {
+        "type": "object",
+        "description": "A library's member.",
+        "required": [
+          "user",
+          "email",
+          "joined",
+          "role"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Its email."
+          },
+          "joined": {
+            "type": "boolean",
+            "description": "False while it's an invitation not accepted yet."
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role",
+            "description": "Its role."
+          },
+          "user": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The organization's member (as `GET /organizations/{id}/members` lists them)."
           }
         }
       },
@@ -4720,6 +5459,10 @@
             "type": "string",
             "description": "Its email."
           },
+          "instance_admin": {
+            "type": "boolean",
+            "description": "An instance admin (organizations, storages, settings)."
+          },
           "organizations": {
             "type": "array",
             "items": {
@@ -4786,6 +5529,10 @@
             "format": "uuid",
             "description": "The organization."
           },
+          "owner": {
+            "type": "boolean",
+            "description": "The account owns it (its administrator: members, settings)."
+          },
           "personal": {
             "type": "boolean",
             "description": "The account's personal organization (shown as \"My files\")."
@@ -4793,6 +5540,47 @@
           "suspended": {
             "type": "boolean",
             "description": "Suspended by the instance admin: nothing in it is reachable."
+          }
+        }
+      },
+      "Namespace": {
+        "type": "object",
+        "description": "A dedup namespace: its libraries' members trust each other.",
+        "required": [
+          "id",
+          "name",
+          "libraries"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The namespace."
+          },
+          "libraries": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The libraries in it."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          }
+        }
+      },
+      "NamespaceName": {
+        "type": "object",
+        "description": "`POST /organizations/{id}/namespaces`, `PATCH /namespaces/{id}`.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Its name."
           }
         }
       },
@@ -4894,6 +5682,13 @@
           "path"
         ],
         "properties": {
+          "ancestors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ancestor"
+            },
+            "description": "The folders above it, from the library's root (named `\"\"`) to its\nfolder; none for the root."
+          },
           "current_version": {
             "type": [
               "string",
@@ -4952,6 +5747,87 @@
           "url": {
             "type": "string",
             "description": "The provider's authorization URL."
+          }
+        }
+      },
+      "Organization": {
+        "type": "object",
+        "description": "An organization, to one of its members.",
+        "required": [
+          "id",
+          "name",
+          "personal",
+          "owner",
+          "used"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The organization."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "owner": {
+            "type": "boolean",
+            "description": "The account owns it."
+          },
+          "personal": {
+            "type": "boolean",
+            "description": "The account's personal organization (shown as \"My files\")."
+          },
+          "quota": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Its quota in bytes; none: unlimited."
+          },
+          "used": {
+            "type": "integer",
+            "format": "int64",
+            "description": "What it stores, in bytes (counted against the quota)."
+          }
+        }
+      },
+      "OrganizationLibrary": {
+        "type": "object",
+        "description": "One of an organization's libraries, to its owner.",
+        "required": [
+          "id",
+          "name",
+          "members"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The library."
+          },
+          "members": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many members it has (none: nobody reaches it until given some)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          }
+        }
+      },
+      "OrganizationName": {
+        "type": "object",
+        "description": "`POST /organizations`, `PATCH /organizations/{id}`.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Its name."
           }
         }
       },
@@ -5110,6 +5986,15 @@
           }
         }
       },
+      "Role": {
+        "type": "string",
+        "description": "A member's role in a library.",
+        "enum": [
+          "read",
+          "write",
+          "unknown"
+        ]
+      },
       "SearchResult": {
         "type": "object",
         "description": "A search result.",
@@ -5230,6 +6115,19 @@
           "token": {
             "type": "string",
             "description": "The token."
+          }
+        }
+      },
+      "SetRole": {
+        "type": "object",
+        "description": "`PUT /libraries/{id}/members/{user}`: adds the member, or changes its role.",
+        "required": [
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/Role",
+            "description": "The role."
           }
         }
       },

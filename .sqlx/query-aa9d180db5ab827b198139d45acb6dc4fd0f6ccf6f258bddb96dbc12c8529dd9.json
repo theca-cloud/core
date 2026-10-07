@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT l.uuid AS id, l.name,\n                  (SELECT count(*) FROM library_member m WHERE m.library = l.pk) AS \"members!\"\n           FROM library l WHERE l.owner = $1 AND l.deleted_at IS NULL ORDER BY lower(l.name)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "members!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "aa9d180db5ab827b198139d45acb6dc4fd0f6ccf6f258bddb96dbc12c8529dd9"
+}

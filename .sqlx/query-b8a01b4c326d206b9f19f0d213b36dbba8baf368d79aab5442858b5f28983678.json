@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO library_namespace (organization, library, namespace) VALUES ($1, $2, $3)\n         ON CONFLICT (library, namespace) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b8a01b4c326d206b9f19f0d213b36dbba8baf368d79aab5442858b5f28983678"
+}

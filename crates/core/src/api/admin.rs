@@ -225,13 +225,7 @@ pub async fn create_organization(
     ApiJson(request): ApiJson<api::CreateOrganization>,
 ) -> Result<(StatusCode, Json<api::AdminOrganization>), HttpError> {
     require_admin(&state, &account, true).await?;
-    let name = request.name.trim();
-    if name.is_empty() {
-        return Err(HttpError::bad_request(
-            "invalid_name",
-            "the organization needs a name",
-        ));
-    }
+    let name = super::organizations::name(&request.name)?;
     let (owner, ..) = db::account::by_email(&state.pool, request.owner.trim())
         .await?
         .ok_or_else(|| HttpError::not_found("account"))?;
