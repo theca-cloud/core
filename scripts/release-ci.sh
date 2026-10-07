@@ -76,10 +76,10 @@ publish)
     release=$(jq -n --arg tag "v$version" --arg sha "${CI_COMMIT_SHA:-$(git rev-parse HEAD)}" --arg body "$notes" \
         '{tag_name: $tag, target_commitish: $sha, name: $tag, body: $body}')
     if [ -n "${DRY_RUN:-}" ]; then
-        echo "$release"
+        printf '%s\n' "$release"
         exit 0
     fi
-    id=$(echo "$release" |
+    id=$(printf '%s\n' "$release" |
         curl -fsS -X POST -H "Authorization: token $GITEA_TOKEN" -H 'Content-Type: application/json' \
             --data-binary @- "$gitea/api/v1/repos/$repo/releases" | jq -r .id)
     curl -fsS -X POST -H "Authorization: token $GITEA_TOKEN" -F attachment=@openapi.json \
