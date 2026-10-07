@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO version (organization, file, parent_version, author, size)\n         SELECT $1, pk, current_version, $3, (SELECT size FROM version WHERE pk = $4)\n         FROM node WHERE pk = $2 RETURNING pk",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b5d558e67575d0b166ae23248e24c3f140e97bc3517da3b581fa980c0da8fee3"
+}

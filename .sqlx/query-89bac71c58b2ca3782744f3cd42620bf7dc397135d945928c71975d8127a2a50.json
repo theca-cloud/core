@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT n.is_file, v.uuid AS \"version?\", extract(epoch FROM v.created_at)::float8 AS \"modified?\",\n                              (SELECT coalesce(sum(c.plain_size), 0)::bigint FROM chunk_in_version civ\n                               JOIN chunk c ON c.pk = civ.chunk WHERE civ.version = v.pk) AS \"len?\"\n                       FROM node n LEFT JOIN version v ON v.pk = n.current_version WHERE n.pk = $1",
+  "query": "SELECT n.is_file, v.uuid AS \"version?\", extract(epoch FROM v.created_at)::float8 AS \"modified?\",\n                              v.size AS \"len?\"\n                       FROM node n LEFT JOIN version v ON v.pk = n.current_version WHERE n.pk = $1",
   "describe": {
     "columns": [
       {
@@ -33,8 +33,8 @@
       false,
       false,
       null,
-      null
+      false
     ]
   },
-  "hash": "390c673489bfb5e2bb26290fc8b518473e1d3b6282650da84bd290bfeec2b222"
+  "hash": "89bac71c58b2ca3782744f3cd42620bf7dc397135d945928c71975d8127a2a50"
 }

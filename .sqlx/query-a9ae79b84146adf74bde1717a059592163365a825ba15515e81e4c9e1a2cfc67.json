@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO node (organization, library, parent, name, is_file)\n           VALUES ($1, $2, $3, $4, false)\n           RETURNING uuid AS id, name, is_file, NULL::text AS modified,\n                     NULL::uuid AS current_version",
+  "query": "SELECT n.uuid AS id, n.name, n.is_file, v.created_at::text AS modified,\n                  v.uuid AS \"current_version?\", v.size AS \"size?\"\n           FROM node n LEFT JOIN version v ON v.pk = n.current_version\n           WHERE n.parent = $1 AND n.deleted_at IS NULL ORDER BY n.is_file, lower(n.name)",
   "describe": {
     "columns": [
       {
@@ -25,16 +25,18 @@
       },
       {
         "ordinal": 4,
-        "name": "current_version",
+        "name": "current_version?",
         "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "size?",
+        "type_info": "Int8"
       }
     ],
     "parameters": {
       "Left": [
-        "Int8",
-        "Int8",
-        "Int8",
-        "Text"
+        "Int8"
       ]
     },
     "nullable": [
@@ -42,8 +44,9 @@
       false,
       false,
       null,
-      null
+      false,
+      false
     ]
   },
-  "hash": "0fca28fd805a90a9a4dffc6edb93705cc90c4c1ca6c9a6f715b881c2cf71ef54"
+  "hash": "a9ae79b84146adf74bde1717a059592163365a825ba15515e81e4c9e1a2cfc67"
 }

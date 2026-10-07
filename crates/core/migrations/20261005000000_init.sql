@@ -381,6 +381,9 @@ CREATE TABLE version (
     file_is_file boolean NOT NULL DEFAULT true CHECK (file_is_file),
     parent_version bigint,
     message text,
+    -- The file's size: the sum of its chunks' plain_size, set when the version
+    -- is created (a copy copies it).
+    size bigint NOT NULL CHECK (size >= 0),
     created_at timestamptz NOT NULL DEFAULT now(),
     -- Who committed it (a member of the organization); NULL once they leave.
     author bigint,

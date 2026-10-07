@@ -85,6 +85,11 @@ impl Client {
         self.upload(library, target, data).await.unwrap().file
     }
 
+    /// The size of a file's current version.
+    async fn size(&self, file: Uuid) -> i64 {
+        self.info(file).await.unwrap().size.unwrap()
+    }
+
     async fn versions(&self, file: Uuid) -> Vec<api::Version> {
         self.get(&format!("/api/v1/files/{file}/versions"))
             .await
@@ -248,6 +253,7 @@ async fn copies_share_chunks(pool: PgPool) {
     let copied_big = copied.iter().find(|n| n.name == "big.bin").unwrap().id;
     assert_eq!(alice.download(copied_big).await.unwrap(), big);
     assert_eq!(alice.versions(copied_big).await.len(), 1, "a fresh history");
+    assert_eq!(alice.size(copied_big).await, big.len() as i64);
 
     // Into its own subtree: a snapshot, so it terminates.
     let nested: api::NodeInfo = alice
@@ -635,6 +641,12 @@ async fn copies_onto_files_add_a_version(pool: PgPool) {
     let tree = alice.versions(b.file).await;
     assert_eq!(tree.len(), 2);
     assert_eq!(tree[1].parent, Some(b.version), "based on its current one");
+    assert_eq!(alice.size(b.file).await, 500);
+    let empty = alice
+        .upload(&docs, new_file(&docs, "empty.txt"), &[])
+        .await
+        .unwrap();
+    assert_eq!(alice.size(empty.file).await, 0);
     assert_eq!(
         alice.download(a.file).await.unwrap(),
         data(500, 2),
@@ -883,4 +895,69 @@ async fn streamed_trees(pool: PgPool) {
         code(alice.tree(file.id).await.unwrap_err()),
         (StatusCode::BAD_REQUEST, "not_a_folder".into())
     );
+}
+
+/// Every response describing a file carries its size; folders have none.
+#[sqlx::test]
+async fn sizes(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let mut alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    let folder = alice.mkdir(docs.root, "folder").await;
+    let first = alice
+        .upload(
+            &docs,
+            json!({ "parent": folder, "name": "a.txt" }),
+            &data(1000, 1),
+        )
+        .await
+        .unwrap();
+    alice
+        .upload(
+            &docs,
+            json!({ "file": first.file, "base_version": first.version }),
+            &data(300, 2),
+        )
+        .await
+        .unwrap();
+
+    let children: Vec<api::Node> = alice
+        .get(&format!("/api/v1/nodes/{folder}/children"))
+        .await
+        .unwrap();
+    assert_eq!(children[0].size, Some(300), "the current version's");
+    let root: Vec<api::Node> = alice
+        .get(&format!("/api/v1/nodes/{}/children", docs.root))
+        .await
+        .unwrap();
+    assert_eq!(root[0].size, None, "a folder has none");
+    assert_eq!(alice.info(folder).await.unwrap().size, None);
+    assert_eq!(alice.size(first.file).await, 300);
+    let sizes: Vec<Option<i64>> = alice
+        .tree(docs.root)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|line| match line {
+            api::TreeLine::Node(n) => Some(n.size),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sizes, [None, Some(300)]);
+    let versions: Vec<i64> = alice
+        .versions(first.file)
+        .await
+        .iter()
+        .map(|v| v.size)
+        .collect();
+    assert_eq!(versions, [1000, 300]);
+    let found: Vec<api::SearchResult> = alice.get("/api/v1/search?q=a.txt").await.unwrap();
+    assert_eq!(found[0].size, Some(300));
+
+    alice.trash(first.file).await;
+    let trash: Vec<api::TrashEntry> = alice
+        .get(&format!("/api/v1/libraries/{}/trash", docs.id))
+        .await
+        .unwrap();
+    assert_eq!(trash[0].size, Some(300));
 }

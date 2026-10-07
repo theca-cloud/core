@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO version (organization, file, author) VALUES ($1, $2, $3) RETURNING pk",
+  "query": "INSERT INTO version (organization, file, author, size)\n                 SELECT $1, $2, $3, size FROM version WHERE pk = $4 RETURNING pk",
   "describe": {
     "columns": [
       {
@@ -13,6 +13,7 @@
       "Left": [
         "Int8",
         "Int8",
+        "Int8",
         "Int8"
       ]
     },
@@ -20,5 +21,5 @@
       false
     ]
   },
-  "hash": "4056fdad810c62e06a1ad4dbeacbcdca7081fe67e4f50031f5d427b320fadbb5"
+  "hash": "45d0978c7ad553597b6e68a37a47c99a7b07c221ba152d79bf65bf1bae5799ad"
 }

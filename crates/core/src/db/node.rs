@@ -17,7 +17,7 @@ pub async fn info(pool: &PgPool, node: i64) -> sqlx::Result<api::NodeInfo> {
     sqlx::query_as!(
         api::NodeInfo,
         r#"SELECT n.uuid AS id, l.uuid AS library, n.name, n.is_file, p.uuid AS "parent?",
-                  node_path(n.pk) AS "path!", v.uuid AS "current_version?"
+                  node_path(n.pk) AS "path!", v.uuid AS "current_version?", v.size AS "size?"
            FROM node n
            JOIN library l ON l.pk = n.library
            LEFT JOIN node p ON p.pk = n.parent
@@ -40,7 +40,7 @@ pub async fn create_folder(
         r#"INSERT INTO node (organization, library, parent, name, is_file)
            VALUES ($1, $2, $3, $4, false)
            RETURNING uuid AS id, name, is_file, NULL::text AS modified,
-                     NULL::uuid AS current_version"#,
+                     NULL::uuid AS current_version, NULL::bigint AS size"#,
         parent.access.organization,
         parent.access.library,
         parent.node,
@@ -67,7 +67,7 @@ pub fn tree(
                WHERE n.deleted_at IS NULL
            )
            SELECT n.uuid AS id, t.path AS "path!", n.is_file,
-                  v.created_at::text AS modified, v.uuid AS "current_version?"
+                  v.created_at::text AS modified, v.uuid AS "current_version?", v.size AS "size?"
            FROM tree t
            JOIN node n ON n.pk = t.pk
            LEFT JOIN version v ON v.pk = n.current_version
@@ -197,11 +197,13 @@ pub async fn add_version(
     content: i64,
 ) -> sqlx::Result<()> {
     let new = sqlx::query_scalar!(
-        "INSERT INTO version (organization, file, parent_version, author)
-         SELECT $1, pk, current_version, $3 FROM node WHERE pk = $2 RETURNING pk",
+        "INSERT INTO version (organization, file, parent_version, author, size)
+         SELECT $1, pk, current_version, $3, (SELECT size FROM version WHERE pk = $4)
+         FROM node WHERE pk = $2 RETURNING pk",
         access.organization,
         dest,
-        access.user
+        access.user,
+        content
     )
     .fetch_one(&mut **tx)
     .await?;
@@ -275,10 +277,12 @@ pub async fn copy(
         top.get_or_insert(copy.pk);
         if let Some(version) = n.current_version {
             let new = sqlx::query_scalar!(
-                "INSERT INTO version (organization, file, author) VALUES ($1, $2, $3) RETURNING pk",
+                "INSERT INTO version (organization, file, author, size)
+                 SELECT $1, $2, $3, size FROM version WHERE pk = $4 RETURNING pk",
                 to.organization,
                 copy.pk,
-                to.user
+                to.user,
+                version
             )
             .fetch_one(&mut **tx)
             .await?;
@@ -347,8 +351,10 @@ pub async fn trashed_access(
 pub async fn trash_list(pool: &PgPool, library: i64) -> sqlx::Result<Vec<api::TrashEntry>> {
     sqlx::query_as!(
         api::TrashEntry,
-        r#"SELECT uuid AS id, name, is_file, node_path(pk) AS "path!", deleted_at::text AS "deleted_at!"
-           FROM node WHERE library = $1 AND deleted_at IS NOT NULL ORDER BY deleted_at DESC"#,
+        r#"SELECT n.uuid AS id, n.name, n.is_file, node_path(n.pk) AS "path!", v.size AS "size?",
+                  n.deleted_at::text AS "deleted_at!"
+           FROM node n LEFT JOIN version v ON v.pk = n.current_version
+           WHERE n.library = $1 AND n.deleted_at IS NOT NULL ORDER BY n.deleted_at DESC"#,
         library
     )
     .fetch_all(pool)
@@ -454,7 +460,7 @@ pub async fn purge(tx: &mut Transaction<'_, Postgres>, node: i64) -> sqlx::Resul
 pub async fn versions(pool: &PgPool, file: i64) -> sqlx::Result<Vec<api::Version>> {
     let rows = sqlx::query!(
         r#"SELECT v.pk, v.parent_version, v.uuid AS id, p.uuid AS "parent?", a.email AS "author?",
-                  v.created_at::text AS "created_at!", v.message,
+                  v.created_at::text AS "created_at!", v.message, v.size,
                   v.pk = n.current_version AS "current!"
            FROM version v
            JOIN node n ON n.pk = v.file
@@ -478,6 +484,7 @@ pub async fn versions(pool: &PgPool, file: i64) -> sqlx::Result<Vec<api::Version
                 author: r.author.clone(),
                 created_at: r.created_at.clone(),
                 message: r.message.clone(),
+                size: r.size,
                 current: r.current,
             }
         })
@@ -562,10 +569,12 @@ pub async fn search(
         .replace('_', "\\_");
     sqlx::query_as!(
         api::SearchResult,
-        r#"SELECT n.uuid AS id, l.uuid AS library, n.name, n.is_file, node_path(n.pk) AS "path!"
+        r#"SELECT n.uuid AS id, l.uuid AS library, n.name, n.is_file, node_path(n.pk) AS "path!",
+                  v.size AS "size?"
            FROM node n
            JOIN library_access($1) a ON a.library = n.library
            JOIN library l ON l.pk = n.library
+           LEFT JOIN version v ON v.pk = n.current_version
            WHERE n.name ILIKE '%' || $2 || '%' AND n.parent IS NOT NULL
              AND ($3::uuid IS NULL OR l.uuid = $3) AND node_reachable(n.pk)
            ORDER BY lower(n.name), n.pk
