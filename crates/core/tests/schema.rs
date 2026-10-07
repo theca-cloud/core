@@ -37,7 +37,7 @@ async fn fixture(pool: &PgPool) {
             VALUES (1, 1, 1, NULL, '', false), (2, 1, 1, 1, 'a', false), (3, 1, 1, 2, 'b', false),
                    (4, 1, 1, 1, 'f.txt', true), (8, 1, 1, 1, 'x', false), (9, 1, 1, 1, 'y', false),
                    (5, 1, 2, NULL, '', false), (6, 2, 3, NULL, '', false), (7, 2, 3, 6, 'g.txt', true);
-        INSERT INTO version (pk, organization, file) OVERRIDING SYSTEM VALUE VALUES (1, 1, 4), (2, 2, 7);
+        INSERT INTO version (pk, organization, file, size) OVERRIDING SYSTEM VALUE VALUES (1, 1, 4, 0), (2, 2, 7, 0);
         UPDATE node SET current_version = 1 WHERE pk = 4;
         INSERT INTO chunk (pk, organization, library, hash, storage, plain_size, stored_size, compression,
                            stored_sha256, uploaded_at)
@@ -620,10 +620,10 @@ async fn concurrent_moves_never_create_cycles(pool: PgPool) {
 #[sqlx::test]
 async fn version_rules(pool: PgPool) {
     fixture(&pool).await;
-    let insert = "INSERT INTO version (organization, file, parent_version) VALUES";
-    assert_refused(&pool, "version_file", &format!("{insert} (1, 2, NULL)")).await; // a folder
-    assert_refused(&pool, "version_file", &format!("{insert} (2, 4, NULL)")).await; // wrong org
-    assert_refused(&pool, "version_parent", &format!("{insert} (1, 4, 2)")).await; // other file
+    let insert = "INSERT INTO version (organization, file, parent_version, size) VALUES";
+    assert_refused(&pool, "version_file", &format!("{insert} (1, 2, NULL, 0)")).await; // a folder
+    assert_refused(&pool, "version_file", &format!("{insert} (2, 4, NULL, 0)")).await; // wrong org
+    assert_refused(&pool, "version_parent", &format!("{insert} (1, 4, 2, 0)")).await; // other file
     assert_refused(
         &pool,
         "node_current_version",

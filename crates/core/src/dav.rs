@@ -280,8 +280,7 @@ impl Fs {
             Item::Node(node) => {
                 let row = sqlx::query!(
                     r#"SELECT n.is_file, v.uuid AS "version?", extract(epoch FROM v.created_at)::float8 AS "modified?",
-                              (SELECT coalesce(sum(c.plain_size), 0)::bigint FROM chunk_in_version civ
-                               JOIN chunk c ON c.pk = civ.chunk WHERE civ.version = v.pk) AS "len?"
+                              v.size AS "len?"
                        FROM node n LEFT JOIN version v ON v.pk = n.current_version WHERE n.pk = $1"#,
                     node.node
                 )
@@ -373,20 +372,25 @@ impl GuardedFileSystem<Who> for Fs {
                     .organizations(who)
                     .await?
                     .into_iter()
-                    .map(|(_, name)| Entry { name, meta: Meta::dir(UNIX_EPOCH) })
+                    .map(|(_, name)| Entry {
+                        name,
+                        meta: Meta::dir(UNIX_EPOCH),
+                    })
                     .collect(),
                 Item::Organization { pk } => self
                     .libraries(who, pk)
                     .await?
                     .into_iter()
-                    .map(|(name, _)| Entry { name, meta: Meta::dir(UNIX_EPOCH) })
+                    .map(|(name, _)| Entry {
+                        name,
+                        meta: Meta::dir(UNIX_EPOCH),
+                    })
                     .collect(),
                 Item::Node(node) if !node.is_file => {
                     let rows = sqlx::query!(
                         r#"SELECT n.name, n.is_file, v.uuid AS "version?",
                                   extract(epoch FROM v.created_at)::float8 AS "modified?",
-                                  (SELECT coalesce(sum(c.plain_size), 0)::bigint FROM chunk_in_version civ
-                                   JOIN chunk c ON c.pk = civ.chunk WHERE civ.version = v.pk) AS "len?"
+                                  v.size AS "len?"
                            FROM node n LEFT JOIN version v ON v.pk = n.current_version
                            WHERE n.parent = $1 AND n.deleted_at IS NULL ORDER BY lower(n.name)"#,
                         node.node
@@ -407,7 +411,11 @@ impl GuardedFileSystem<Who> for Fs {
                 }
                 Item::Node(_) => return Err(FsError::Forbidden),
             };
-            let stream = futures::stream::iter(entries.into_iter().map(|e| Ok(Box::new(e) as Box<dyn DavDirEntry>)));
+            let stream = futures::stream::iter(
+                entries
+                    .into_iter()
+                    .map(|e| Ok(Box::new(e) as Box<dyn DavDirEntry>)),
+            );
             Ok(Box::pin(stream) as FsStream<Box<dyn DavDirEntry>>)
         }
         .boxed()

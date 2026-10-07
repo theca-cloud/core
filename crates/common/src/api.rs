@@ -88,6 +88,10 @@ pub struct Node {
     /// A file's current version (the base of a new one).
     #[serde(default)]
     pub current_version: Option<Uuid>,
+    /// A file's size in bytes (its current version's); none for a folder or a
+    /// file without a version yet.
+    #[serde(default)]
+    pub size: Option<i64>,
 }
 
 /// `POST /chunks/lookup`.
@@ -573,6 +577,10 @@ pub struct NodeInfo {
     pub path: String,
     /// A file's current version.
     pub current_version: Option<Uuid>,
+    /// A file's size in bytes (its current version's); none for a folder or a
+    /// file without a version yet.
+    #[serde(default)]
+    pub size: Option<i64>,
 }
 
 /// `POST /nodes/{parent}/folders`: folders to create in a folder, like
@@ -610,6 +618,10 @@ pub struct TreeNode {
     pub modified: Option<String>,
     /// A file's current version.
     pub current_version: Option<Uuid>,
+    /// A file's size in bytes (its current version's); none for a folder or a
+    /// file without a version yet.
+    #[serde(default)]
+    pub size: Option<i64>,
 }
 
 /// One line of `GET /nodes/{id}/tree` (NDJSON): a node, then the end (with
@@ -677,6 +689,10 @@ pub struct TrashEntry {
     pub is_file: bool,
     /// Where it was.
     pub path: String,
+    /// A file's size in bytes (its current version's); none for a folder or a
+    /// file without a version yet.
+    #[serde(default)]
+    pub size: Option<i64>,
     /// When it was trashed.
     pub deleted_at: String,
 }
@@ -712,6 +728,9 @@ pub struct Version {
     pub created_at: String,
     /// Its description.
     pub message: Option<String>,
+    /// The file's size in bytes at this version.
+    #[serde(default)]
+    pub size: i64,
     /// The file's current version.
     pub current: bool,
 }
@@ -730,6 +749,10 @@ pub struct SearchResult {
     pub is_file: bool,
     /// Its path in the library.
     pub path: String,
+    /// A file's size in bytes (its current version's); none for a folder or a
+    /// file without a version yet.
+    #[serde(default)]
+    pub size: Option<i64>,
 }
 
 /// A background job and its last runs (admin).

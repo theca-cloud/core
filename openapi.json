@@ -4865,6 +4865,14 @@
           "name": {
             "type": "string",
             "description": "Its name."
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "A file's size in bytes (its current version's); none for a folder or a\nfile without a version yet."
           }
         }
       },
@@ -4916,6 +4924,14 @@
           "path": {
             "type": "string",
             "description": "Its path in the library, e.g. `/a/b.txt` (`/` for the root)."
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "A file's size in bytes (its current version's); none for a folder or a\nfile without a version yet."
           }
         }
       },
@@ -5119,6 +5135,14 @@
           "path": {
             "type": "string",
             "description": "Its path in the library."
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "A file's size in bytes (its current version's); none for a folder or a\nfile without a version yet."
           }
         }
       },
@@ -5465,6 +5489,14 @@
           "path": {
             "type": "string",
             "description": "Where it was."
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "A file's size in bytes (its current version's); none for a folder or a\nfile without a version yet."
           }
         }
       },
@@ -5583,6 +5615,14 @@
           "path": {
             "type": "string",
             "description": "Its path below the listed folder (`a`, `a/b.txt`)."
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "A file's size in bytes (its current version's); none for a folder or a\nfile without a version yet."
           }
         }
       },
@@ -5727,6 +5767,11 @@
             ],
             "format": "uuid",
             "description": "The version it was based on (a tree: branches after conflicts and restores)."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The file's size in bytes at this version."
           }
         }
       }

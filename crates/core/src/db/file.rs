@@ -179,13 +179,16 @@ pub async fn commit(
     }
 
     let version = sqlx::query!(
-        "INSERT INTO version (organization, file, parent_version, message, author)
-         VALUES ($1, $2, $3, $4, $5) RETURNING pk, uuid",
+        "INSERT INTO version (organization, file, parent_version, message, author, size)
+         SELECT $1, $2, $3, $4, $5, coalesce(sum(c.plain_size), 0)
+         FROM unnest($6::bigint[]) AS t (chunk) JOIN chunk c ON c.pk = t.chunk
+         RETURNING pk, uuid",
         access.organization,
         file_pk,
         base,
         message,
-        access.user
+        access.user,
+        &pks
     )
     .fetch_one(&mut **tx)
     .await?;
