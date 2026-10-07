@@ -354,6 +354,16 @@ pub struct Me {
     pub organizations: Vec<Membership>,
 }
 
+/// `GET /instance`: public, for a login page.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Instance {
+    /// Its name (the setting `instance_name`).
+    pub name: String,
+    /// Accounts can be created (`registration = open`, and SMTP configured).
+    pub registration: bool,
+}
+
 /// A member's role in a library.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

@@ -7,7 +7,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.9.0"
+    "version": "0.10.0"
   },
   "paths": {
     "/api/health": {
@@ -2015,6 +2015,27 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/instance": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "What a login page shows before anyone logs in: the instance's name, and\nwhether accounts can be created (registration open, and emails sendable).",
+        "operationId": "instance",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
                 }
               }
             }
@@ -5180,6 +5201,24 @@
           "name": {
             "type": "string",
             "description": "Its name, e.g. \"Google\"."
+          }
+        }
+      },
+      "Instance": {
+        "type": "object",
+        "description": "`GET /instance`: public, for a login page.",
+        "required": [
+          "name",
+          "registration"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Its name (the setting `instance_name`)."
+          },
+          "registration": {
+            "type": "boolean",
+            "description": "Accounts can be created (`registration = open`, and SMTP configured)."
           }
         }
       },

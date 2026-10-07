@@ -1,6 +1,11 @@
 # Changelog
 
 Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
+## [0.10.0] - 2026-10-07
+
+### Features
+
+- **core**: GET /instance, the instance's name and whether accounts can be created, for login pages
 ## [0.9.0] - 2026-10-07
 
 ### Features

@@ -541,3 +541,46 @@ async fn organizations_by_their_users(pool: PgPool) {
         .await
         .unwrap();
 }
+
+#[sqlx::test]
+async fn the_instance_to_anyone(pool: PgPool) {
+    let w = admin_world(pool).await;
+    let admin = w.as_user(1).await;
+    let anyone = Client {
+        app: w.app.clone(),
+        account: Uuid::nil(),
+        org: Uuid::nil(),
+        cookies: String::new(),
+        puts: 0,
+    };
+    let instance: api::Instance = anyone.get("/api/v1/instance").await.unwrap();
+    assert_eq!(
+        (instance.name.as_str(), instance.registration),
+        ("Theca", false)
+    );
+
+    // Open, but no SMTP: nobody can register yet (the email can't go out).
+    admin
+        .json::<Value>(
+            "PATCH",
+            "/api/v1/admin/settings",
+            &json!({ "instance_name": "Acme Cloud", "registration": "open" }),
+        )
+        .await
+        .unwrap();
+    let instance: api::Instance = anyone.get("/api/v1/instance").await.unwrap();
+    assert_eq!(
+        (instance.name.as_str(), instance.registration),
+        ("Acme Cloud", false)
+    );
+    admin
+        .json::<Value>(
+            "PATCH",
+            "/api/v1/admin/settings",
+            &json!({ "smtp_host": "localhost", "smtp_from": "theca@x.ch" }),
+        )
+        .await
+        .unwrap();
+    let instance: api::Instance = anyone.get("/api/v1/instance").await.unwrap();
+    assert!(instance.registration);
+}
