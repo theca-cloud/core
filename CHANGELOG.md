@@ -1,11 +1,12 @@
 # Changelog
 
 Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
-## [0.6.0] - 2026-10-07
+## [0.7.0] - 2026-10-07
 
 ### Features
 
 - **core**: GET /nodes/{id}/tree streamed; folders created from a list of paths (**breaking**)
+- **core**: File sizes, summed from their chunks at commit
 ## [0.5.0] - 2026-10-07
 
 ### Features

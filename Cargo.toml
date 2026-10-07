@@ -3,7 +3,7 @@ members = ["crates/common", "crates/core", "crates/client"]
 resolver = "3"
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 license = "AGPL-3.0-only"
 # Published to the Gitea registry only (never crates.io).
@@ -12,8 +12,8 @@ publish = ["gitea"]
 [workspace.dependencies]
 # The workspace's own crates: by path here, by version once published (the
 # release script keeps these versions equal to the workspace's).
-theca-common = { path = "crates/common", version = "0.6.0", registry = "gitea" }
-theca-client = { path = "crates/client", version = "0.6.0", registry = "gitea" }
+theca-common = { path = "crates/common", version = "0.7.0", registry = "gitea" }
+theca-client = { path = "crates/client", version = "0.7.0", registry = "gitea" }
 argon2 = "0.6"
 askama = "0.16"
 # WebDAV over our own filesystem trait (no local or in-memory filesystem).
