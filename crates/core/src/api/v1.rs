@@ -22,6 +22,7 @@ use theca_common::hash::Sha256;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/limits", get(limits))
+        .route("/instance", get(instance))
         .route("/libraries", post(create_library).get(list_libraries))
         .route(
             "/libraries/{id}",
@@ -52,6 +53,17 @@ async fn limits(State(state): State<AppState>, _user: CurrentAccount) -> Json<ap
     let settings = state.settings.get();
     Json(api::Limits {
         max_pending_uploads: u32::try_from(settings.max_pending_uploads).unwrap_or(u32::MAX),
+    })
+}
+
+/// What a login page shows before anyone logs in: the instance's name, and
+/// whether accounts can be created (registration open, and emails sendable).
+#[utoipa::path(get, path = "/api/v1/instance", responses((status = 200, body = api::Instance)))]
+async fn instance(State(state): State<AppState>) -> Json<api::Instance> {
+    let settings = state.settings.get();
+    Json(api::Instance {
+        name: settings.instance_name.clone(),
+        registration: settings.registration_open && settings.smtp.is_some(),
     })
 }
 
