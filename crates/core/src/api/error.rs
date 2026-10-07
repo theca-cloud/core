@@ -123,6 +123,12 @@ impl From<sqlx::Error> for HttpError {
                         "a personal organization has no other member",
                     );
                 }
+                Some("namespace_name") => {
+                    return Self::conflict(
+                        "namespace_name_taken",
+                        "a namespace with this name exists",
+                    );
+                }
                 Some("library_name") => {
                     return Self::conflict("library_name_taken", "a library with this name exists");
                 }

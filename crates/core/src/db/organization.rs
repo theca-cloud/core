@@ -67,6 +67,38 @@ pub async fn owned(
     .await
 }
 
+/// An organization as its members see it, with its usage.
+pub async fn details(
+    pool: &PgPool,
+    organization: i64,
+    account: i64,
+) -> sqlx::Result<api::Organization> {
+    sqlx::query_as!(
+        api::Organization,
+        r#"SELECT o.uuid AS id, o.name, o.personal_of IS NOT NULL AS "personal!",
+                  EXISTS (SELECT 1 FROM "user" u WHERE u.pk = o.owner AND u.account = $2) AS "owner!",
+                  o.quota,
+                  (SELECT coalesce(sum(c.stored_size), 0)::bigint FROM chunk c WHERE c.organization = o.pk)
+                      AS "used!"
+           FROM organization o WHERE o.pk = $1"#,
+        organization,
+        account
+    )
+    .fetch_one(pool)
+    .await
+}
+
+pub async fn rename(pool: &PgPool, organization: i64, name: &str) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE organization SET name = $2 WHERE pk = $1",
+        organization,
+        name
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// The organization, if the credential's account is a joined member of it.
 pub async fn joined(
     pool: &PgPool,

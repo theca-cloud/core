@@ -971,3 +971,49 @@ async fn sizes(pool: PgPool) {
         .unwrap();
     assert_eq!(trash[0].size, Some(300));
 }
+
+#[sqlx::test]
+async fn what_the_web_app_shows(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    assert!(docs.writable);
+    let made = alice.folders(docs.root, &["A", "A/B"]).await.unwrap();
+    let b = made[1].id;
+
+    // The breadcrumb: the folders above, from the root (named ""), with the path.
+    let info = alice.info(b).await.unwrap();
+    let ancestors: Vec<(Uuid, &str)> = info
+        .ancestors
+        .iter()
+        .map(|a| (a.id, a.name.as_str()))
+        .collect();
+    assert_eq!(ancestors, [(docs.root, ""), (made[0].id, "A")]);
+    assert_eq!(info.path, "/A/B");
+    let root = alice.info(docs.root).await.unwrap();
+    assert!(root.ancestors.is_empty());
+    assert_eq!(root.path, "/");
+
+    // Whether a library can be written, per member.
+    w.add_member(docs.id, 2, "read").await;
+    let bob = w.as_user(2).await;
+    let theirs: Vec<api::Library> = bob.get("/api/v1/libraries").await.unwrap();
+    assert!(!theirs.iter().find(|l| l.id == docs.id).unwrap().writable);
+
+    // The account's role: owner of its organization, instance admin.
+    let me: api::Me = alice.get("/api/v1/me").await.unwrap();
+    assert!(!me.instance_admin);
+    assert!(
+        me.organizations
+            .iter()
+            .find(|m| m.organization == w.organizations[0])
+            .unwrap()
+            .owner
+    );
+    let me: api::Me = bob.get("/api/v1/me").await.unwrap();
+    assert!(me.organizations.iter().all(|m| !m.owner));
+    w.sql("UPDATE account SET instance_admin = true WHERE pk = 2")
+        .await;
+    let me: api::Me = bob.get("/api/v1/me").await.unwrap();
+    assert!(me.instance_admin);
+}

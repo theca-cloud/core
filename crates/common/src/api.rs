@@ -72,6 +72,10 @@ pub struct Library {
     pub name: String,
     /// Its root folder.
     pub root: Uuid,
+    /// Whether the account may write in it: its role, within its credential's
+    /// scope and read-only cap.
+    #[serde(default)]
+    pub writable: bool,
 }
 
 /// A file or folder.
@@ -343,8 +347,105 @@ pub struct Me {
     pub email: String,
     /// Whether logging in with the password also asks for a TOTP code.
     pub totp: bool,
+    /// An instance admin (organizations, storages, settings).
+    #[serde(default)]
+    pub instance_admin: bool,
     /// Its memberships.
     pub organizations: Vec<Membership>,
+}
+
+/// A member's role in a library.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    /// Reads.
+    Read,
+    /// Reads, uploads, moves, deletes.
+    Write,
+    /// A role this version doesn't know.
+    #[serde(other)]
+    Unknown,
+}
+
+/// A library's member.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LibraryMember {
+    /// The organization's member (as `GET /organizations/{id}/members` lists them).
+    pub user: Uuid,
+    /// Its email.
+    pub email: String,
+    /// False while it's an invitation not accepted yet.
+    pub joined: bool,
+    /// Its role.
+    pub role: Role,
+}
+
+/// `PUT /libraries/{id}/members/{user}`: adds the member, or changes its role.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SetRole {
+    /// The role.
+    pub role: Role,
+}
+
+/// One of an organization's libraries, to its owner.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct OrganizationLibrary {
+    /// The library.
+    pub id: Uuid,
+    /// Its name.
+    pub name: String,
+    /// How many members it has (none: nobody reaches it until given some).
+    pub members: i64,
+}
+
+/// A dedup namespace: its libraries' members trust each other.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Namespace {
+    /// The namespace.
+    pub id: Uuid,
+    /// Its name.
+    pub name: String,
+    /// The libraries in it.
+    pub libraries: Vec<Uuid>,
+}
+
+/// `POST /organizations/{id}/namespaces`, `PATCH /namespaces/{id}`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NamespaceName {
+    /// Its name.
+    pub name: String,
+}
+
+/// An organization, to one of its members.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Organization {
+    /// The organization.
+    pub id: Uuid,
+    /// Its name.
+    pub name: String,
+    /// The account's personal organization (shown as "My files").
+    pub personal: bool,
+    /// The account owns it.
+    pub owner: bool,
+    /// Its quota in bytes; none: unlimited.
+    pub quota: Option<i64>,
+    /// What it stores, in bytes (counted against the quota).
+    pub used: i64,
+}
+
+/// `POST /organizations`, `PATCH /organizations/{id}`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct OrganizationName {
+    /// Its name.
+    pub name: String,
 }
 
 /// An account's membership in an organization.
@@ -361,6 +462,9 @@ pub struct Membership {
     pub personal: bool,
     /// Suspended by the instance admin: nothing in it is reachable.
     pub suspended: bool,
+    /// The account owns it (its administrator: members, settings).
+    #[serde(default)]
+    pub owner: bool,
 }
 
 /// A live session of the account.
@@ -576,12 +680,26 @@ pub struct NodeInfo {
     pub parent: Option<Uuid>,
     /// Its path in the library, e.g. `/a/b.txt` (`/` for the root).
     pub path: String,
+    /// The folders above it, from the library's root (named `""`) to its
+    /// folder; none for the root.
+    #[serde(default)]
+    pub ancestors: Vec<Ancestor>,
     /// A file's current version.
     pub current_version: Option<Uuid>,
     /// A file's size in bytes (its current version's); none for a folder or a
     /// file without a version yet.
     #[serde(default)]
     pub size: Option<i64>,
+}
+
+/// A folder above a node.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Ancestor {
+    /// The folder.
+    pub id: Uuid,
+    /// Its name (empty for the library's root).
+    pub name: String,
 }
 
 /// `POST /nodes/{parent}/folders`: folders to create in a folder, like

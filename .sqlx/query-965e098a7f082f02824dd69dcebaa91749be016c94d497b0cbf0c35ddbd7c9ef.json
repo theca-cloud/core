@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT l.uuid AS id, o.uuid AS organization, l.name, n.uuid AS root,\n                  a.can_write AS \"writable!\"\n           FROM library_access($1) a\n           JOIN library l ON l.pk = a.library\n           JOIN organization o ON o.pk = l.owner\n           JOIN node n ON n.library = l.pk AND n.parent IS NULL\n           ORDER BY lower(o.name), lower(l.name)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "organization",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "root",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "writable!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "965e098a7f082f02824dd69dcebaa91749be016c94d497b0cbf0c35ddbd7c9ef"
+}

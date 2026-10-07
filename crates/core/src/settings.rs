@@ -40,6 +40,9 @@ pub struct Settings {
     pub trash_retention: Duration,
     /// Anyone may create an account (`registration = open`; needs SMTP).
     pub registration_open: bool,
+    /// Every account may create company organizations
+    /// (`organization_creation = anyone`), not only instance admins.
+    pub organization_creation_open: bool,
     /// Where emails go out. `None` (no `smtp_host`): emails stay queued.
     pub smtp: Option<Smtp>,
     /// Each background job's interval, by job name.
@@ -70,6 +73,11 @@ pub const DEFINITIONS: &[Definition] = &[
         "registration",
         "closed",
         "open: anyone can create an account (needs SMTP); closed: invitations only.",
+    ),
+    def(
+        "organization_creation",
+        "anyone",
+        "anyone: every account can create company organizations; admins: only instance admins.",
     ),
     def(
         "gc_grace_period_secs",
@@ -330,6 +338,11 @@ impl Settings {
                 "open" => Ok(true),
                 "closed" => Ok(false),
                 _ => Err("open or closed".into()),
+            })?,
+            organization_creation_open: take(values, "organization_creation", |v| match v {
+                "anyone" => Ok(true),
+                "admins" => Ok(false),
+                _ => Err("anyone or admins".into()),
             })?,
             smtp: smtp(values)?,
             trash_retention: take(values, "trash_retention_secs", seconds)?,

@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT n.pk, n.organization\n           FROM namespace n JOIN organization o ON o.pk = n.organization JOIN \"user\" u ON u.pk = o.owner\n           WHERE n.uuid = $1 AND u.account = $2 AND ($3::bigint IS NULL OR o.pk = $3)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "organization",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "2f2295b9b68c10d27841d5e55e2024e247d6ce9cf6960fe9eb8ff9068dfd14c4"
+}

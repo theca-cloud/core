@@ -3410,7 +3410,7 @@ dependencies = [
 
 [[package]]
 name = "theca-client"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "bytes",
  "futures",
@@ -3426,13 +3426,14 @@ dependencies = [
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams",
  "web-sys",
  "web-time",
 ]
 
 [[package]]
 name = "theca-common"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "chrono",
  "fastcdc",
@@ -3450,7 +3451,7 @@ dependencies = [
 
 [[package]]
 name = "theca-core"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "argon2",
  "askama",

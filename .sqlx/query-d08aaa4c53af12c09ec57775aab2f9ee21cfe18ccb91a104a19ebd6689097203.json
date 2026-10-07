@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM library_namespace ln USING library l\n         WHERE ln.namespace = $1 AND ln.library = l.pk AND l.uuid = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d08aaa4c53af12c09ec57775aab2f9ee21cfe18ccb91a104a19ebd6689097203"
+}

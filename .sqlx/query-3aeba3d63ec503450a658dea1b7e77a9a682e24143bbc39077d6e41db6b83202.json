@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO library_member (organization, library, \"user\", role)\n           SELECT $1, $2, u.pk, $4 FROM \"user\" u WHERE u.uuid = $3 AND u.organization = $1\n           ON CONFLICT (library, \"user\") DO UPDATE SET role = EXCLUDED.role",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3aeba3d63ec503450a658dea1b7e77a9a682e24143bbc39077d6e41db6b83202"
+}

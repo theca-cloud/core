@@ -12,6 +12,7 @@ pub mod library;
 pub mod node;
 pub mod organization;
 pub mod setup;
+pub mod sharing;
 
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;

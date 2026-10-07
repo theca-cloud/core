@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT uuid, email, EXISTS (\n               SELECT 1 FROM identity WHERE account = $1 AND kind = 'totp' AND details->>'confirmed' = 'true'\n           ) AS \"totp!\" FROM account WHERE pk = $1",
+  "query": "SELECT uuid, email, instance_admin, EXISTS (\n               SELECT 1 FROM identity WHERE account = $1 AND kind = 'totp' AND details->>'confirmed' = 'true'\n           ) AS \"totp!\" FROM account WHERE pk = $1",
   "describe": {
     "columns": [
       {
@@ -15,6 +15,11 @@
       },
       {
         "ordinal": 2,
+        "name": "instance_admin",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
         "name": "totp!",
         "type_info": "Bool"
       }
@@ -27,8 +32,9 @@
     "nullable": [
       false,
       false,
+      false,
       null
     ]
   },
-  "hash": "cd3e82f065d1a23f6b40adf058876a74acdc8bb3c0aed74d728bf483ab0c4190"
+  "hash": "e8cafd53044b8d20ba379067486988f4dbc0e3b0725a0c0030a2f1486e55a1f5"
 }

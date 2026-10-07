@@ -284,7 +284,7 @@ pub async fn sessions(
 /// The account and its organizations (joined or invited).
 pub async fn me(pool: &PgPool, account: i64) -> sqlx::Result<api::Me> {
     let a = sqlx::query!(
-        r#"SELECT uuid, email, EXISTS (
+        r#"SELECT uuid, email, instance_admin, EXISTS (
                SELECT 1 FROM identity WHERE account = $1 AND kind = 'totp' AND details->>'confirmed' = 'true'
            ) AS "totp!" FROM account WHERE pk = $1"#,
         account
@@ -294,7 +294,8 @@ pub async fn me(pool: &PgPool, account: i64) -> sqlx::Result<api::Me> {
     let organizations = sqlx::query_as!(
         api::Membership,
         r#"SELECT o.uuid AS organization, o.name, u.joined_at IS NOT NULL AS "joined!",
-                  o.personal_of IS NOT NULL AS "personal!", o.suspended_at IS NOT NULL AS "suspended!"
+                  o.personal_of IS NOT NULL AS "personal!", o.suspended_at IS NOT NULL AS "suspended!",
+                  o.owner IS NOT DISTINCT FROM u.pk AS "owner!"
            FROM "user" u JOIN organization o ON o.pk = u.organization
            WHERE u.account = $1 ORDER BY lower(o.name)"#,
         account
@@ -305,6 +306,7 @@ pub async fn me(pool: &PgPool, account: i64) -> sqlx::Result<api::Me> {
         account: a.uuid,
         email: a.email,
         totp: a.totp,
+        instance_admin: a.instance_admin,
         organizations,
     })
 }

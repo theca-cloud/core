@@ -1,6 +1,11 @@
 # Changelog
 
 Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
+## [0.9.0] - 2026-10-07
+
+### Features
+
+- What the web app needs (members, namespaces, organizations, shared client code, the WASM API) (**breaking**)
 ## [0.8.0] - 2026-10-07
 
 ### Features

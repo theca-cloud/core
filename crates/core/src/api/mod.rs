@@ -12,6 +12,7 @@ mod organizations;
 mod providers;
 mod session;
 pub mod setup;
+mod sharing;
 mod totp;
 mod v1;
 
@@ -113,7 +114,20 @@ pub struct AppState {
         accounts::forgot,
         accounts::reset,
         accounts::accept,
+        organizations::create,
+        organizations::organization,
+        organizations::rename,
         organizations::members,
+        sharing::libraries,
+        sharing::members,
+        sharing::set_member,
+        sharing::remove_member,
+        sharing::namespaces,
+        sharing::create_namespace,
+        sharing::rename_namespace,
+        sharing::delete_namespace,
+        sharing::add_library,
+        sharing::remove_library,
         organizations::add,
         organizations::remove,
         admin::run_job,
@@ -157,6 +171,7 @@ pub fn router(state: AppState) -> Router {
                 .merge(admin::router())
                 .merge(accounts::router())
                 .merge(organizations::router())
+                .merge(sharing::router())
                 .merge(session::router())
                 .merge(app_password::router())
                 .merge(totp::router())
@@ -292,6 +307,7 @@ mod tests {
             oidc_allow_internal_issuers: false,
             trash_retention: Duration::from_secs(0),
             registration_open: false,
+            organization_creation_open: true,
             smtp: None,
             job_intervals: Default::default(),
             rate_limits: Default::default(),

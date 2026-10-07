@@ -37,6 +37,7 @@ Changed through the admin API (`PATCH /api/v1/admin/settings`), which validates 
 | `presigned_url_lifetime_secs` | `900` (15 min) | How long presigned upload and download URLs stay valid. |
 | `max_pending_uploads` | `15` | Most chunks a user may have being uploaded at once (declared, upload URL still valid, not uploaded yet). Requesting more upload URLs is refused (`429`); clients read it (`GET /api/v1/limits`) and size their upload window by it, so raising it speeds every client up, lowering it never makes them fail. |
 | `registration` | `closed` | `open`: anyone can create an account (verified by email, so it needs SMTP). `closed`: accounts come from invitations (and the setup). |
+| `organization_creation` | `anyone` | `anyone`: every account can create company organizations (and owns them). `admins`: only instance admins (the admin API creates them for others). |
 | `smtp_host` | | The SMTP server. Unset: emails stay queued (and registration and invitations are unavailable). Changes apply to the next sending run, no restart needed. |
 | `smtp_port` | `587` | Its port. |
 | `smtp_tls` | `starttls` | `starttls` (587), `tls` (465), or `none` (a server on the same host or network only). |

@@ -8,11 +8,12 @@ use std::net::TcpListener;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
+use futures::TryStreamExt;
 use serde_json::json;
 use sqlx::PgPool;
 use theca_client::{
-    Cancel, Client, DownloadOptions, Downloader, FileSink, MemorySink, MemorySource, Target,
-    UploadOptions, UploadProgress, Uploader, download, upload,
+    Cancel, Client, DownloadOptions, Downloader, Error, FileSink, MemorySink, MemorySource, Target,
+    UploadOptions, UploadProgress, Uploader, download, place, stream, upload,
 };
 use theca_common::api;
 use theca_common::name::Name;
@@ -678,4 +679,103 @@ async fn the_window_follows_the_server(pool: PgPool) {
     .expect("declarations within the server's window are never refused")
     .unwrap();
     assert_eq!(fetch(&client, committed.file, None).await, bytes);
+}
+
+#[sqlx::test]
+async fn placing_and_streaming(pool: PgPool) {
+    let server = start(&pool).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut client = Client::new(&server.url).unwrap();
+    let setup: api::Setup = serde_json::from_value(json!({
+        "admin_email": "admin@test.theca", "admin_password": "a long password", "organization": "Acme",
+        "storages": [{ "name": "main", "implementation": "filesystem", "path": dir.path() }],
+    }))
+    .unwrap();
+    let me = client.setup(&setup, None).await.unwrap();
+    let library = client
+        .create_library(me.organizations[0].organization, "Docs")
+        .await
+        .unwrap();
+    let (id, root) = (library.id, library.root);
+
+    // A tree: its folders created (an empty one too), each file a new one; a
+    // folder with an invalid name fails its files alone.
+    let files: Vec<String> = ["a.txt", "Docs/b.txt", "Docs/sub/c.txt", "bad:name/d.txt"]
+        .map(String::from)
+        .into();
+    let targets = place(&client, id, root, &["Docs/empty".into()], &files)
+        .await
+        .unwrap();
+    assert!(matches!(&targets[0], Ok(Target::New { parent, .. }) if *parent == root));
+    assert!(matches!(&targets[2], Ok(Target::New { name, .. }) if name.as_str() == "c.txt"));
+    assert!(matches!(&targets[3], Err(Error::InvalidName(_))));
+    let docs = client
+        .children(root)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|n| n.name == "Docs")
+        .unwrap();
+    let inside: Vec<String> = client
+        .children(docs.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|n| n.name)
+        .collect();
+    assert_eq!(inside, ["empty", "sub"]);
+    let sources = [MemorySource(data(3000, 20)), MemorySource(data(4000, 21))];
+    let options = UploadOptions::default();
+    let mut committed = Vec::new();
+    for (source, target) in sources.iter().zip(targets.into_iter().take(2)) {
+        let done = upload(
+            &client,
+            source,
+            target.unwrap(),
+            &options,
+            |_| {},
+            &Cancel::default(),
+        )
+        .await
+        .unwrap();
+        committed.push(done);
+    }
+
+    // Again, names in another case: new versions of the files there, based
+    // on their current versions; a file where a folder is refused.
+    let files: Vec<String> = ["A.TXT", "docs/B.txt", "Docs"].map(String::from).into();
+    let targets = place(&client, id, root, &[], &files).await.unwrap();
+    for (target, done) in targets.iter().zip(&committed) {
+        assert!(matches!(target,
+            Ok(Target::Version { file, base, .. }) if *file == done.file && *base == Some(done.version)));
+    }
+    assert!(matches!(&targets[2], Err(Error::FolderExists(_))));
+
+    // A file streamed in order, a few chunks ahead, as a browser download.
+    let big = data(6 * 1024 * 1024, 22);
+    let target = Target::New {
+        library: id,
+        parent: root,
+        name: Name::new("big.bin").unwrap(),
+    };
+    let done = upload(
+        &client,
+        &MemorySource(big.clone()),
+        target,
+        &options,
+        |_| {},
+        &Cancel::default(),
+    )
+    .await
+    .unwrap();
+    let options = DownloadOptions {
+        parallel: 2,
+        ..Default::default()
+    };
+    let chunks: Vec<Vec<u8>> = stream(client.clone(), done.file, None, options)
+        .try_collect()
+        .await
+        .unwrap();
+    assert!(chunks.len() > 2);
+    assert_eq!(chunks.concat(), big);
 }

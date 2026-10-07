@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM library_member m USING \"user\" u\n           WHERE m.library = $1 AND m.\"user\" = u.pk AND u.uuid = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "41c9a6c80a1edc6a1dd2cfd4020e943290c8eb5bfaa87b59dc16f2aae7969e84"
+}
