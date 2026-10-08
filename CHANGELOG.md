@@ -1,6 +1,15 @@
 # Changelog
 
 Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
+## [0.17.1] - 2026-10-08
+
+### Fixes
+
+- **core**: An organization's provider links by email only its members
+
+### Documentation
+
+- **core**: The CORS rule an S3 bucket needs for the web app
 ## [0.17.0] - 2026-10-08
 
 ### Features
