@@ -502,6 +502,56 @@ async fn search(pool: PgPool) {
         code(alice.search("ab").await.unwrap_err()),
         (StatusCode::BAD_REQUEST, "query_too_short".into())
     );
+    // In a context: below a folder (deeper too, not the folder itself), an
+    // organization, a library; one of them at most.
+    let deeper = alice.mkdir(reports, "2026").await;
+    alice
+        .file(&docs, deeper, "deep report.txt", &data(10, 4))
+        .await;
+    let scoped = |scope: String| {
+        let alice = &alice;
+        async move {
+            let found: Vec<api::SearchResult> = alice
+                .get(&format!("/api/v1/search?q=report&{scope}"))
+                .await?;
+            Ok::<_, Failure>(found.into_iter().map(|r| r.path).collect::<Vec<_>>())
+        }
+    };
+    assert_eq!(
+        scoped(format!("folder={reports}")).await.unwrap(),
+        ["/Reports/2026/deep report.txt", "/Reports/Q1 report.pdf"]
+    );
+    assert_eq!(
+        scoped(format!("folder={deeper}")).await.unwrap(),
+        ["/Reports/2026/deep report.txt"]
+    );
+    assert_eq!(
+        scoped(format!("organization={}", w.organizations[0]))
+            .await
+            .unwrap()
+            .len(),
+        3
+    );
+    assert!(
+        scoped(format!("organization={}", w.organizations[1]))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        scoped(format!("library={}", theirs.id))
+            .await
+            .unwrap()
+            .len(),
+        0
+    );
+    let both = scoped(format!("library={}&folder={reports}", docs.id))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        code(both),
+        (StatusCode::BAD_REQUEST, "invalid_scope".into())
+    );
 }
 
 #[sqlx::test]

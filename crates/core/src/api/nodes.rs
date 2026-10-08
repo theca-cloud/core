@@ -397,6 +397,10 @@ pub struct SearchParams {
     q: String,
     /// Only this library.
     library: Option<Uuid>,
+    /// Only this organization's libraries.
+    organization: Option<Uuid>,
+    /// Only below this folder.
+    folder: Option<Uuid>,
 }
 
 /// Files and folders by name (case-insensitive), in the libraries the user
@@ -417,7 +421,17 @@ pub async fn search(
             "search needs at least 3 characters",
         ));
     }
-    Ok(Json(
-        db::node::search(&state.pool, &user, q, params.library).await?,
-    ))
+    let scopes = [params.library, params.organization, params.folder];
+    if scopes.iter().flatten().count() > 1 {
+        return Err(HttpError::bad_request(
+            "invalid_scope",
+            "search in one library, organization or folder at most",
+        ));
+    }
+    let scope = db::node::SearchScope {
+        library: params.library,
+        organization: params.organization,
+        folder: params.folder,
+    };
+    Ok(Json(db::node::search(&state.pool, &user, q, &scope).await?))
 }

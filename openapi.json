@@ -7,7 +7,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.12.0"
+    "version": "0.13.0"
   },
   "paths": {
     "/api/health": {
@@ -4052,6 +4052,26 @@
             "name": "library",
             "in": "query",
             "description": "Only this library.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "organization",
+            "in": "query",
+            "description": "Only this organization's libraries.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "folder",
+            "in": "query",
+            "description": "Only below this folder.",
             "required": false,
             "schema": {
               "type": "string",

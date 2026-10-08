@@ -1,6 +1,11 @@
 # Changelog
 
 Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
+## [0.13.0] - 2026-10-08
+
+### Features
+
+- **core**: Search in an organization or below a folder
 ## [0.12.0] - 2026-10-08
 
 ### Features
