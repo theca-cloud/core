@@ -233,6 +233,23 @@ struct Client {
 
 type Failure = (StatusCode, Value);
 
+/// A batch item's error as a call of its own would have failed.
+fn failure(status: Option<u16>, error: Option<api::ApiError>) -> Failure {
+    (
+        StatusCode::from_u16(status.unwrap()).unwrap(),
+        serde_json::to_value(error.unwrap()).unwrap(),
+    )
+}
+
+/// A batch of one's node, or its error.
+fn one_node(outcomes: Vec<api::NodeOutcome>) -> Result<api::NodeInfo, Failure> {
+    let o = outcomes.into_iter().next().unwrap();
+    match o.node {
+        Some(node) => Ok(node),
+        None => Err(failure(o.status, o.error)),
+    }
+}
+
 /// A chunk ready to upload: its declaration and stored bytes.
 struct Prepared {
     declare: api::Declare,
@@ -290,6 +307,49 @@ impl Client {
                 status,
                 serde_json::from_slice(&bytes).unwrap_or(Value::Null),
             ))
+        }
+    }
+
+    /// One node renamed or moved: `PATCH /nodes`, a batch of one.
+    async fn patch_node(&self, id: Uuid, mut change: Value) -> Result<api::NodeInfo, Failure> {
+        change["id"] = json!(id);
+        let outcomes: Vec<api::NodeOutcome> = self
+            .json("PATCH", "/api/v1/nodes", &json!({ "nodes": [change] }))
+            .await?;
+        one_node(outcomes)
+    }
+
+    /// One node copied: `POST /nodes/copy`, a batch of one.
+    async fn copy_node(&self, id: Uuid, mut copy: Value) -> Result<api::NodeInfo, Failure> {
+        copy["id"] = json!(id);
+        let outcomes: Vec<api::NodeOutcome> = self
+            .json("POST", "/api/v1/nodes/copy", &json!({ "nodes": [copy] }))
+            .await?;
+        one_node(outcomes)
+    }
+
+    /// One node trashed (or `permanent`ly deleted): `POST /nodes/trash`, a
+    /// batch of one; the status a call of its own would have answered.
+    async fn trash_node(&self, id: Uuid, permanent: bool) -> StatusCode {
+        let body = json!({ "nodes": [id], "permanent": permanent });
+        match self.json::<Vec<api::NodeOutcome>>("POST", "/api/v1/nodes/trash", &body).await {
+            Ok(outcomes) => match &outcomes[0].status {
+                Some(status) => StatusCode::from_u16(*status).unwrap(),
+                None => StatusCode::NO_CONTENT,
+            },
+            Err((status, _)) => status,
+        }
+    }
+
+    /// One node out of the trash: `POST /nodes/restore`, a batch of one.
+    async fn restore_node(&self, id: Uuid) -> Result<api::Restored, Failure> {
+        let outcomes: Vec<api::RestoreOutcome> = self
+            .json("POST", "/api/v1/nodes/restore", &json!({ "nodes": [id] }))
+            .await?;
+        let o = outcomes.into_iter().next().unwrap();
+        match o.restored {
+            Some(restored) => Ok(restored),
+            None => Err(failure(o.status, o.error)),
         }
     }
 

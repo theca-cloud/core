@@ -308,35 +308,80 @@ impl Client {
         self.get(&format!("/api/v1/nodes/{id}")).await
     }
 
-    /// Renames and/or moves a node (`replace`: merge into a file of that name).
-    pub async fn update_node(
+    /// Renames and/or moves nodes (`replace`: merge into a file of that name),
+    /// each in its own transaction (at most 1000): each one's outcome, in order.
+    pub async fn update_nodes(
         &self,
-        id: Uuid,
-        update: &api::UpdateNode,
-    ) -> Result<api::NodeInfo, Error> {
-        self.call(Method::PATCH, &format!("/api/v1/nodes/{id}"), Some(update))
-            .await
+        nodes: &[api::UpdateNode],
+    ) -> Result<Vec<Result<api::NodeInfo, Error>>, Error> {
+        let body = api::UpdateNodes {
+            nodes: nodes.to_vec(),
+        };
+        let outcomes: Vec<api::NodeOutcome> = self
+            .call(Method::PATCH, "/api/v1/nodes", Some(&body))
+            .await?;
+        Ok(outcomes.into_iter().map(node_outcome).collect())
     }
 
-    /// Copies a node (`replace`: a new version of a file of that name).
-    pub async fn copy_node(&self, id: Uuid, copy: &api::CopyNode) -> Result<api::NodeInfo, Error> {
-        self.post(&format!("/api/v1/nodes/{id}/copy"), copy).await
+    /// Copies nodes (`replace`: a new version of a file of that name), each in
+    /// its own transaction (at most 1000): each copy's outcome, in order.
+    pub async fn copy_nodes(
+        &self,
+        nodes: &[api::CopyNode],
+    ) -> Result<Vec<Result<api::NodeInfo, Error>>, Error> {
+        let body = api::CopyNodes {
+            nodes: nodes.to_vec(),
+        };
+        let outcomes: Vec<api::NodeOutcome> = self.post("/api/v1/nodes/copy", &body).await?;
+        Ok(outcomes.into_iter().map(node_outcome).collect())
     }
 
-    /// Puts a node in the trash, or (`permanent`, from the trash) deletes it
-    /// for good.
-    pub async fn delete_node(&self, id: Uuid, permanent: bool) -> Result<(), Error> {
-        self.call(
-            Method::DELETE,
-            &format!("/api/v1/nodes/{id}?permanent={permanent}"),
-            None::<&()>,
-        )
-        .await
+    /// Puts nodes in the trash, or (`permanent`, from the trash) deletes them
+    /// for good, each in its own transaction (at most 1000): each one's
+    /// outcome, in order.
+    pub async fn trash_nodes(
+        &self,
+        nodes: &[Uuid],
+        permanent: bool,
+    ) -> Result<Vec<Result<(), Error>>, Error> {
+        let body = api::TrashNodes {
+            nodes: nodes.to_vec(),
+            permanent,
+        };
+        let outcomes: Vec<api::NodeOutcome> = self.post("/api/v1/nodes/trash", &body).await?;
+        Ok(outcomes
+            .into_iter()
+            .map(|o| match o.error {
+                Some(error) => Err(Error::Api {
+                    status: o.status.unwrap_or(409),
+                    error,
+                }),
+                None => Ok(()),
+            })
+            .collect())
     }
 
-    /// Takes a node out of the trash.
-    pub async fn restore_node(&self, id: Uuid) -> Result<api::Restored, Error> {
-        self.post(&format!("/api/v1/nodes/{id}/restore"), &()).await
+    /// Takes nodes out of the trash, each in its own transaction (at most
+    /// 1000): each one's outcome, in order.
+    pub async fn restore_nodes(
+        &self,
+        nodes: &[Uuid],
+    ) -> Result<Vec<Result<api::Restored, Error>>, Error> {
+        let body = api::RestoreNodes {
+            nodes: nodes.to_vec(),
+        };
+        let outcomes: Vec<api::RestoreOutcome> = self.post("/api/v1/nodes/restore", &body).await?;
+        Ok(outcomes
+            .into_iter()
+            .map(|o| match (o.restored, o.error) {
+                (Some(restored), _) => Ok(restored),
+                (None, Some(error)) => Err(Error::Api {
+                    status: o.status.unwrap_or(409),
+                    error,
+                }),
+                (None, None) => Err(Error::Decode("an empty restore outcome".into())),
+            })
+            .collect())
     }
 
     /// A library's trash.
@@ -599,6 +644,18 @@ where
             }
         }
     })
+}
+
+/// A node's outcome in a batch: the node, or its error.
+fn node_outcome(o: api::NodeOutcome) -> Result<api::NodeInfo, Error> {
+    match (o.node, o.error) {
+        (Some(node), _) => Ok(node),
+        (None, Some(error)) => Err(Error::Api {
+            status: o.status.unwrap_or(409),
+            error,
+        }),
+        (None, None) => Err(Error::Decode("an empty node outcome".into())),
+    }
 }
 
 #[cfg(test)]

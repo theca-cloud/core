@@ -56,17 +56,9 @@ async fn chunk_gc(pool: PgPool) {
     let (in_flight, _) = alice.pending(docs.id, &data(1000, 4)).await;
     let in_flight = in_flight.declare.chunk;
     // gone.txt deleted for good: its chunk is unreferenced, its object stored.
-    alice
-        .call(
-            "DELETE",
-            &format!("/api/v1/nodes/{}", gone.file),
-            None,
-            true,
-        )
-        .await;
-    let purge = format!("/api/v1/nodes/{}?permanent=true", gone.file);
+    alice.trash_node(gone.file, false).await;
     assert_eq!(
-        alice.call("DELETE", &purge, None, true).await.0,
+        alice.trash_node(gone.file, true).await,
         StatusCode::NO_CONTENT
     );
 
@@ -160,14 +152,7 @@ async fn trash_purge(pool: PgPool) {
         .upload(&docs, new_file(&docs, "a.txt"), &data(1000, 1))
         .await
         .unwrap();
-    alice
-        .call(
-            "DELETE",
-            &format!("/api/v1/nodes/{}", file.file),
-            None,
-            true,
-        )
-        .await;
+    alice.trash_node(file.file, false).await;
 
     // 30 days by default.
     assert_eq!(w.run(Job::TrashPurge).await, 0);
@@ -188,14 +173,7 @@ async fn trash_purge(pool: PgPool) {
         .upload(&docs, new_file(&docs, "b.txt"), &data(1000, 2))
         .await
         .unwrap();
-    alice
-        .call(
-            "DELETE",
-            &format!("/api/v1/nodes/{}", other.file),
-            None,
-            true,
-        )
-        .await;
+    alice.trash_node(other.file, false).await;
     assert_eq!(w.run(Job::TrashPurge).await, 1);
 
     // A trashed library, whole.
