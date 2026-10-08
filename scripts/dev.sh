@@ -22,8 +22,10 @@ url="postgres://theca:$password@localhost:5432/theca"
 
 mkdir -p data/secrets data/garage
 printf '%s\n' "$url" > data/secrets/database_url
-[ -f data/secrets/server_key ] || : > data/secrets/server_key  # empty: the server generates the key
-[ -f data/secrets/data_key ] || : > data/secrets/data_key
+# Generated once: the server only reads its keys.
+for key in server_key data_key; do
+    [ -s "data/secrets/$key" ] || openssl rand -hex 32 > "data/secrets/$key"
+done
 
 # Garage config, secrets generated once.
 if [ ! -f data/garage/garage.toml ]; then

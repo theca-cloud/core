@@ -99,12 +99,16 @@ pub fn secret(name: &'static str) -> Result<String, Error> {
     read_secret(name, PathBuf::from(required(name)?))
 }
 
-fn read_secret(name: &'static str, path: PathBuf) -> Result<String, Error> {
-    let value = std::fs::read_to_string(&path).map_err(|source| Error::SecretFile {
-        name,
-        path,
-        source,
-    })?;
+/// Reads a secret file, never writing it: a missing or empty one is an error
+/// naming the variable.
+pub(crate) fn read_secret(name: &'static str, path: PathBuf) -> Result<String, Error> {
+    let value = match std::fs::read_to_string(&path) {
+        Ok(value) => value,
+        Err(source) => return Err(Error::SecretFile { name, path, source }),
+    };
+    if value.trim().is_empty() {
+        return Err(Error::EmptySecret { name, path });
+    }
     Ok(value.trim_end_matches(['\n', '\r']).to_owned())
 }
 
@@ -122,6 +126,15 @@ mod tests {
     #[test]
     fn missing_secret_file_names_the_variable() {
         let err = read_secret("X__FILE", "/nonexistent/theca".into()).unwrap_err();
+        assert!(err.to_string().contains("X__FILE"), "{err}");
+    }
+
+    #[test]
+    fn empty_secret_file_names_the_variable() {
+        let path = std::env::temp_dir().join(format!("theca-secret-empty-{}", std::process::id()));
+        std::fs::write(&path, "\n").unwrap();
+        let err = read_secret("X__FILE", path).unwrap_err();
+        assert!(matches!(err, Error::EmptySecret { .. }), "{err}");
         assert!(err.to_string().contains("X__FILE"), "{err}");
     }
 

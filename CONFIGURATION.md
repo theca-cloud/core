@@ -11,13 +11,13 @@ A test (`tests/configuration.rs`) fails if a variable or a setting read by the c
 
 ## Environment variables
 
-**Secrets only exist as `X__FILE`**: the variable holds the path to a file containing the value (a trailing newline is ignored). Everything else is a plain variable.
+**Secrets only exist as `X__FILE`**: the variable holds the path to a file containing the value (a trailing newline is ignored). Everything else is a plain variable. The server only reads these files, never writes them (they can be read-only, e.g. Docker secrets): a missing or empty one stops it at startup, naming the variable.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `DATABASE_URL__FILE` | yes | | File containing the PostgreSQL URL, e.g. `postgres://user:password@host:5432/theca`. PostgreSQL 18+ with the built-in `C.UTF-8` collation (`initdb --locale-provider=builtin --builtin-locale=C.UTF-8`); the server refuses to start otherwise. |
-| `SERVER_KEY__FILE` | yes | | File containing the server's key (64 hex characters). If the file is empty, the server generates a key and writes it there (the file must then be writable). Derives the key signing the server's own upload/download URLs: rotating it only invalidates the URLs in flight. |
-| `DATA_KEY__FILE` | yes | | File containing the key encrypting secrets stored in the database (TOTP secrets), 64 hex characters; generated into the file if empty. **Back it up with the database and never change it**: without it, those secrets are lost (users must set up TOTP again). |
+| `SERVER_KEY__FILE` | yes | | File containing the server's key: 64 hex characters, e.g. `openssl rand -hex 32`. Derives the key signing the server's own upload/download URLs: rotating it only invalidates the URLs in flight. |
+| `DATA_KEY__FILE` | yes | | File containing the key encrypting secrets stored in the database (TOTP secrets): 64 hex characters, e.g. `openssl rand -hex 32`. **Back it up with the database and never change it**: without it, those secrets are lost (users must set up TOTP again). |
 | `SETUP_OPEN` | no | `false` | `true`: a fresh instance's setup needs no token (the first visitor sets it up). Otherwise the server prints the setup URL, token included, in its logs at startup. |
 | `TRUSTED_PROXIES` | no | | Comma-separated addresses or CIDRs of the reverse proxies in front of the server (e.g. `172.17.0.1, 10.0.0.0/8`). Their `X-Forwarded-For` gives the client's address. Unset: the peer is the client, so behind an undeclared proxy every client shares the proxy's address (and its rate limits). |
 | `METRICS_ADDR` | no | | Where Prometheus metrics are served (`/metrics`), e.g. `127.0.0.1:9090` or an internal address. Unset: no metrics. Never the public port. |

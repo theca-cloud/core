@@ -58,8 +58,8 @@ async fn start(pool: &PgPool) -> Server {
     let public = format!("http://127.0.0.1:{port}");
     let child = Command::new(env!("CARGO_BIN_EXE_theca-server"))
         .env("DATABASE_URL__FILE", file("database_url", &url))
-        .env("SERVER_KEY__FILE", file("server_key", ""))
-        .env("DATA_KEY__FILE", file("data_key", ""))
+        .env("SERVER_KEY__FILE", file("server_key", &"1".repeat(64)))
+        .env("DATA_KEY__FILE", file("data_key", &"2".repeat(64)))
         .env("PUBLIC_URL", &public)
         .env("LISTEN_ADDR", format!("127.0.0.1:{port}"))
         .env("SETUP_OPEN", "true")

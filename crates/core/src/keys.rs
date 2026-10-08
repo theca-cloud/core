@@ -1,6 +1,6 @@
-//! Secret keys read from files (`SERVER_KEY__FILE`, `DATA_KEY__FILE`), or
-//! generated into them when empty, and the cipher for secrets stored in the
-//! database.
+//! Secret keys read from files (`SERVER_KEY__FILE`, `DATA_KEY__FILE`), never
+//! written (decisions.md, Configuration), and the cipher for secrets stored in
+//! the database.
 
 use std::path::Path;
 
@@ -22,24 +22,10 @@ impl std::fmt::Debug for SecretKey {
 }
 
 impl SecretKey {
-    /// Loads the key from `path` (64 hex characters). If the file is empty,
-    /// generates a key and writes it there.
-    pub fn load_or_generate(name: &'static str, path: &Path) -> Result<Self, Error> {
-        let content = std::fs::read_to_string(path).map_err(|source| Error::SecretFile {
-            name,
-            path: path.to_owned(),
-            source,
-        })?;
+    /// Loads the key from `path` (64 hex characters).
+    pub fn load(name: &'static str, path: &Path) -> Result<Self, Error> {
+        let content = crate::config::read_secret(name, path.to_owned())?;
         let content = content.trim();
-        if content.is_empty() {
-            let mut key = [0u8; 32];
-            getrandom::fill(&mut key)
-                .map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
-            std::fs::write(path, hex(&key))
-                .map_err(|e| Error::KeyNotWritable(name, path.to_owned(), e))?;
-            tracing::info!(name, path = %path.display(), "generated a new key");
-            return Ok(Self(key));
-        }
         let invalid = || Error::InvalidKey(name, path.to_owned());
         if content.len() != 64 {
             return Err(invalid());
@@ -118,10 +104,6 @@ impl DataCipher {
     }
 }
 
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,12 +118,14 @@ mod tests {
     }
 
     #[test]
-    fn generates_into_empty_file_then_reloads_it() {
-        let path = temp_file("gen", "");
-        let generated = SecretKey::load_or_generate("TEST__FILE", &path).unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap().len(), 64);
-        let reloaded = SecretKey::load_or_generate("TEST__FILE", &path).unwrap();
-        assert_eq!(generated.0, reloaded.0);
+    fn loads_a_key_and_refuses_an_empty_file() {
+        let path = temp_file("load", &format!("{}\n", "ab".repeat(32)));
+        assert_eq!(SecretKey::load("TEST__FILE", &path).unwrap().0, [0xab; 32]);
+        let path = temp_file("empty", "");
+        let err = SecretKey::load("SERVER_KEY__FILE", &path).unwrap_err();
+        assert!(matches!(err, Error::EmptySecret { .. }), "{err}");
+        assert!(err.to_string().contains("openssl rand -hex 32"), "{err}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "", "never written");
     }
 
     #[test]
@@ -170,25 +154,8 @@ mod tests {
     fn rejects_invalid_content() {
         let path = temp_file("bad", "not a key");
         assert!(matches!(
-            SecretKey::load_or_generate("TEST__FILE", &path),
+            SecretKey::load("TEST__FILE", &path),
             Err(Error::InvalidKey(..))
-        ));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn empty_and_read_only_is_an_error() {
-        use std::os::unix::fs::PermissionsExt;
-        let path = temp_file("ro", "");
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
-        // Root (e.g. in CI containers) can write to read-only files: nothing to test there.
-        if std::fs::OpenOptions::new().write(true).open(&path).is_ok() {
-            eprintln!("skipped: the file is still writable (running as root?)");
-            return;
-        }
-        assert!(matches!(
-            SecretKey::load_or_generate("TEST__FILE", &path),
-            Err(Error::KeyNotWritable(..))
         ));
     }
 }
