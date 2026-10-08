@@ -4,7 +4,8 @@
 //! full session, an organization's provider a session restricted to that
 //! organization (it could assert anyone's email: see docs/decisions.md,
 //! Authentication). The start and the callback are browser navigations: they
-//! answer with redirects, to the web app (`/`, or `/login?error=...`).
+//! answer with redirects, to the web app (`/`, `/account` after a link, or
+//! `/login?error=...`).
 
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -130,7 +131,7 @@ pub struct CallbackParams {
 /// The provider sends the user back here: opens a session (or links the
 /// identity), then redirects to the web app.
 #[utoipa::path(get, path = "/api/v1/auth/oidc/{provider}/callback", params(("provider" = Uuid, Path), CallbackParams), responses(
-    (status = 303, description = "To `/`, or to `/login?error=...`"),
+    (status = 303, description = "To `/` (logged in), `/account` (linked), or `/login?error=...`"),
 ))]
 pub async fn callback(
     State(state): State<AppState>,
@@ -150,9 +151,10 @@ pub async fn callback(
                 Redirect::to(&format!("{}/", state.signer.public_url())),
             )
         }
+        // An identity linked: back to the account's page.
         Ok(None) => (
             headers,
-            Redirect::to(&format!("{}/", state.signer.public_url())),
+            Redirect::to(&format!("{}/account", state.signer.public_url())),
         ),
         Err(code) => (headers, failed(&state, code)),
     }

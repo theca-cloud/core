@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.email FROM token t\n           JOIN account a ON (t.usage = 'password_reset' AND a.uuid = t.resource)\n             OR (t.usage = 'invitation'\n                 AND a.pk = (SELECT u.account FROM \"user\" u WHERE u.uuid = t.resource))\n           WHERE t.prefix = $1 AND t.hash = $2 AND t.revoked_at IS NULL\n             AND ((t.usage = 'password_reset' AND t.created_at > now() - make_interval(secs => $3))\n               OR (t.usage = 'invitation' AND t.created_at > now() - make_interval(secs => $4)))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "email",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bytea",
+        "Float8",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ba32a871c85bf2f78f9f9b9419bbfaafbf3045a8e2f3685d141cfdaa09543a46"
+}

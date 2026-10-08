@@ -95,7 +95,7 @@ if [ "$step" = all ] || [ "$step" = test ]; then
     cargo test --workspace
 fi
 if [ "$step" = all ] || [ "$step" = wasm ]; then
-    cargo build -p theca-common -p theca-client --target wasm32-unknown-unknown
+    cargo build -p theca-common -p theca-client -p theca-password --target wasm32-unknown-unknown
 fi
 if [ "$step" = all ] || [ "$step" = deny ]; then
     cargo deny check

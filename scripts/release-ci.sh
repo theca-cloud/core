@@ -64,6 +64,12 @@ publish)
     # The browser package, as @theca/client.
     wasm-pack build crates/client --release --target web --scope theca --out-dir ../../dist/npm
     sed -i 's|"name": "@theca/theca-client"|"name": "@theca/client"|' dist/npm/package.json
+    # The password scorer beside it, its own WASM (zxcvbn's weight stays out of
+    # the engine): @theca/client/password/theca_password.js.
+    wasm-pack build crates/password --release --target web --out-dir ../../dist/npm/password
+    rm dist/npm/password/package.json dist/npm/password/.gitignore
+    jq '.files += ["password"]' dist/npm/package.json >dist/npm/package.json.new
+    mv dist/npm/package.json.new dist/npm/package.json
     registry=${gitea#https:}/api/packages/theca/npm/
     printf '%s:_authToken=%s\n' "$registry" "$GITEA_TOKEN" >dist/npm/.npmrc
     if published npm %40theca%2Fclient; then

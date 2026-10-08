@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/common", "crates/core", "crates/client"]
+members = ["crates/common", "crates/core", "crates/client", "crates/password"]
 resolver = "3"
 
 [workspace.package]
@@ -48,6 +48,7 @@ chrono = { version = "0.4", default-features = false, features = ["std", "serde"
 serde_json = "1.0.151"
 twox-hash = { version = "2.1.5", default-features = false, features = ["xxhash3_128"] }
 unicode-normalization = "0.1.25"
+zxcvbn = { version = "3.1.1", default-features = false }
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net", "io-util", "fs"] }
 tracing = "0.1"

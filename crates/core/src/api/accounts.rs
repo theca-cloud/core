@@ -5,7 +5,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use axum::{Json, Router};
-use theca_common::api;
+use theca_common::{api, password};
 
 use super::AppState;
 use super::auth::{ClientIp, UserAgent, set_session_cookie};
@@ -22,15 +22,25 @@ pub fn router() -> Router<AppState> {
         .route("/auth/verify/resend", post(resend))
         .route("/auth/password/forgot", post(forgot))
         .route("/auth/password/reset", post(reset))
+        .route("/auth/token", post(token_email))
         .route("/invitations/accept", post(accept))
 }
 
-/// The password rules: at least 8 characters.
-pub(super) fn check_password(password: &str) -> Result<(), HttpError> {
-    if password.chars().count() < 8 {
+/// The password rules: at least 8 characters, and zxcvbn's score at least
+/// the instance's `password_strength`, the account's email a user input.
+pub(super) fn check_password(
+    state: &AppState,
+    password: &str,
+    email: &str,
+) -> Result<(), HttpError> {
+    let level = state.settings.get().password_strength;
+    if !password::acceptable(password, email, level) {
         return Err(HttpError::bad_request(
             "weak_password",
-            "a password needs at least 8 characters",
+            format!(
+                "a password needs at least {} characters and a strength of {level} of 4",
+                password::MIN_LEN
+            ),
         ));
     }
     Ok(())
@@ -108,7 +118,7 @@ pub async fn register(
     }
     let email = check_email(&req.email)?;
     email_limits(&state, ip, email)?;
-    check_password(&req.password)?;
+    check_password(&state, &req.password, email)?;
     // Hashed whether or not the address is free: same time either way.
     let hash = hash_password(&req.password);
     let mut tx = state.pool.begin().await?;
@@ -200,8 +210,6 @@ pub async fn reset(
     ApiJson(req): ApiJson<api::SetPassword>,
 ) -> Result<StatusCode, HttpError> {
     let password = req.password.as_deref().unwrap_or_default();
-    check_password(password)?;
-    let hash = hash_password(password);
     let mut tx = state.pool.begin().await?;
     let account =
         db::account::consume_one_off(&mut tx, "password_reset", &req.token, email::RESET_LIFETIME)
@@ -210,10 +218,34 @@ pub async fn reset(
     let pk = db::account::set_verified(&mut tx, account)
         .await?
         .ok_or_else(invalid_token)?;
-    db::account::set_password(&mut tx, pk, &hash).await?;
-    db::account::revoke_sessions(&mut tx, account, "password_reset").await?;
+    // Refused: the transaction rolls back, the link still works.
+    check_password(&state, password, &db::account::email_of(&mut tx, pk).await?)?;
+    db::account::set_password(&mut tx, pk, &hash_password(password)).await?;
+    db::account::revoke_sessions(&mut tx, account, None, "password_reset").await?;
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// The email a reset or invitation link is for, without using it: the page
+/// choosing a password scores it against the email. Holding the token proves
+/// the inbox, so the address tells nothing new.
+#[utoipa::path(post, path = "/api/v1/auth/token", request_body = api::LinkToken, responses(
+    (status = 200, body = api::TokenEmail),
+    (status = 400, description = "`invalid_token`", body = api::ApiError),
+))]
+pub async fn token_email(
+    State(state): State<AppState>,
+    ApiJson(req): ApiJson<api::LinkToken>,
+) -> Result<Json<api::TokenEmail>, HttpError> {
+    let email = db::account::token_email(
+        &state.pool,
+        &req.token,
+        email::RESET_LIFETIME,
+        email::INVITATION_LIFETIME,
+    )
+    .await?
+    .ok_or_else(invalid_token)?;
+    Ok(Json(api::TokenEmail { email }))
 }
 
 /// Accept an invitation (the link's token): joins the organization. A new
@@ -229,7 +261,6 @@ pub async fn accept(
     agent: UserAgent,
     ApiJson(req): ApiJson<api::SetPassword>,
 ) -> Result<(HeaderMap, Json<Option<api::Me>>), HttpError> {
-    let hash = req.password.as_deref().map(hash_password);
     let mut tx = state.pool.begin().await?;
     let user = db::account::consume_one_off(
         &mut tx,
@@ -240,7 +271,7 @@ pub async fn accept(
     .await?
     .ok_or_else(invalid_token)?;
     let invited = sqlx::query!(
-        r#"SELECT u.pk, a.pk AS account, a.uuid AS account_uuid,
+        r#"SELECT u.pk, a.pk AS account, a.uuid AS account_uuid, a.email,
                   EXISTS (SELECT 1 FROM identity WHERE account = a.pk) AS "can_log_in!"
            FROM "user" u JOIN account a ON a.pk = u.account WHERE u.uuid = $1"#,
         user
@@ -251,9 +282,8 @@ pub async fn accept(
     let new_password = !invited.can_log_in;
     if new_password {
         let password = req.password.as_deref().unwrap_or_default();
-        check_password(password)?;
-        db::account::set_password(&mut tx, invited.account, hash.as_deref().expect("checked"))
-            .await?;
+        check_password(&state, password, &invited.email)?;
+        db::account::set_password(&mut tx, invited.account, &hash_password(password)).await?;
     }
     db::account::set_verified(&mut tx, invited.account_uuid).await?;
     sqlx::query!(

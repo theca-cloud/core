@@ -1,0 +1,22 @@
+[package]
+name = "theca-password"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+# Only the browser's: shipped inside the @theca/client npm package.
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde_json.workspace = true
+theca-common.workspace = true
+wasm-bindgen = "0.2"
+
+[lints]
+workspace = true
+
+# As theca-client's: wasm-pack's wasm-opt needs them allowed.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]

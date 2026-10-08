@@ -10,7 +10,7 @@ use uuid::Uuid;
 use super::AppState;
 use super::auth::{ClientIp, CurrentAccount, UserAgent, clear_session_cookie, set_session_cookie};
 use super::error::{ApiJson, HttpError};
-use crate::auth::verify_password;
+use crate::auth::{hash_password, verify_password};
 use crate::db;
 use crate::db::account::Credential;
 use crate::limits::Limit;
@@ -22,6 +22,7 @@ pub fn router() -> Router<AppState> {
         .route("/auth/sessions", get(sessions))
         .route("/auth/sessions/{id}", delete(revoke))
         .route("/me", get(me).delete(delete_me))
+        .route("/auth/password", post(change_password))
         .route("/me/export", get(export))
 }
 
@@ -223,6 +224,61 @@ pub(super) async fn erase_account(state: &AppState, account: i64) -> Result<(), 
     tx.commit().await?;
     crate::jobs::trigger(state, crate::jobs::Job::ChunkGc).await;
     Ok(())
+}
+
+/// Change the password (a full session, the current one asked): every other
+/// session is logged out, this one kept. Failed attempts count as failed
+/// logins. Without a password (OIDC only), the reset email sets one.
+#[utoipa::path(post, path = "/api/v1/auth/password", request_body = api::ChangePassword, responses(
+    (status = 204),
+    (status = 400, description = "`weak_password`", body = api::ApiError),
+    (status = 401, description = "`invalid_credentials`", body = api::ApiError),
+    (status = 403, description = "`full_session_required`", body = api::ApiError),
+    (status = 404, description = "`no_password`: set one through the reset email", body = api::ApiError),
+))]
+pub async fn change_password(
+    State(state): State<AppState>,
+    account: CurrentAccount,
+    ApiJson(req): ApiJson<api::ChangePassword>,
+) -> Result<StatusCode, HttpError> {
+    account.require_full_session()?;
+    let settings = state.settings.get();
+    let mut tx = state.pool.begin().await?;
+    let email = db::account::email_of(&mut tx, account.account).await?;
+    state
+        .limits
+        .check(&settings, Limit::LoginAccount, &email)
+        .map_err(HttpError::too_many)?;
+    let Some((_, _, hash, _, _)) = db::account::password_of(&state.pool, &email)
+        .await?
+        .filter(|(_, _, hash, _, _)| hash.is_some())
+    else {
+        return Err(HttpError::new(
+            StatusCode::NOT_FOUND,
+            "no_password",
+            "this account has no password: set one through the reset email",
+        ));
+    };
+    if !verify_password(hash.as_deref(), &req.current) {
+        tracing::warn!(anomaly = "password_change_failed", account = %account.account_uuid, "wrong current password");
+        state.limits.fail(&settings, Limit::LoginAccount, &email);
+        return Err(HttpError::new(
+            StatusCode::UNAUTHORIZED,
+            "invalid_credentials",
+            "wrong password",
+        ));
+    }
+    super::accounts::check_password(&state, &req.new, &email)?;
+    db::account::set_password(&mut tx, account.account, &hash_password(&req.new)).await?;
+    db::account::revoke_sessions(
+        &mut tx,
+        account.account_uuid,
+        Some(account.token_uuid),
+        "password_changed",
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Delete this account (a full session, confirmed with its password if it has

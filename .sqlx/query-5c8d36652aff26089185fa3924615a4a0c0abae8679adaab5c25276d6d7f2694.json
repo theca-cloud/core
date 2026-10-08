@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT u.pk, a.pk AS account, a.uuid AS account_uuid,\n                  EXISTS (SELECT 1 FROM identity WHERE account = a.pk) AS \"can_log_in!\"\n           FROM \"user\" u JOIN account a ON a.pk = u.account WHERE u.uuid = $1",
+  "query": "SELECT u.pk, a.pk AS account, a.uuid AS account_uuid, a.email,\n                  EXISTS (SELECT 1 FROM identity WHERE account = a.pk) AS \"can_log_in!\"\n           FROM \"user\" u JOIN account a ON a.pk = u.account WHERE u.uuid = $1",
   "describe": {
     "columns": [
       {
@@ -20,6 +20,11 @@
       },
       {
         "ordinal": 3,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
         "name": "can_log_in!",
         "type_info": "Bool"
       }
@@ -33,8 +38,9 @@
       false,
       false,
       false,
+      false,
       null
     ]
   },
-  "hash": "157ed63df3f2db10ada11558aa37dfa5fb46d92e46582b618aceb0bf537ef6e2"
+  "hash": "5c8d36652aff26089185fa3924615a4a0c0abae8679adaab5c25276d6d7f2694"
 }

@@ -37,6 +37,7 @@ Changed through the admin API (`PATCH /api/v1/admin/settings`), which validates 
 | `presigned_url_lifetime_secs` | `900` (15 min) | How long presigned upload and download URLs stay valid. |
 | `max_pending_uploads` | `15` | Most chunks a user may have being uploaded at once (declared, upload URL still valid, not uploaded yet). Requesting more upload URLs is refused (`429`); clients read it (`GET /api/v1/limits`) and size their upload window by it, so raising it speeds every client up, lowering it never makes them fail. |
 | `registration` | `closed` | `open`: anyone can create an account (verified by email, so it needs SMTP). `closed`: accounts come from invitations (and the setup). |
+| `password_strength` | `3` | The zxcvbn score (0 to 4) a new password needs, wherever one is chosen (registration, setup, reset, invitation, change), the account's email counting against it. `0`: no score asked. At least 8 characters at every level. The web app shows the same score as the user types (`GET /api/v1/instance` gives the level). |
 | `organization_creation` | `anyone` | `anyone`: every account can create company organizations (and owns them). `admins`: only instance admins (the admin API creates them for others). |
 | `smtp_host` | | The SMTP server. Unset: emails stay queued (and registration and invitations are unavailable). Changes apply to the next sending run, no restart needed. |
 | `smtp_port` | `587` | Its port. |

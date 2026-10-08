@@ -40,6 +40,8 @@ pub struct Settings {
     pub trash_retention: Duration,
     /// Anyone may create an account (`registration = open`; needs SMTP).
     pub registration_open: bool,
+    /// The zxcvbn score (0 to 4) a new password needs; 0: 8 characters only.
+    pub password_strength: u8,
     /// Every account may create company organizations
     /// (`organization_creation = anyone`), not only instance admins.
     pub organization_creation_open: bool,
@@ -78,6 +80,11 @@ pub const DEFINITIONS: &[Definition] = &[
         "organization_creation",
         "anyone",
         "anyone: every account can create company organizations; admins: only instance admins.",
+    ),
+    def(
+        "password_strength",
+        "3",
+        "The zxcvbn score (0 to 4) a new password needs; 0: 8 characters only.",
     ),
     def(
         "gc_grace_period_secs",
@@ -338,6 +345,10 @@ impl Settings {
                 "open" => Ok(true),
                 "closed" => Ok(false),
                 _ => Err("open or closed".into()),
+            })?,
+            password_strength: take(values, "password_strength", |v| match v.parse::<u8>() {
+                Ok(level @ 0..=4) => Ok(level),
+                _ => Err("0 to 4".into()),
             })?,
             organization_creation_open: take(values, "organization_creation", |v| match v {
                 "anyone" => Ok(true),

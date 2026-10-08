@@ -1115,7 +1115,7 @@
         ],
         "responses": {
           "303": {
-            "description": "To `/`, or to `/login?error=...`"
+            "description": "To `/` (logged in), `/account` (linked), or `/login?error=...`"
           }
         }
       }
@@ -1193,6 +1193,70 @@
         "responses": {
           "303": {
             "description": "To the provider, or to `/login?error=...`"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/password": {
+      "post": {
+        "tags": [
+          "session"
+        ],
+        "summary": "Change the password (a full session, the current one asked): every other\nsession is logged out, this one kept. Failed attempts count as failed\nlogins. Without a password (OIDC only), the reset email sets one.",
+        "operationId": "change_password",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePassword"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "`weak_password`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`invalid_credentials`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`full_session_required`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`no_password`: set one through the reset email",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           }
         }
       }
@@ -1357,6 +1421,47 @@
           },
           "404": {
             "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/token": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "The email a reset or invitation link is for, without using it: the page\nchoosing a password scores it against the email. Holding the token proves\nthe inbox, so the address tells nothing new.",
+        "operationId": "token_email",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkToken"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenEmail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_token`",
             "content": {
               "application/json": {
                 "schema": {
@@ -4422,6 +4527,24 @@
           }
         }
       },
+      "ChangePassword": {
+        "type": "object",
+        "description": "A password change: the current one, and the new one.",
+        "required": [
+          "current",
+          "new"
+        ],
+        "properties": {
+          "current": {
+            "type": "string",
+            "description": "The current password."
+          },
+          "new": {
+            "type": "string",
+            "description": "The new password (at least 8 characters, and strong enough)."
+          }
+        }
+      },
       "ChunkState": {
         "type": "string",
         "description": "Whether a chunk must be uploaded.",
@@ -5190,12 +5313,19 @@
         "description": "`GET /instance`: public, for a login page.",
         "required": [
           "name",
-          "registration"
+          "registration",
+          "password_strength"
         ],
         "properties": {
           "name": {
             "type": "string",
             "description": "Its name (the setting `instance_name`)."
+          },
+          "password_strength": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The zxcvbn score a new password needs, 0 (none: 8 characters only) to 4\n(the setting `password_strength`).",
+            "minimum": 0
           },
           "registration": {
             "type": "boolean",
@@ -6221,7 +6351,7 @@
               "string",
               "null"
             ],
-            "description": "The new password (at least 8 characters). Optional to accept an\ninvitation for an account that can already log in."
+            "description": "The new password (at least 8 characters, and strong enough: the\ninstance's `password_strength`). Optional to accept an\ninvitation for an account that can already log in."
           },
           "token": {
             "type": "string",
@@ -6428,6 +6558,19 @@
             "type": "integer",
             "format": "int64",
             "description": "Bytes stored there."
+          }
+        }
+      },
+      "TokenEmail": {
+        "type": "object",
+        "description": "The account an email's link is for.",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Its email."
           }
         }
       },
