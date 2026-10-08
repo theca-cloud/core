@@ -1,6 +1,11 @@
 # Changelog
 
 Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
+## [0.17.0] - 2026-10-08
+
+### Features
+
+- **core**: Secret files are only read, an empty key file stops the server (**breaking**)
 ## [0.16.0] - 2026-10-08
 
 ### Features
