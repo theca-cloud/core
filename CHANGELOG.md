@@ -1,6 +1,15 @@
 # Changelog
 
 Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
+## [0.11.0] - 2026-10-08
+
+### Features
+
+- **core**: Node operations take lists: PATCH /nodes, POST /nodes/copy, /nodes/trash, /nodes/restore (**breaking**)
+
+### Fixes
+
+- **core**: Logout needs no valid session, and always clears the cookie
 ## [0.10.0] - 2026-10-07
 
 ### Features
