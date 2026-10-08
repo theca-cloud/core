@@ -185,7 +185,7 @@
           "admin"
         ],
         "summary": "The instance-wide identity providers.",
-        "operationId": "providers",
+        "operationId": "admin_providers",
         "responses": {
           "200": {
             "description": "",
@@ -207,7 +207,7 @@
           "admin"
         ],
         "summary": "Add an instance-wide identity provider (full sessions for its logins).",
-        "operationId": "create_provider",
+        "operationId": "admin_create_provider",
         "requestBody": {
           "content": {
             "application/json": {
@@ -248,7 +248,7 @@
           "admin"
         ],
         "summary": "Delete an instance-wide identity provider, and the identities linked through it.",
-        "operationId": "delete_provider",
+        "operationId": "admin_delete_provider",
         "parameters": [
           {
             "name": "id",
@@ -281,7 +281,7 @@
           "admin"
         ],
         "summary": "Change an instance-wide identity provider.",
-        "operationId": "update_provider",
+        "operationId": "admin_update_provider",
         "parameters": [
           {
             "name": "id",
@@ -451,7 +451,7 @@
           "admin"
         ],
         "summary": "Create an organization owned by an existing account.",
-        "operationId": "create_organization",
+        "operationId": "admin_create_organization",
         "requestBody": {
           "content": {
             "application/json": {
@@ -492,7 +492,7 @@
           "admin"
         ],
         "summary": "Delete an organization (personal ones included): its data at once, its\nstored chunks with the garbage collection, started now.",
-        "operationId": "delete_organization",
+        "operationId": "admin_delete_organization",
         "parameters": [
           {
             "name": "id",
@@ -792,7 +792,7 @@
           "app_password"
         ],
         "summary": "Create an app password, within what this session reaches (a restricted\nsession: inside its organization). The password is shown only once.",
-        "operationId": "create",
+        "operationId": "create_app_password",
         "requestBody": {
           "content": {
             "application/json": {
@@ -853,7 +853,7 @@
           "app_password"
         ],
         "summary": "Revoke an app password: refused at once.",
-        "operationId": "revoke",
+        "operationId": "revoke_app_password",
         "parameters": [
           {
             "name": "id",
@@ -1052,7 +1052,7 @@
           "oidc"
         ],
         "summary": "The instance-wide providers, for the login page. An organization's\nprovider isn't listed: the organization shares its start link.",
-        "operationId": "providers",
+        "operationId": "login_providers",
         "responses": {
           "200": {
             "description": "",
@@ -1178,7 +1178,7 @@
           "oidc"
         ],
         "summary": "Start logging in with a provider: redirects to it.",
-        "operationId": "start",
+        "operationId": "oidc_start",
         "parameters": [
           {
             "name": "provider",
@@ -1403,7 +1403,7 @@
           "session"
         ],
         "summary": "Revoke one of the account's sessions (e.g. a lost device).",
-        "operationId": "revoke",
+        "operationId": "revoke_session",
         "parameters": [
           {
             "name": "id",
@@ -1479,7 +1479,7 @@
           "totp"
         ],
         "summary": "Start setting up TOTP: a new secret, not required at login until\nconfirmed. Starting again replaces an unconfirmed secret.",
-        "operationId": "start",
+        "operationId": "totp_start",
         "responses": {
           "200": {
             "description": "",
@@ -2381,7 +2381,7 @@
           "sharing"
         ],
         "summary": "A library's members (its members, and the organization's owner).",
-        "operationId": "members",
+        "operationId": "library_members",
         "parameters": [
           {
             "name": "id",
@@ -3319,7 +3319,7 @@
           "organizations"
         ],
         "summary": "Create a company organization, owned by the account (from a full session;\ninstance admins only when `organization_creation` is `admins`).",
-        "operationId": "create",
+        "operationId": "create_organization",
         "requestBody": {
           "content": {
             "application/json": {
@@ -3525,7 +3525,7 @@
           "organizations"
         ],
         "summary": "The organization's identity providers (the owner).",
-        "operationId": "providers",
+        "operationId": "organization_providers",
         "parameters": [
           {
             "name": "id",
@@ -3568,7 +3568,7 @@
           "organizations"
         ],
         "summary": "Add an identity provider for the organization (the owner): its logins open\nsessions restricted to the organization. `https` issuers on public\naddresses only; the secret as a value (stored encrypted).",
-        "operationId": "create_provider",
+        "operationId": "organization_create_provider",
         "parameters": [
           {
             "name": "id",
@@ -3620,7 +3620,7 @@
           "organizations"
         ],
         "summary": "Delete one of the organization's identity providers, and the identities\nlinked through it (the owner).",
-        "operationId": "delete_provider",
+        "operationId": "organization_delete_provider",
         "parameters": [
           {
             "name": "id",
@@ -3662,7 +3662,7 @@
           "organizations"
         ],
         "summary": "Change one of the organization's identity providers (the owner).",
-        "operationId": "update_provider",
+        "operationId": "organization_update_provider",
         "parameters": [
           {
             "name": "id",
@@ -3768,7 +3768,7 @@
           "organizations"
         ],
         "summary": "The organization's members and pending invitations (any member).",
-        "operationId": "members",
+        "operationId": "organization_members",
         "parameters": [
           {
             "name": "id",

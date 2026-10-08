@@ -216,7 +216,7 @@ pub async fn organizations(
 }
 
 /// Create an organization owned by an existing account.
-#[utoipa::path(post, path = "/api/v1/admin/organizations", request_body = api::CreateOrganization, responses(
+#[utoipa::path(post, path = "/api/v1/admin/organizations", operation_id = "admin_create_organization", request_body = api::CreateOrganization, responses(
     (status = 201, body = api::AdminOrganization),
     (status = 404, description = "No account with that email", body = api::ApiError),
 ))]
@@ -379,7 +379,7 @@ pub async fn default_storage(
 }
 
 /// The instance-wide identity providers.
-#[utoipa::path(get, path = "/api/v1/admin/identity-providers", responses((status = 200, body = Vec<api::ProviderInfo>)))]
+#[utoipa::path(get, path = "/api/v1/admin/identity-providers", operation_id = "admin_providers", responses((status = 200, body = Vec<api::ProviderInfo>)))]
 pub async fn providers(
     State(state): State<AppState>,
     account: CurrentAccount,
@@ -389,7 +389,7 @@ pub async fn providers(
 }
 
 /// Add an instance-wide identity provider (full sessions for its logins).
-#[utoipa::path(post, path = "/api/v1/admin/identity-providers", request_body = api::ProviderRequest, responses(
+#[utoipa::path(post, path = "/api/v1/admin/identity-providers", operation_id = "admin_create_provider", request_body = api::ProviderRequest, responses(
     (status = 201, body = api::ProviderInfo),
     (status = 400, description = "`invalid_provider`", body = api::ApiError),
 ))]
@@ -406,7 +406,7 @@ pub async fn create_provider(
 }
 
 /// Change an instance-wide identity provider.
-#[utoipa::path(patch, path = "/api/v1/admin/identity-providers/{id}", params(("id" = Uuid, Path)), request_body = api::ProviderRequest, responses(
+#[utoipa::path(patch, path = "/api/v1/admin/identity-providers/{id}", operation_id = "admin_update_provider", params(("id" = Uuid, Path)), request_body = api::ProviderRequest, responses(
     (status = 200, body = api::ProviderInfo),
     (status = 404, body = api::ApiError),
 ))]
@@ -423,7 +423,7 @@ pub async fn update_provider(
 }
 
 /// Delete an instance-wide identity provider, and the identities linked through it.
-#[utoipa::path(delete, path = "/api/v1/admin/identity-providers/{id}", params(("id" = Uuid, Path)), responses(
+#[utoipa::path(delete, path = "/api/v1/admin/identity-providers/{id}", operation_id = "admin_delete_provider", params(("id" = Uuid, Path)), responses(
     (status = 204),
     (status = 404, body = api::ApiError),
 ))]
@@ -438,7 +438,7 @@ pub async fn delete_provider(
 
 /// Delete an organization (personal ones included): its data at once, its
 /// stored chunks with the garbage collection, started now.
-#[utoipa::path(delete, path = "/api/v1/admin/organizations/{id}", params(("id" = Uuid, Path)), responses(
+#[utoipa::path(delete, path = "/api/v1/admin/organizations/{id}", operation_id = "admin_delete_organization", params(("id" = Uuid, Path)), responses(
     (status = 204),
     (status = 404, body = api::ApiError),
 ))]

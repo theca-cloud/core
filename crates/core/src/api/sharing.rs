@@ -89,7 +89,7 @@ pub async fn libraries(
 }
 
 /// A library's members (its members, and the organization's owner).
-#[utoipa::path(get, path = "/api/v1/libraries/{id}/members", params(("id" = Uuid, Path)), responses(
+#[utoipa::path(get, path = "/api/v1/libraries/{id}/members", operation_id = "library_members", params(("id" = Uuid, Path)), responses(
     (status = 200, body = Vec<api::LibraryMember>),
     (status = 404, body = api::ApiError),
 ))]

@@ -379,6 +379,29 @@ mod tests {
         );
     }
 
+    /// Every operation has its own id: utoipa defaults it to the handler's
+    /// name, and two handlers named alike (`start`, `revoke`) would merge in
+    /// typed clients generated from the spec (the web app's).
+    #[test]
+    fn operation_ids_are_unique() {
+        let spec = serde_json::to_value(ApiDoc::openapi()).unwrap();
+        let mut seen = std::collections::HashMap::new();
+        let mut duplicates = Vec::new();
+        for (path, item) in spec["paths"].as_object().unwrap() {
+            for (method, operation) in item.as_object().unwrap() {
+                if let Some(id) = operation["operationId"].as_str()
+                    && let Some(first) = seen.insert(id.to_owned(), format!("{method} {path}"))
+                {
+                    duplicates.push(format!("{id}: {first}, {method} {path}"));
+                }
+            }
+        }
+        assert!(
+            duplicates.is_empty(),
+            "operation ids used twice (set `operation_id`): {duplicates:?}"
+        );
+    }
+
     /// `openapi.json` must match the code. Regenerate with `UPDATE_OPENAPI=1 cargo test`.
     #[test]
     fn openapi_is_up_to_date() {
