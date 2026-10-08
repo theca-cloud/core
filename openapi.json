@@ -7,7 +7,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.14.1"
+    "version": "0.15.0"
   },
   "paths": {
     "/api/health": {
