@@ -1,6 +1,11 @@
 # Changelog
 
 Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
+## [0.14.1] - 2026-10-08
+
+### Fixes
+
+- **core**: Every API operation has its own id
 ## [0.14.0] - 2026-10-08
 
 ### Features

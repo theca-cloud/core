@@ -3457,7 +3457,7 @@ dependencies = [
 
 [[package]]
 name = "theca-client"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "bytes",
  "futures",
@@ -3480,7 +3480,7 @@ dependencies = [
 
 [[package]]
 name = "theca-common"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "chrono",
  "fastcdc",
@@ -3499,7 +3499,7 @@ dependencies = [
 
 [[package]]
 name = "theca-core"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "argon2",
  "askama",
@@ -3540,7 +3540,7 @@ dependencies = [
 
 [[package]]
 name = "theca-password"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "serde_json",
  "theca-common",
