@@ -19,6 +19,7 @@ use crate::db;
 use crate::stream::{VersionReader, parse_range};
 
 #[derive(Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub(super) struct ContentParams {
     /// A version of the file (default: the current one).
     version: Option<Uuid>,
