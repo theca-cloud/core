@@ -1,6 +1,11 @@
 # Changelog
 
 Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
+## [0.11.1] - 2026-10-08
+
+### Fixes
+
+- **core**: Query parameters are declared as such in openapi.json
 ## [0.11.0] - 2026-10-08
 
 ### Features
