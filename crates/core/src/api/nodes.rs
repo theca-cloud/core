@@ -391,6 +391,7 @@ pub async fn restore_version(
 }
 
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct SearchParams {
     /// Part of a name (at least 3 characters).
     q: String,

@@ -95,6 +95,7 @@ async fn update_library(
 }
 
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 struct DeleteLibraryParams {
     /// Delete for good (a library already in the trash only).
     #[serde(default)]

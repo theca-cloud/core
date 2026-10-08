@@ -196,6 +196,7 @@ pub async fn change_settings(
 }
 
 #[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct Search {
     /// Part of a name or email.
     q: Option<String>,

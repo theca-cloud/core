@@ -119,6 +119,7 @@ async fn begin(
 }
 
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct CallbackParams {
     code: Option<String>,
     state: Option<String>,

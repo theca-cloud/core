@@ -353,6 +353,29 @@ mod tests {
         assert_eq!(body["api"][0], "v1");
     }
 
+    /// Every path parameter is in its path: a query struct derived as
+    /// `IntoParams` without `parameter_in = Query` lands in the path, which
+    /// typed clients (the web app's) then put there.
+    #[test]
+    fn path_parameters_are_in_their_paths() {
+        let spec = serde_json::to_value(ApiDoc::openapi()).unwrap();
+        let mut misplaced = Vec::new();
+        for (path, item) in spec["paths"].as_object().unwrap() {
+            for operation in item.as_object().unwrap().values() {
+                for parameter in operation["parameters"].as_array().into_iter().flatten() {
+                    let name = parameter["name"].as_str().unwrap();
+                    if parameter["in"] == "path" && !path.contains(&format!("{{{name}}}")) {
+                        misplaced.push(format!("{path} {name}"));
+                    }
+                }
+            }
+        }
+        assert!(
+            misplaced.is_empty(),
+            "query parameters declared in the path: {misplaced:?}"
+        );
+    }
+
     /// `openapi.json` must match the code. Regenerate with `UPDATE_OPENAPI=1 cargo test`.
     #[test]
     fn openapi_is_up_to_date() {

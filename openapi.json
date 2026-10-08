@@ -7,7 +7,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.11.0"
+    "version": "0.11.1"
   },
   "paths": {
     "/api/health": {
@@ -49,14 +49,11 @@
         "parameters": [
           {
             "name": "q",
-            "in": "path",
+            "in": "query",
             "description": "Part of a name or email.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -425,14 +422,11 @@
         "parameters": [
           {
             "name": "q",
-            "in": "path",
+            "in": "query",
             "description": "Part of a name or email.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -1095,36 +1089,27 @@
           },
           {
             "name": "code",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           },
           {
             "name": "state",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           },
           {
             "name": "error",
-            "in": "path",
+            "in": "query",
             "description": "Set by the provider when the user refused, or on errors.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -1908,14 +1893,11 @@
           },
           {
             "name": "version",
-            "in": "path",
+            "in": "query",
             "description": "A version of the file (default: the current one).",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           }
@@ -2203,9 +2185,9 @@
           },
           {
             "name": "permanent",
-            "in": "path",
+            "in": "query",
             "description": "Delete for good (a library already in the trash only).",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "boolean"
             }
@@ -4059,7 +4041,7 @@
         "parameters": [
           {
             "name": "q",
-            "in": "path",
+            "in": "query",
             "description": "Part of a name (at least 3 characters).",
             "required": true,
             "schema": {
@@ -4068,14 +4050,11 @@
           },
           {
             "name": "library",
-            "in": "path",
+            "in": "query",
             "description": "Only this library.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           }
