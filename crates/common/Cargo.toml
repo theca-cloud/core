@@ -17,6 +17,7 @@ twox-hash.workspace = true
 unicode-normalization.workspace = true
 utoipa = { workspace = true, optional = true }
 uuid.workspace = true
+zxcvbn.workspace = true
 
 [features]
 # OpenAPI schemas for the API types, only needed by the server.

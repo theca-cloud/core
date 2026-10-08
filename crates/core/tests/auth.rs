@@ -324,6 +324,84 @@ async fn logout_and_sessions(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn password_change(pool: PgPool) {
+    let w = world(pool).await;
+    let laptop = w.login("a@x.ch", PASSWORD).await;
+    let phone = w.login("a@x.ch", PASSWORD).await;
+    let change = |current: &str, new: &str| json!({ "current": current, "new": new });
+    let post = |body: Value, session: String| {
+        let w = &w;
+        async move {
+            w.with(
+                "POST",
+                "/api/v1/auth/password",
+                ("cookie", &session),
+                Some(body),
+            )
+            .await
+        }
+    };
+
+    let wrong = post(
+        change("not it", "violet tractor on the moon"),
+        laptop.session(),
+    )
+    .await;
+    assert_eq!(wrong.body["code"], "invalid_credentials");
+    // Weak (common); then the instance's level.
+    let weak = post(change(PASSWORD, "password1234"), laptop.session()).await;
+    assert_eq!(weak.body["code"], "weak_password");
+    sqlx::query("INSERT INTO setting (key, value) VALUES ('password_strength', '0')")
+        .execute(&w.pool)
+        .await
+        .unwrap();
+    w.settings.set(Settings::load(&w.pool).await.unwrap());
+    let short = post(change(PASSWORD, "short"), laptop.session()).await;
+    assert_eq!(
+        short.body["code"], "weak_password",
+        "8 characters at every level"
+    );
+    sqlx::query("DELETE FROM setting WHERE key = 'password_strength'")
+        .execute(&w.pool)
+        .await
+        .unwrap();
+    w.settings.set(Settings::load(&w.pool).await.unwrap());
+
+    // Changed: this session kept, the others logged out.
+    let changed = post(
+        change(PASSWORD, "violet tractor on the moon"),
+        laptop.session(),
+    )
+    .await;
+    assert_eq!(changed.status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        w.get("/api/v1/me", &laptop.session()).await.status,
+        StatusCode::OK
+    );
+    assert_eq!(
+        w.get("/api/v1/me", &phone.session()).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        w.login("a@x.ch", PASSWORD).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        w.login("a@x.ch", "violet tractor on the moon").await.status,
+        StatusCode::OK
+    );
+
+    // Without a password (OIDC only): the reset email sets one.
+    let b = w.login("b@x.ch", PASSWORD).await;
+    sqlx::query("DELETE FROM identity WHERE account = 2")
+        .execute(&w.pool)
+        .await
+        .unwrap();
+    let none = post(change(PASSWORD, "violet tractor on the moon"), b.session()).await;
+    assert_eq!(none.body["code"], "no_password");
+}
+
+#[sqlx::test]
 async fn csrf(pool: PgPool) {
     let w = world(pool).await;
     let a = w.login("a@x.ch", PASSWORD).await;
@@ -1081,7 +1159,7 @@ async fn oidc_login_and_linking(pool: PgPool) {
     let linked = w
         .oidc_link(&a, provider, &idp, ("g-a", "whatever", false))
         .await;
-    assert_eq!(linked.location.as_deref(), Some(HOME));
+    assert_eq!(linked.location.as_deref(), Some("http://test/account"));
     let login = w.oidc_login(provider, &idp, ("g-a", "", false)).await;
     assert_eq!(login.location.as_deref(), Some(HOME));
     let session = format!("theca_session={}", login.cookie("theca_session").unwrap());

@@ -362,6 +362,9 @@ pub struct Instance {
     pub name: String,
     /// Accounts can be created (`registration = open`, and SMTP configured).
     pub registration: bool,
+    /// The zxcvbn score a new password needs, 0 (none: 8 characters only) to 4
+    /// (the setting `password_strength`).
+    pub password_strength: u8,
 }
 
 /// A member's role in a library.
@@ -1036,13 +1039,32 @@ pub struct LinkToken {
     pub token: String,
 }
 
+/// The account an email's link is for.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TokenEmail {
+    /// Its email.
+    pub email: String,
+}
+
+/// A password change: the current one, and the new one.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ChangePassword {
+    /// The current password.
+    pub current: String,
+    /// The new password (at least 8 characters, and strong enough).
+    pub new: String,
+}
+
 /// A token from an email's link, and a password to set.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SetPassword {
     /// The token.
     pub token: String,
-    /// The new password (at least 8 characters). Optional to accept an
+    /// The new password (at least 8 characters, and strong enough: the
+    /// instance's `password_strength`). Optional to accept an
     /// invitation for an account that can already log in.
     #[serde(default)]
     pub password: Option<String>,

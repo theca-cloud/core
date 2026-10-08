@@ -309,11 +309,20 @@ async fn password_reset(pool: PgPool) {
         .await
         .unwrap_err();
     assert_eq!(refused.1["code"], "invalid_token");
-    let weak = anon
-        .json::<Value>("POST", "/api/v1/auth/password/reset", &reset(&new, "short"))
+    // The page asks which address the link is for, without using it.
+    let peek = json!({ "token": new });
+    let asked = anon
+        .json::<Value>("POST", "/api/v1/auth/token", &peek)
         .await
-        .unwrap_err();
-    assert_eq!(weak.1["code"], "weak_password");
+        .unwrap();
+    assert_eq!(asked["email"], email);
+    for weak in ["short", email.as_str()] {
+        let refused = anon
+            .json::<Value>("POST", "/api/v1/auth/password/reset", &reset(&new, weak))
+            .await
+            .unwrap_err();
+        assert_eq!(refused.1["code"], "weak_password", "{weak}");
+    }
     anon.json::<Value>(
         "POST",
         "/api/v1/auth/password/reset",
@@ -339,6 +348,11 @@ async fn password_reset(pool: PgPool) {
         .await
         .unwrap_err();
     assert_eq!(reused.1["code"], "invalid_token");
+    let used = anon
+        .json::<Value>("POST", "/api/v1/auth/token", &peek)
+        .await
+        .unwrap_err();
+    assert_eq!(used.1["code"], "invalid_token");
 }
 
 #[sqlx::test]
@@ -415,6 +429,19 @@ async fn members_and_invitations(pool: PgPool) {
         login(&anon, &newcomer, "a long password").await.0,
         StatusCode::UNAUTHORIZED
     );
+    // The invitation's address, for the page; a password made of it refused.
+    let link = json!({ "token": token(&mail[0].1) });
+    let asked = anon
+        .json::<Value>("POST", "/api/v1/auth/token", &link)
+        .await
+        .unwrap();
+    assert_eq!(asked["email"], newcomer);
+    let weak = json!({ "token": token(&mail[0].1), "password": newcomer });
+    let refused = anon
+        .json::<Value>("POST", "/api/v1/invitations/accept", &weak)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.1["code"], "weak_password");
     let accept = json!({ "token": token(&mail[0].1), "password": "a long password" });
     let me: Option<api::Me> = anon
         .json("POST", "/api/v1/invitations/accept", &accept)

@@ -1,5 +1,6 @@
 #![warn(missing_docs)]
-//! Shared types and algorithms: chunking, hashing, compression, name rules.
+//! Shared types and algorithms: chunking, hashing, compression, name rules,
+//! password strength.
 //!
 //! Everything here must behave identically on the server, in native clients and
 //! in the browser (WASM), so this crate does no I/O of its own.
@@ -9,3 +10,4 @@ pub mod chunking;
 pub mod compression;
 pub mod hash;
 pub mod name;
+pub mod password;

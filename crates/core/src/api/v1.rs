@@ -64,6 +64,7 @@ async fn instance(State(state): State<AppState>) -> Json<api::Instance> {
     Json(api::Instance {
         name: settings.instance_name.clone(),
         registration: settings.registration_open && settings.smtp.is_some(),
+        password_strength: settings.password_strength,
     })
 }
 

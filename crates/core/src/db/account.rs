@@ -147,21 +147,60 @@ pub async fn set_verified(db: &mut sqlx::PgConnection, account: Uuid) -> sqlx::R
     .await
 }
 
-/// Revokes all of an account's sessions (e.g. after a password reset).
+/// Revokes all of an account's sessions (e.g. after a password reset), but
+/// `keep` (the one changing the password).
 pub async fn revoke_sessions(
     db: &mut sqlx::PgConnection,
     account: Uuid,
+    keep: Option<Uuid>,
     reason: &str,
 ) -> sqlx::Result<()> {
     sqlx::query!(
         "UPDATE token SET revoked_at = now(), revocation_reason = $2
-         WHERE resource = $1 AND usage = 'session' AND revoked_at IS NULL",
+         WHERE resource = $1 AND usage = 'session' AND revoked_at IS NULL
+           AND uuid IS DISTINCT FROM $3",
         account,
-        reason
+        reason,
+        keep
     )
     .execute(db)
     .await?;
     Ok(())
+}
+
+/// The email an unused reset or invitation link is for (`None`: no such
+/// link, used, or expired). The token stays usable.
+pub async fn token_email(
+    pool: &PgPool,
+    token: &str,
+    reset_lifetime: Duration,
+    invitation_lifetime: Duration,
+) -> sqlx::Result<Option<String>> {
+    let Some((prefix, hash)) = OpaqueToken::parse(token) else {
+        return Ok(None);
+    };
+    sqlx::query_scalar!(
+        r#"SELECT a.email FROM token t
+           JOIN account a ON (t.usage = 'password_reset' AND a.uuid = t.resource)
+             OR (t.usage = 'invitation'
+                 AND a.pk = (SELECT u.account FROM "user" u WHERE u.uuid = t.resource))
+           WHERE t.prefix = $1 AND t.hash = $2 AND t.revoked_at IS NULL
+             AND ((t.usage = 'password_reset' AND t.created_at > now() - make_interval(secs => $3))
+               OR (t.usage = 'invitation' AND t.created_at > now() - make_interval(secs => $4)))"#,
+        prefix,
+        &hash[..],
+        reset_lifetime.as_secs_f64(),
+        invitation_lifetime.as_secs_f64()
+    )
+    .fetch_optional(pool)
+    .await
+}
+
+/// An account's email.
+pub async fn email_of(db: &mut sqlx::PgConnection, account: i64) -> sqlx::Result<String> {
+    sqlx::query_scalar!("SELECT email FROM account WHERE pk = $1", account)
+        .fetch_one(db)
+        .await
 }
 
 /// An account by email: `(uuid, verified, has a password)`.

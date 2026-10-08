@@ -136,7 +136,7 @@ pub async fn run(
     if !req.admin_email.contains('@') {
         return Err(invalid("the admin's email is invalid"));
     }
-    super::accounts::check_password(&req.admin_password)?;
+    super::accounts::check_password(&state, &req.admin_password, &req.admin_email)?;
     if req.organization.trim().is_empty() {
         return Err(invalid("the organization needs a name"));
     }
