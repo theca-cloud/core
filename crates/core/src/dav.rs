@@ -12,9 +12,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::extract::Request;
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::http::{HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use bytes::{Buf, Bytes};
+use chrono::{DateTime, Utc};
 use dav_server::davpath::DavPath;
 use dav_server::fs::{
     DavDirEntry, DavFile, DavMetaData, DavProp, FsError, FsFuture, FsResult, FsStream,
@@ -59,13 +60,37 @@ pub async fn serve(dav: DavHandler<Who>, request: Request) -> Response {
         );
         return response;
     };
+    // The file's modification time on the client, as ownCloud and Nextcloud
+    // take it (rclone's `vendor = owncloud` sends it): Unix seconds.
+    let modified = match request.headers().get("x-oc-mtime") {
+        None => None,
+        Some(value) => match value
+            .to_str()
+            .ok()
+            .and_then(|v| v.trim().parse::<f64>().ok())
+            .and_then(|secs| DateTime::from_timestamp(secs as i64, 0))
+            .filter(|t| db::file::plausible_modified(*t))
+        {
+            Some(t) => Some(t),
+            None => return (StatusCode::BAD_REQUEST, "invalid X-OC-Mtime").into_response(),
+        },
+    };
+    let put = request.method() == Method::PUT;
     let who = Who {
         credential: who,
+        modified,
         trashed: Arc::default(),
     };
-    dav.handle_guarded(request, who.account_uuid.to_string(), who)
+    let mut response = dav
+        .handle_guarded(request, who.account_uuid.to_string(), who)
         .await
-        .map(Body::new)
+        .map(Body::new);
+    if put && modified.is_some() && response.status().is_success() {
+        response
+            .headers_mut()
+            .insert("x-oc-mtime", HeaderValue::from_static("accepted"));
+    }
+    response
 }
 
 /// Who a request acts as, and what it trashed so far: `dav-server` deletes a
@@ -75,6 +100,8 @@ pub async fn serve(dav: DavHandler<Who>, request: Request) -> Response {
 #[derive(Clone)]
 pub struct Who {
     credential: Credential,
+    /// A `PUT`'s `X-OC-Mtime`: the file's modification time on the client.
+    modified: Option<DateTime<Utc>>,
     trashed: Arc<Mutex<Vec<Trashed>>>,
 }
 
@@ -279,7 +306,7 @@ impl Fs {
             Item::Root | Item::Organization { .. } => Ok(Meta::dir(UNIX_EPOCH)),
             Item::Node(node) => {
                 let row = sqlx::query!(
-                    r#"SELECT n.is_file, v.uuid AS "version?", extract(epoch FROM v.created_at)::float8 AS "modified?",
+                    r#"SELECT n.is_file, v.uuid AS "version?", extract(epoch FROM v.modified_at)::float8 AS "modified?",
                               v.size AS "len?"
                        FROM node n LEFT JOIN version v ON v.pk = n.current_version WHERE n.pk = $1"#,
                     node.node
@@ -349,6 +376,7 @@ impl GuardedFileSystem<Who> for Fs {
             Ok(Box::new(WriteFile {
                 fs: self.clone(),
                 who: who.credential,
+                modified: who.modified,
                 parent,
                 existing,
                 name,
@@ -389,7 +417,7 @@ impl GuardedFileSystem<Who> for Fs {
                 Item::Node(node) if !node.is_file => {
                     let rows = sqlx::query!(
                         r#"SELECT n.name, n.is_file, v.uuid AS "version?",
-                                  extract(epoch FROM v.created_at)::float8 AS "modified?",
+                                  extract(epoch FROM v.modified_at)::float8 AS "modified?",
                                   v.size AS "len?"
                            FROM node n LEFT JOIN version v ON v.pk = n.current_version
                            WHERE n.parent = $1 AND n.deleted_at IS NULL ORDER BY lower(n.name)"#,
@@ -735,6 +763,8 @@ impl DavFile for ReadFile {
 struct WriteFile {
     fs: Fs,
     who: Credential,
+    /// The request's `X-OC-Mtime`.
+    modified: Option<DateTime<Utc>>,
     parent: NodeAccess,
     existing: Option<NodeAccess>,
     name: String,
@@ -799,9 +829,15 @@ impl DavFile for WriteFile {
                     name: name.as_str(),
                 },
             };
-            files::store(&self.fs.state, &self.who, target, self.spool.path())
-                .await
-                .map_err(map)?;
+            files::store(
+                &self.fs.state,
+                &self.who,
+                target,
+                self.spool.path(),
+                self.modified,
+            )
+            .await
+            .map_err(map)?;
             self.stored = true;
             Ok(())
         }

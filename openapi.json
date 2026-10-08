@@ -7,7 +7,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.17.1"
+    "version": "0.18.0"
   },
   "paths": {
     "/api/health": {
@@ -4654,6 +4654,14 @@
             ],
             "description": "Description of the version."
           },
+          "modified": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "The file's modification time on the client (its own, e.g. on disk);\nnone: the upload's. The same chunks as the current version with\nanother time update that version's (a touch), creating nothing."
+          },
           "name": {
             "type": [
               "string",
@@ -5819,7 +5827,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "A file's current version date."
+            "description": "A file's modification time (its current version's, as its client gave it)."
           },
           "name": {
             "type": "string",
@@ -5874,6 +5882,14 @@
             "type": "string",
             "format": "uuid",
             "description": "Its library."
+          },
+          "modified": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "A file's modification time (its current version's, as its client gave\nit); none for a folder or a file without a version yet."
           },
           "name": {
             "type": "string",
@@ -6809,7 +6825,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "A file's current version date."
+            "description": "A file's modification time (its current version's, as its client gave it)."
           },
           "path": {
             "type": "string",
@@ -6956,6 +6972,7 @@
         "required": [
           "id",
           "created_at",
+          "modified",
           "current"
         ],
         "properties": {
@@ -6969,7 +6986,7 @@
           "created_at": {
             "type": "string",
             "format": "date-time",
-            "description": "When."
+            "description": "When it was committed."
           },
           "current": {
             "type": "boolean",
@@ -6986,6 +7003,11 @@
               "null"
             ],
             "description": "Its description."
+          },
+          "modified": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The file's modification time at this version, as its client gave it\n(the commit's time when none was given)."
           },
           "number": {
             "type": "string",

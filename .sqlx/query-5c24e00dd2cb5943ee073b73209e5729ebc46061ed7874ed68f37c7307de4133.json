@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO version (organization, file, parent_version, message, author, size)\n         SELECT $1, $2, $3, $4, $5, coalesce(sum(c.plain_size), 0)\n         FROM unnest($6::bigint[]) AS t (chunk) JOIN chunk c ON c.pk = t.chunk\n         RETURNING pk, uuid",
+  "query": "INSERT INTO version (organization, file, parent_version, message, author, size, modified_at)\n         SELECT $1, $2, $3, $4, $5, coalesce(sum(c.plain_size), 0), coalesce($7, now())\n         FROM unnest($6::bigint[]) AS t (chunk) JOIN chunk c ON c.pk = t.chunk\n         RETURNING pk, uuid",
   "describe": {
     "columns": [
       {
@@ -21,7 +21,8 @@
         "Int8",
         "Text",
         "Int8",
-        "Int8Array"
+        "Int8Array",
+        "Timestamptz"
       ]
     },
     "nullable": [
@@ -29,5 +30,5 @@
       false
     ]
   },
-  "hash": "40f0e25c2a569a04029d94b38346633c9a638835fd48d79c765697ce2e25a472"
+  "hash": "5c24e00dd2cb5943ee073b73209e5729ebc46061ed7874ed68f37c7307de4133"
 }

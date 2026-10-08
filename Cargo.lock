@@ -3457,9 +3457,10 @@ dependencies = [
 
 [[package]]
 name = "theca-client"
-version = "0.17.1"
+version = "0.18.0"
 dependencies = [
  "bytes",
+ "chrono",
  "futures",
  "gloo-timers",
  "js-sys",
@@ -3480,7 +3481,7 @@ dependencies = [
 
 [[package]]
 name = "theca-common"
-version = "0.17.1"
+version = "0.18.0"
 dependencies = [
  "chrono",
  "fastcdc",
@@ -3499,7 +3500,7 @@ dependencies = [
 
 [[package]]
 name = "theca-core"
-version = "0.17.1"
+version = "0.18.0"
 dependencies = [
  "argon2",
  "askama",
@@ -3507,6 +3508,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chacha20poly1305",
+ "chrono",
  "dav-server",
  "dotenvy",
  "futures",
@@ -3540,7 +3542,7 @@ dependencies = [
 
 [[package]]
 name = "theca-password"
-version = "0.17.1"
+version = "0.18.0"
 dependencies = [
  "serde_json",
  "theca-common",

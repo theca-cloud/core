@@ -30,6 +30,7 @@ on_both_backends!(
     edit_uploads_only_new_chunks,
     concurrent_edits_conflict,
     unchanged_content_creates_no_version,
+    commit_keeps_the_client_modified_time,
     empty_file,
     other_bytes_are_refused,
     declarations_are_fixed,
@@ -200,6 +201,44 @@ async fn unchanged_content_creates_no_version(kind: Kind, pool: PgPool) {
     assert!(!stale.unchanged && stale.conflict);
     assert_ne!(stale.version, v2.version);
     assert_eq!(count().await, 3);
+}
+
+/// The commit's `modified` is the file's time everywhere; the same chunks with
+/// another time update the current version (a touch) instead of creating one.
+async fn commit_keeps_the_client_modified_time(kind: Kind, pool: PgPool) {
+    let w = world(kind, pool).await;
+    let mut alice = w.as_user(1).await;
+    let lib = alice.create_library("docs").await;
+    let content = data(MIB, 9);
+    let mut target = new_file(&lib, "dated.bin");
+    target["modified"] = json!("2020-01-02T03:04:05Z");
+    let v1 = alice.upload(&lib, target, &content).await.unwrap();
+    let at = |s: &str| s.parse::<chrono::DateTime<chrono::Utc>>().unwrap();
+    let info: api::NodeInfo = alice
+        .get(&format!("/api/v1/nodes/{}", v1.file))
+        .await
+        .unwrap();
+    assert_eq!(info.modified, Some(at("2020-01-02T03:04:05Z")));
+
+    let touch =
+        json!({ "file": v1.file, "base_version": v1.version, "modified": "2021-06-07T08:09:10Z" });
+    let touched = alice.upload(&lib, touch, &content).await.unwrap();
+    assert!(touched.unchanged);
+    let versions: Vec<api::Version> = alice
+        .get(&format!("/api/v1/files/{}/versions", v1.file))
+        .await
+        .unwrap();
+    assert_eq!(versions.len(), 1, "no new version");
+    assert_eq!(versions[0].modified, at("2021-06-07T08:09:10Z"));
+    assert!(
+        versions[0].created_at > at("2026-01-01T00:00:00Z"),
+        "the commit's own time"
+    );
+
+    let mut absurd = new_file(&lib, "absurd.bin");
+    absurd["modified"] = json!("0000-06-01T00:00:00Z");
+    let refused = alice.upload(&lib, absurd, &content).await.unwrap_err();
+    assert_eq!(refused.1["code"], "invalid_modified");
 }
 
 async fn empty_file(kind: Kind, pool: PgPool) {

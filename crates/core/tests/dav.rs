@@ -287,6 +287,113 @@ async fn reads_and_writes(pool: PgPool) {
     assert_eq!(dav.put("/bad%3Cname", b"x").await, StatusCode::FORBIDDEN);
 }
 
+/// Each version keeps its client's modification time (`X-OC-Mtime`, as rclone
+/// sends it): shown by WebDAV and the API; the same bytes with another time
+/// update the current version (a touch, no new version); a restored version
+/// shows its own; a copy keeps it.
+#[sqlx::test]
+async fn modification_times(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    let dav = w.dav(1, json!({ "library": docs.id })).await;
+    let put = |data: &'static [u8], mtime: Option<&'static str>| {
+        let headers: Vec<(&str, &str)> = mtime.map(|t| ("x-oc-mtime", t)).into_iter().collect();
+        let dav = &dav;
+        async move {
+            dav.request("PUT", "/notes.txt", &headers, data.to_vec())
+                .await
+        }
+    };
+    let file = || async {
+        let nodes: Vec<api::Node> = alice
+            .get(&format!("/api/v1/nodes/{}/children", docs.root))
+            .await
+            .unwrap();
+        nodes.into_iter().find(|n| n.name == "notes.txt").unwrap()
+    };
+    let versions = |id: uuid::Uuid| {
+        let alice = &alice;
+        async move {
+            alice
+                .get::<Vec<api::Version>>(&format!("/api/v1/files/{id}/versions"))
+                .await
+                .unwrap()
+        }
+    };
+    let lastmodified = |path: &'static str| {
+        let dav = &dav;
+        async move {
+            let (_, _, body) = dav
+                .request("PROPFIND", path, &[("depth", "0")], Vec::new())
+                .await;
+            let xml = String::from_utf8(body).unwrap();
+            xml.split("getlastmodified>")
+                .nth(1)
+                .unwrap()
+                .split('<')
+                .next()
+                .unwrap()
+                .to_owned()
+        }
+    };
+    let at = |secs: i64| chrono::DateTime::from_timestamp(secs, 0).unwrap();
+
+    // The client's time, accepted, shown everywhere.
+    let (status, headers, _) = put(b"version one", Some("1700000000")).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(headers["x-oc-mtime"], "accepted");
+    assert_eq!(
+        lastmodified("/notes.txt").await,
+        "Tue, 14 Nov 2023 22:13:20 GMT"
+    );
+    let node = file().await;
+    assert_eq!(node.modified, Some(at(1_700_000_000)));
+    let info: api::NodeInfo = alice
+        .get(&format!("/api/v1/nodes/{}", node.id))
+        .await
+        .unwrap();
+    assert_eq!(info.modified, Some(at(1_700_000_000)));
+    let first = versions(node.id).await;
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].modified, at(1_700_000_000));
+
+    // A touch: the same bytes, another time. No new version.
+    put(b"version one", Some("1700000100")).await;
+    let touched = versions(node.id).await;
+    assert_eq!(touched.len(), 1);
+    assert_eq!(touched[0].modified, at(1_700_000_100));
+
+    // New content without a time: the upload's.
+    let (status, headers, _) = put(b"version two", None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(headers.get("x-oc-mtime").is_none());
+    let node = file().await;
+    assert!(node.modified.unwrap() > at(1_700_000_100));
+
+    // A restored version shows its own time.
+    let restore = format!("/api/v1/files/{}/versions/{}/restore", node.id, first[0].id);
+    let (status, _) = alice
+        .call("POST", &restore, Some(b"{}".to_vec()), true)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(file().await.modified, Some(at(1_700_000_100)));
+
+    // A copy keeps it.
+    let status = dav
+        .status("COPY", "/notes.txt", &[("destination", "/dav/copy.txt")])
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(
+        lastmodified("/copy.txt").await,
+        "Tue, 14 Nov 2023 22:15:00 GMT"
+    );
+
+    // A time that isn't one.
+    let (status, _, _) = put(b"x", Some("soon")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
 #[sqlx::test]
 async fn read_only_and_quota(pool: PgPool) {
     let w = fs_world(pool).await;

@@ -385,6 +385,10 @@ CREATE TABLE version (
     -- is created (a copy copies it).
     size bigint NOT NULL CHECK (size >= 0),
     created_at timestamptz NOT NULL DEFAULT now(),
+    -- The file's modification time as its client gave it (the commit's when
+    -- none was given). The current version's follows a touch (a commit of the
+    -- same chunks with another time); a copy copies it.
+    modified_at timestamptz NOT NULL DEFAULT now(),
     -- Who committed it (a member of the organization); NULL once they leave.
     author bigint,
     UNIQUE (file, pk),

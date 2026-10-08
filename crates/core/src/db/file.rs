@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Postgres, Transaction};
 use theca_common::compression::Compression;
 use theca_common::hash::ChunkHash;
@@ -45,16 +46,26 @@ pub struct Committed {
     pub unchanged: bool,
 }
 
+/// A modification time the database stores as a client means it: years 1 to
+/// 9999 (Postgres's range is wider, chrono's too; past that it's a bug).
+pub fn plausible_modified(t: DateTime<Utc>) -> bool {
+    use chrono::Datelike;
+    (1..=9999).contains(&t.year())
+}
+
 /// Creates the file if needed and a new version with the given chunks (in
 /// order), and makes it current. `conflict`: the base wasn't the current version.
 /// The same chunks as the base, still current: nothing is created, the current
-/// version is returned (`unchanged`; the message is dropped).
+/// version is returned (`unchanged`; the message is dropped), its modification
+/// time set to `modified` if given (a touch). `modified`: the file's time on
+/// the client; none, the commit's.
 pub async fn commit(
     tx: &mut Transaction<'_, Postgres>,
     access: &Access,
     target: Target<'_>,
     chunks: &[Uuid],
     message: Option<&str>,
+    modified: Option<DateTime<Utc>>,
 ) -> Result<Committed, CommitError> {
     let (file_pk, file_uuid, base, current) = match target {
         Target::File { file, base_version } => {
@@ -166,9 +177,15 @@ pub async fn commit(
         .fetch_all(&mut **tx)
         .await?;
         if same == pks {
-            let version = sqlx::query_scalar!("SELECT uuid FROM version WHERE pk = $1", base)
-                .fetch_one(&mut **tx)
-                .await?;
+            // A touch: the current version's time follows its client (a new
+            // version would copy the chunk list for the same content).
+            let version = sqlx::query_scalar!(
+                "UPDATE version SET modified_at = coalesce($2, modified_at) WHERE pk = $1 RETURNING uuid",
+                base,
+                modified
+            )
+            .fetch_one(&mut **tx)
+            .await?;
             return Ok(Committed {
                 file: file_uuid,
                 version,
@@ -179,8 +196,8 @@ pub async fn commit(
     }
 
     let version = sqlx::query!(
-        "INSERT INTO version (organization, file, parent_version, message, author, size)
-         SELECT $1, $2, $3, $4, $5, coalesce(sum(c.plain_size), 0)
+        "INSERT INTO version (organization, file, parent_version, message, author, size, modified_at)
+         SELECT $1, $2, $3, $4, $5, coalesce(sum(c.plain_size), 0), coalesce($7, now())
          FROM unnest($6::bigint[]) AS t (chunk) JOIN chunk c ON c.pk = t.chunk
          RETURNING pk, uuid",
         access.organization,
@@ -188,7 +205,8 @@ pub async fn commit(
         base,
         message,
         access.user,
-        &pks
+        &pks,
+        modified
     )
     .fetch_one(&mut **tx)
     .await?;

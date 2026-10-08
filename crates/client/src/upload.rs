@@ -1013,6 +1013,7 @@ fn commit_request<P>(state: &State<'_, P>, f: usize, options: &UploadOptions) ->
         .iter()
         .map(|p| state.chunks[&(library, p.hash)].id.expect("ready"))
         .collect();
+    let modified = file.source.modified();
     match &file.target {
         Target::New {
             library,
@@ -1026,6 +1027,7 @@ fn commit_request<P>(state: &State<'_, P>, f: usize, options: &UploadOptions) ->
             base_version: None,
             chunks,
             message: options.message.clone(),
+            modified,
         },
         Target::Version {
             library,
@@ -1039,6 +1041,7 @@ fn commit_request<P>(state: &State<'_, P>, f: usize, options: &UploadOptions) ->
             base_version: *base,
             chunks,
             message: options.message.clone(),
+            modified,
         },
     }
 }
