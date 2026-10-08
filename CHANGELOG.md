@@ -1,6 +1,11 @@
 # Changelog
 
 Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
+## [0.18.0] - 2026-10-08
+
+### Features
+
+- **core**: Versions keep their client's modification time
 ## [0.17.1] - 2026-10-08
 
 ### Fixes
