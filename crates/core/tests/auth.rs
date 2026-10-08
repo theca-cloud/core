@@ -308,6 +308,19 @@ async fn logout_and_sessions(pool: PgPool) {
         w.get("/api/v1/me", &laptop.session()).await.status,
         StatusCode::UNAUTHORIZED
     );
+    // Again with the dead session, or none: the cookie is cleared all the same.
+    for cookie in [laptop.session(), String::new()] {
+        let again = w
+            .with(
+                "POST",
+                "/api/v1/auth/logout",
+                ("cookie", &cookie),
+                Some(json!({})),
+            )
+            .await;
+        assert_eq!(again.status, StatusCode::NO_CONTENT);
+        assert_eq!(again.cookie("theca_session"), Some(""));
+    }
 }
 
 #[sqlx::test]

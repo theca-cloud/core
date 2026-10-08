@@ -12,6 +12,7 @@ use super::auth::{ClientIp, CurrentAccount, UserAgent, clear_session_cookie, set
 use super::error::{ApiJson, HttpError};
 use crate::auth::verify_password;
 use crate::db;
+use crate::db::account::Credential;
 use crate::limits::Limit;
 
 pub fn router() -> Router<AppState> {
@@ -107,22 +108,33 @@ pub async fn login(
     Ok((headers, Json(db::account::me(&state.pool, pk).await?)))
 }
 
-/// Log out: revokes this session (at once) and clears the cookie.
-#[utoipa::path(post, path = "/api/v1/auth/logout", responses((status = 204)))]
+/// Log out: revokes this session at once if it's still valid, and clears the
+/// cookie in any case. No session needed: an expired or revoked session's
+/// cookie would otherwise stay, as only the server clears an `httpOnly`
+/// cookie. A valid session stays protected by the CSRF rule (a `POST`, never
+/// a `GET` another site could trigger). App passwords can't log out.
+#[utoipa::path(post, path = "/api/v1/auth/logout", responses(
+    (status = 204),
+    (status = 403, description = "`not_a_session` (an app password)", body = api::ApiError),
+))]
 pub async fn logout(
     State(state): State<AppState>,
-    account: CurrentAccount,
+    credential: Option<axum::Extension<Credential>>,
 ) -> Result<(StatusCode, HeaderMap), HttpError> {
-    if !account.session {
-        return Err(HttpError::forbidden("app passwords can't log out").into_code("not_a_session"));
+    if let Some(axum::Extension(account)) = credential {
+        if !account.session {
+            return Err(
+                HttpError::forbidden("app passwords can't log out").into_code("not_a_session")
+            );
+        }
+        db::account::revoke_session(
+            &state.pool,
+            account.account_uuid,
+            account.token_uuid,
+            "logout",
+        )
+        .await?;
     }
-    db::account::revoke_session(
-        &state.pool,
-        account.account_uuid,
-        account.token_uuid,
-        "logout",
-    )
-    .await?;
     let mut headers = HeaderMap::new();
     clear_session_cookie(&mut headers);
     Ok((StatusCode::NO_CONTENT, headers))
