@@ -36,6 +36,26 @@ pub async fn organization_pk(pool: &PgPool, uuid: Uuid) -> sqlx::Result<Option<i
 }
 
 /// Applies the fields given. `false` if the default storage is unknown.
+/// Makes a joined member, by email, the organization's owner. `false`: no
+/// such joined member.
+pub async fn set_owner(
+    db: &mut PgConnection,
+    organization: i64,
+    email: &str,
+) -> sqlx::Result<bool> {
+    let done = sqlx::query!(
+        r#"UPDATE organization o SET owner = u.pk
+           FROM "user" u JOIN account a ON a.pk = u.account
+           WHERE o.pk = $1 AND u.organization = o.pk AND u.joined_at IS NOT NULL
+             AND lower(a.email) = lower($2)"#,
+        organization,
+        email.trim()
+    )
+    .execute(db)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
 pub async fn update_organization(
     db: &mut PgConnection,
     pk: i64,

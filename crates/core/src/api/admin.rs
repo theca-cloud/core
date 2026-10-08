@@ -250,10 +250,13 @@ async fn organization(state: &AppState, id: Uuid) -> Result<api::AdminOrganizati
         .ok_or_else(|| HttpError::not_found("organization"))
 }
 
-/// Rename, set the quota, suspend or lift, set the default storage.
+/// Rename, set the quota, suspend or lift, set the default storage, give it
+/// another owner (a joined member, by email: an owner gone or mistaken
+/// otherwise leaves only the deletion).
 #[utoipa::path(patch, path = "/api/v1/admin/organizations/{id}", params(("id" = Uuid, Path)), request_body = api::UpdateOrganization, responses(
     (status = 200, body = api::AdminOrganization),
-    (status = 404, body = api::ApiError),
+    (status = 404, description = "No such organization, storage, or joined member (the owner)", body = api::ApiError),
+    (status = 409, description = "`personal_organization` (a new owner)", body = api::ApiError),
 ))]
 pub async fn update_organization(
     State(state): State<AppState>,
@@ -266,6 +269,17 @@ pub async fn update_organization(
         .await?
         .ok_or_else(|| HttpError::not_found("organization"))?;
     let mut tx = state.pool.begin().await?;
+    if let Some(owner) = &update.owner {
+        if organization(&state, id).await?.personal {
+            return Err(HttpError::conflict(
+                "personal_organization",
+                "a personal organization keeps its owner",
+            ));
+        }
+        if !db::admin::set_owner(&mut tx, pk, owner).await? {
+            return Err(HttpError::not_found("member"));
+        }
+    }
     if !db::admin::update_organization(&mut tx, pk, &update).await? {
         return Err(HttpError::not_found("storage"));
     }

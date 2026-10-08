@@ -524,7 +524,7 @@
         "tags": [
           "admin"
         ],
-        "summary": "Rename, set the quota, suspend or lift, set the default storage.",
+        "summary": "Rename, set the quota, suspend or lift, set the default storage, give it\nanother owner (a joined member, by email: an owner gone or mistaken\notherwise leaves only the deletion).",
         "operationId": "update_organization",
         "parameters": [
           {
@@ -559,7 +559,17 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "No such organization, storage, or joined member (the owner)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`personal_organization` (a new owner)",
             "content": {
               "application/json": {
                 "schema": {
@@ -6915,6 +6925,13 @@
               "null"
             ],
             "description": "A new name."
+          },
+          "owner": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A new owner: a joined member's email (a company organization)."
           },
           "quota": {
             "type": [
