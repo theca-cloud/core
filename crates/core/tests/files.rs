@@ -46,8 +46,7 @@ impl Client {
     }
 
     async fn patch(&self, node: Uuid, body: Value) -> Result<api::NodeInfo, Failure> {
-        self.json("PATCH", &format!("/api/v1/nodes/{node}"), &body)
-            .await
+        self.patch_node(node, body).await
     }
 
     async fn delete(&self, path: &str) -> StatusCode {
@@ -55,15 +54,11 @@ impl Client {
     }
 
     async fn trash(&self, node: Uuid) {
-        assert_eq!(
-            self.delete(&format!("/api/v1/nodes/{node}")).await,
-            StatusCode::NO_CONTENT
-        );
+        assert_eq!(self.trash_node(node, false).await, StatusCode::NO_CONTENT);
     }
 
     async fn restore(&self, node: Uuid) -> Result<api::Restored, Failure> {
-        self.json("POST", &format!("/api/v1/nodes/{node}/restore"), &json!({}))
-            .await
+        self.restore_node(node).await
     }
 
     async fn children(&self, folder: Uuid) -> Vec<String> {
@@ -147,7 +142,7 @@ async fn folders_renames_moves(pool: PgPool) {
         .unwrap_err();
     assert_eq!(code(root), (StatusCode::BAD_REQUEST, "root".into()));
     assert_eq!(
-        alice.delete(&format!("/api/v1/nodes/{}", docs.root)).await,
+        alice.trash_node(docs.root, false).await,
         StatusCode::BAD_REQUEST
     );
 
@@ -194,11 +189,7 @@ async fn folders_renames_moves(pool: PgPool) {
         (StatusCode::CONFLICT, "other_organization".into())
     );
     let copy = alice
-        .json::<Value>(
-            "POST",
-            &format!("/api/v1/nodes/{a}/copy"),
-            &json!({ "parent": theirs.root }),
-        )
+        .copy_node(a, json!({ "parent": theirs.root }))
         .await
         .unwrap_err();
     assert_eq!(
@@ -232,11 +223,7 @@ async fn copies_share_chunks(pool: PgPool) {
 
     let other = alice.create_library("Other").await;
     let copy: api::NodeInfo = alice
-        .json(
-            "POST",
-            &format!("/api/v1/nodes/{src}/copy"),
-            &json!({ "parent": other.root, "name": "dst" }),
-        )
+        .copy_node(src, json!({ "parent": other.root, "name": "dst" }))
         .await
         .unwrap();
     assert_eq!(copy.path, "/dst");
@@ -257,11 +244,7 @@ async fn copies_share_chunks(pool: PgPool) {
 
     // Into its own subtree: a snapshot, so it terminates.
     let nested: api::NodeInfo = alice
-        .json(
-            "POST",
-            &format!("/api/v1/nodes/{src}/copy"),
-            &json!({ "parent": sub }),
-        )
+        .copy_node(src, json!({ "parent": sub }))
         .await
         .unwrap();
     assert_eq!(nested.path, "/src/sub/src");
@@ -272,20 +255,12 @@ async fn copies_share_chunks(pool: PgPool) {
     let bob = w.as_user(2).await;
     w.add_member(docs.id, 2, "read").await;
     let refused = bob
-        .json::<Value>(
-            "POST",
-            &format!("/api/v1/nodes/{}/copy", other.root),
-            &json!({ "parent": docs.root }),
-        )
+        .copy_node(other.root, json!({ "parent": docs.root }))
         .await
         .unwrap_err();
     assert_eq!(refused.0, StatusCode::BAD_REQUEST, "the root isn't copied");
     let refused = bob
-        .json::<Value>(
-            "POST",
-            &format!("/api/v1/nodes/{}/copy", copy.id),
-            &json!({ "parent": docs.root }),
-        )
+        .copy_node(copy.id, json!({ "parent": docs.root }))
         .await
         .unwrap_err();
     assert_eq!(refused.0, StatusCode::FORBIDDEN);
@@ -353,10 +328,9 @@ async fn trash(pool: PgPool) {
     );
 
     // Deleted for good: only from the trash; nodes and history go, chunks stay (GC).
-    let tr = format!("/api/v1/nodes/{t}?permanent=true");
-    assert_eq!(alice.delete(&tr).await, StatusCode::NOT_FOUND);
+    assert_eq!(alice.trash_node(t, true).await, StatusCode::NOT_FOUND);
     alice.trash(t).await;
-    assert_eq!(alice.delete(&tr).await, StatusCode::NO_CONTENT);
+    assert_eq!(alice.trash_node(t, true).await, StatusCode::NO_CONTENT);
     let count = |sql: &'static str| {
         let pool = w.pool.clone();
         async move {
@@ -629,10 +603,9 @@ async fn copies_onto_files_add_a_version(pool: PgPool) {
         .await
         .unwrap();
     let copy: api::NodeInfo = alice
-        .json(
-            "POST",
-            &format!("/api/v1/nodes/{}/copy", a.file),
-            &json!({ "parent": docs.root, "name": "b.txt", "replace": true }),
+        .copy_node(
+            a.file,
+            json!({ "parent": docs.root, "name": "b.txt", "replace": true }),
         )
         .await
         .unwrap();
@@ -1016,4 +989,74 @@ async fn what_the_web_app_shows(pool: PgPool) {
         .await;
     let me: api::Me = bob.get("/api/v1/me").await.unwrap();
     assert!(me.instance_admin);
+}
+
+#[sqlx::test]
+async fn batches_of_nodes(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let mut alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    let made = alice.folders(docs.root, &["A", "B", "C"]).await.unwrap();
+    let (a, b, c) = (made[0].id, made[1].id, made[2].id);
+    let f = alice.file(&docs, docs.root, "f.txt", &data(100, 1)).await;
+
+    // Each item its own outcome: one failing leaves the others done.
+    let outcomes: Vec<api::NodeOutcome> = alice
+        .json(
+            "PATCH",
+            "/api/v1/nodes",
+            &json!({ "nodes": [
+                { "id": a, "parent": c },
+                { "id": c, "parent": a },
+                { "id": f, "name": "g.txt" },
+            ] }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcomes[0].node.as_ref().unwrap().path, "/C/A");
+    assert_eq!(outcomes[1].error.as_ref().unwrap().code, "move_into_itself");
+    assert_eq!(outcomes[1].status, Some(409));
+    assert_eq!(outcomes[2].node.as_ref().unwrap().name, "g.txt");
+
+    let outcomes: Vec<api::NodeOutcome> = alice
+        .json(
+            "POST",
+            "/api/v1/nodes/copy",
+            &json!({ "nodes": [
+            { "id": f, "parent": b }, { "id": f, "parent": b },
+        ] }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcomes[0].node.as_ref().unwrap().path, "/B/g.txt");
+    assert_eq!(outcomes[1].error.as_ref().unwrap().code, "name_taken");
+
+    // Trashed and restored together; an unknown node fails alone.
+    let gone = Uuid::now_v7();
+    let outcomes: Vec<api::NodeOutcome> = alice
+        .json(
+            "POST",
+            "/api/v1/nodes/trash",
+            &json!({ "nodes": [b, f, gone] }),
+        )
+        .await
+        .unwrap();
+    assert!(outcomes[0].error.is_none() && outcomes[1].error.is_none());
+    assert_eq!(outcomes[2].status, Some(404));
+    let restored: Vec<api::RestoreOutcome> = alice
+        .json("POST", "/api/v1/nodes/restore", &json!({ "nodes": [b, f] }))
+        .await
+        .unwrap();
+    assert_eq!(restored[0].restored.as_ref().unwrap().path, "/B");
+    assert_eq!(restored[1].restored.as_ref().unwrap().path, "/g.txt");
+
+    let too_many = vec![f; 1001];
+    let refused = alice
+        .json::<Value>("POST", "/api/v1/nodes/trash", &json!({ "nodes": too_many }))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        code(refused),
+        (StatusCode::BAD_REQUEST, "batch_too_large".into())
+    );
 }

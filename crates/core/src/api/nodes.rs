@@ -4,7 +4,7 @@
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use theca_common::api;
@@ -20,11 +20,13 @@ use crate::files;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/nodes/{id}", get(info).patch(update).delete(delete))
+        .route("/nodes", patch(update))
+        .route("/nodes/copy", post(copy))
+        .route("/nodes/trash", post(trash_nodes))
+        .route("/nodes/restore", post(restore))
+        .route("/nodes/{id}", get(info))
         .route("/nodes/{id}/folders", post(create_folder))
         .route("/nodes/{id}/tree", get(tree))
-        .route("/nodes/{id}/copy", post(copy))
-        .route("/nodes/{id}/restore", post(restore))
         .route("/libraries/{id}/trash", get(trash))
         .route("/files/{id}/versions", get(versions))
         .route("/files/{id}/content", get(super::content::content))
@@ -154,53 +156,106 @@ pub async fn tree(
         .into_response())
 }
 
-/// Rename and/or move a file or folder. Within a library a move is one row;
-/// to another library of the same organization, the subtree (and its
-/// history) follows.
-#[utoipa::path(patch, path = "/api/v1/nodes/{id}", params(("id" = Uuid, Path)), request_body = api::UpdateNode, responses(
-    (status = 200, body = api::NodeInfo),
-    (status = 400, description = "`root`", body = api::ApiError),
-    (status = 404, body = api::ApiError),
-    (status = 409, description = "`name_taken`, `move_into_itself`, `other_organization`", body = api::ApiError),
+/// The most nodes one batch takes.
+const NODE_BATCH: usize = 1000;
+
+fn batch_size(len: usize) -> Result<(), HttpError> {
+    if len > NODE_BATCH {
+        return Err(HttpError::bad_request(
+            "batch_too_large",
+            format!("at most {NODE_BATCH} nodes per batch"),
+        ));
+    }
+    Ok(())
+}
+
+/// One item's result as its outcome's parts: the value, or the error and the
+/// status a call of its own would have answered.
+fn outcome<T>(result: Result<T, HttpError>) -> (Option<T>, Option<api::ApiError>, Option<u16>) {
+    match result {
+        Ok(value) => (Some(value), None, None),
+        Err(e) => {
+            let (status, error) = e.into_parts();
+            (None, Some(error), Some(status.as_u16()))
+        }
+    }
+}
+
+fn node_outcome(result: Result<Option<api::NodeInfo>, HttpError>) -> api::NodeOutcome {
+    let (node, error, status) = outcome(result);
+    api::NodeOutcome {
+        node: node.flatten(),
+        error,
+        status,
+    }
+}
+
+/// Rename and/or move files and folders, each in its own transaction, each
+/// its own outcome. Within a library a move is one row; to another library of
+/// the same organization, the subtree (and its history) follows.
+#[utoipa::path(patch, path = "/api/v1/nodes", request_body = api::UpdateNodes, responses(
+    (status = 200, description = "Each node's outcome, in order: errors `root`, `not_found`, `name_taken`, `move_into_itself`, `other_organization`", body = Vec<api::NodeOutcome>),
+    (status = 400, description = "`batch_too_large`", body = api::ApiError),
 ))]
 pub async fn update(
     State(state): State<AppState>,
     user: CurrentAccount,
-    Path(id): Path<Uuid>,
-    ApiJson(req): ApiJson<api::UpdateNode>,
-) -> Result<Json<api::NodeInfo>, HttpError> {
-    let node = node(&state, &user, id).await?;
-    let parent = match req.parent {
-        Some(parent) => Some(super::nodes::node(&state, &user, parent).await?),
+    ApiJson(req): ApiJson<api::UpdateNodes>,
+) -> Result<Json<Vec<api::NodeOutcome>>, HttpError> {
+    batch_size(req.nodes.len())?;
+    let mut outcomes = Vec::with_capacity(req.nodes.len());
+    for change in &req.nodes {
+        outcomes.push(node_outcome(
+            update_one(&state, &user, change).await.map(Some),
+        ));
+    }
+    Ok(Json(outcomes))
+}
+
+async fn update_one(
+    state: &AppState,
+    user: &CurrentAccount,
+    change: &api::UpdateNode,
+) -> Result<api::NodeInfo, HttpError> {
+    let node = node(state, user, change.id).await?;
+    let parent = match change.parent {
+        Some(parent) => Some(super::nodes::node(state, user, parent).await?),
         None => None,
     };
-    let name = req.name.as_ref().map(|n| n.as_str());
-    let now = files::rename_move(&state, &node, name, parent.as_ref(), req.replace).await?;
-    Ok(Json(db::node::info(&state.pool, now).await?))
+    let name = change.name.as_ref().map(|n| n.as_str());
+    let now = files::rename_move(state, &node, name, parent.as_ref(), change.replace).await?;
+    Ok(db::node::info(&state.pool, now).await?)
 }
 
-#[derive(Debug, Deserialize, utoipa::IntoParams)]
-pub struct DeleteParams {
-    /// Delete for good (a node already in the trash only).
-    #[serde(default)]
-    permanent: bool,
-}
-
-/// Put a file or folder in the trash, or (`permanent`, from the trash) delete
-/// it for good with its subtree and history.
-#[utoipa::path(delete, path = "/api/v1/nodes/{id}", params(("id" = Uuid, Path), DeleteParams), responses(
-    (status = 204),
-    (status = 400, description = "`root`", body = api::ApiError),
-    (status = 404, body = api::ApiError),
+/// Put files and folders in the trash, or (`permanent`, from the trash)
+/// delete them for good with their subtrees and histories; each in its own
+/// transaction, each its own outcome.
+#[utoipa::path(post, path = "/api/v1/nodes/trash", request_body = api::TrashNodes, responses(
+    (status = 200, description = "Each node's outcome, in order (no `node`): errors `root`, `not_found`", body = Vec<api::NodeOutcome>),
+    (status = 400, description = "`batch_too_large`", body = api::ApiError),
 ))]
-pub async fn delete(
+pub async fn trash_nodes(
     State(state): State<AppState>,
     user: CurrentAccount,
-    Path(id): Path<Uuid>,
-    Query(params): Query<DeleteParams>,
-) -> Result<StatusCode, HttpError> {
-    if params.permanent {
-        let node = db::node::trashed_access(&state.pool, &user, id)
+    ApiJson(req): ApiJson<api::TrashNodes>,
+) -> Result<Json<Vec<api::NodeOutcome>>, HttpError> {
+    batch_size(req.nodes.len())?;
+    let mut outcomes = Vec::with_capacity(req.nodes.len());
+    for id in &req.nodes {
+        let result = trash_one(&state, &user, *id, req.permanent).await;
+        outcomes.push(node_outcome(result.map(|()| None)));
+    }
+    Ok(Json(outcomes))
+}
+
+async fn trash_one(
+    state: &AppState,
+    user: &CurrentAccount,
+    id: Uuid,
+    permanent: bool,
+) -> Result<(), HttpError> {
+    if permanent {
+        let node = db::node::trashed_access(&state.pool, user, id)
             .await?
             .ok_or_else(|| HttpError::not_found("trashed node"))?;
         require_write(&node.access)?;
@@ -208,33 +263,42 @@ pub async fn delete(
         db::node::purge(&mut tx, node.node).await?;
         tx.commit().await?;
     } else {
-        let node = node(&state, &user, id).await?;
-        files::trash(&state, &node).await?;
+        let node = node(state, user, id).await?;
+        files::trash(state, &node).await?;
     }
-    Ok(StatusCode::NO_CONTENT)
+    Ok(())
 }
 
-/// Copy a file or folder into a folder of any library of the same
-/// organization. Files keep their current version only, sharing its chunks.
-#[utoipa::path(post, path = "/api/v1/nodes/{id}/copy", params(("id" = Uuid, Path)), request_body = api::CopyNode, responses(
-    (status = 201, body = api::NodeInfo),
-    (status = 404, body = api::ApiError),
-    (status = 409, description = "`name_taken`, `other_organization`", body = api::ApiError),
+/// Copy files and folders into folders of any library of the same
+/// organization, each in its own transaction, each its own outcome. Files
+/// keep their current version only, sharing its chunks.
+#[utoipa::path(post, path = "/api/v1/nodes/copy", request_body = api::CopyNodes, responses(
+    (status = 200, description = "Each copy's outcome, in order (`node`: the copy): errors `not_found`, `name_taken`, `other_organization`", body = Vec<api::NodeOutcome>),
+    (status = 400, description = "`batch_too_large`", body = api::ApiError),
 ))]
 pub async fn copy(
     State(state): State<AppState>,
     user: CurrentAccount,
-    Path(id): Path<Uuid>,
-    ApiJson(req): ApiJson<api::CopyNode>,
-) -> Result<(StatusCode, Json<api::NodeInfo>), HttpError> {
-    let source = node(&state, &user, id).await?;
-    let dest = node(&state, &user, req.parent).await?;
-    let name = req.name.as_ref().map(|n| n.as_str());
-    let copy = files::copy(&state, &source, &dest, name, req.replace).await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(db::node::info(&state.pool, copy).await?),
-    ))
+    ApiJson(req): ApiJson<api::CopyNodes>,
+) -> Result<Json<Vec<api::NodeOutcome>>, HttpError> {
+    batch_size(req.nodes.len())?;
+    let mut outcomes = Vec::with_capacity(req.nodes.len());
+    for copy in &req.nodes {
+        outcomes.push(node_outcome(copy_one(&state, &user, copy).await.map(Some)));
+    }
+    Ok(Json(outcomes))
+}
+
+async fn copy_one(
+    state: &AppState,
+    user: &CurrentAccount,
+    copy: &api::CopyNode,
+) -> Result<api::NodeInfo, HttpError> {
+    let source = node(state, user, copy.id).await?;
+    let dest = node(state, user, copy.parent).await?;
+    let name = copy.name.as_ref().map(|n| n.as_str());
+    let made = files::copy(state, &source, &dest, name, copy.replace).await?;
+    Ok(db::node::info(&state.pool, made).await?)
 }
 
 /// A library's trash.
@@ -253,25 +317,44 @@ pub async fn trash(
     ))
 }
 
-/// Take a file or folder out of the trash: back in its folder, or into the
-/// library's root if that one is trashed too; renamed if its name is taken.
-#[utoipa::path(post, path = "/api/v1/nodes/{id}/restore", params(("id" = Uuid, Path)), responses(
-    (status = 200, body = api::Restored),
-    (status = 404, body = api::ApiError),
+/// Take files and folders out of the trash, each in its own transaction,
+/// each its own outcome: back in their folder, or into the library's root if
+/// that one is trashed too; renamed if their name is taken.
+#[utoipa::path(post, path = "/api/v1/nodes/restore", request_body = api::RestoreNodes, responses(
+    (status = 200, description = "Each node's outcome, in order: errors `not_found`", body = Vec<api::RestoreOutcome>),
+    (status = 400, description = "`batch_too_large`", body = api::ApiError),
 ))]
 pub async fn restore(
     State(state): State<AppState>,
     user: CurrentAccount,
-    Path(id): Path<Uuid>,
-) -> Result<Json<api::Restored>, HttpError> {
-    let node = db::node::trashed_access(&state.pool, &user, id)
+    ApiJson(req): ApiJson<api::RestoreNodes>,
+) -> Result<Json<Vec<api::RestoreOutcome>>, HttpError> {
+    batch_size(req.nodes.len())?;
+    let mut outcomes = Vec::with_capacity(req.nodes.len());
+    for id in &req.nodes {
+        let (restored, error, status) = outcome(restore_one(&state, &user, *id).await);
+        outcomes.push(api::RestoreOutcome {
+            restored,
+            error,
+            status,
+        });
+    }
+    Ok(Json(outcomes))
+}
+
+async fn restore_one(
+    state: &AppState,
+    user: &CurrentAccount,
+    id: Uuid,
+) -> Result<api::Restored, HttpError> {
+    let node = db::node::trashed_access(&state.pool, user, id)
         .await?
         .ok_or_else(|| HttpError::not_found("trashed node"))?;
     require_write(&node.access)?;
     let mut tx = state.pool.begin().await?;
     let restored = db::node::restore(&mut tx, &node).await?;
     tx.commit().await?;
-    Ok(Json(restored))
+    Ok(restored)
 }
 
 /// A file's versions: a tree (branches after conflicts and restores).

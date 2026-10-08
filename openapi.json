@@ -2836,6 +2836,182 @@
         }
       }
     },
+    "/api/v1/nodes": {
+      "patch": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Rename and/or move files and folders, each in its own transaction, each\nits own outcome. Within a library a move is one row; to another library of\nthe same organization, the subtree (and its history) follows.",
+        "operationId": "update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateNodes"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Each node's outcome, in order: errors `root`, `not_found`, `name_taken`, `move_into_itself`, `other_organization`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NodeOutcome"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`batch_too_large`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/copy": {
+      "post": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Copy files and folders into folders of any library of the same\norganization, each in its own transaction, each its own outcome. Files\nkeep their current version only, sharing its chunks.",
+        "operationId": "copy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyNodes"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Each copy's outcome, in order (`node`: the copy): errors `not_found`, `name_taken`, `other_organization`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NodeOutcome"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`batch_too_large`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/restore": {
+      "post": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Take files and folders out of the trash, each in its own transaction,\neach its own outcome: back in their folder, or into the library's root if\nthat one is trashed too; renamed if their name is taken.",
+        "operationId": "restore",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreNodes"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Each node's outcome, in order: errors `not_found`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RestoreOutcome"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`batch_too_large`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/trash": {
+      "post": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Put files and folders in the trash, or (`permanent`, from the trash)\ndelete them for good with their subtrees and histories; each in its own\ntransaction, each its own outcome.",
+        "operationId": "trash_nodes",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrashNodes"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Each node's outcome, in order (no `node`): errors `root`, `not_found`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NodeOutcome"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`batch_too_large`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/nodes/{id}": {
       "get": {
         "tags": [
@@ -2867,128 +3043,6 @@
           },
           "404": {
             "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "nodes"
-        ],
-        "summary": "Put a file or folder in the trash, or (`permanent`, from the trash) delete\nit for good with its subtree and history.",
-        "operationId": "delete",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "permanent",
-            "in": "path",
-            "description": "Delete for good (a node already in the trash only).",
-            "required": true,
-            "schema": {
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": ""
-          },
-          "400": {
-            "description": "`root`",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "tags": [
-          "nodes"
-        ],
-        "summary": "Rename and/or move a file or folder. Within a library a move is one row;\nto another library of the same organization, the subtree (and its\nhistory) follows.",
-        "operationId": "update",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateNode"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NodeInfo"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "`root`",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "`name_taken`, `move_into_itself`, `other_organization`",
             "content": {
               "application/json": {
                 "schema": {
@@ -3034,68 +3088,6 @@
           },
           "404": {
             "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/nodes/{id}/copy": {
-      "post": {
-        "tags": [
-          "nodes"
-        ],
-        "summary": "Copy a file or folder into a folder of any library of the same\norganization. Files keep their current version only, sharing its chunks.",
-        "operationId": "copy",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CopyNode"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NodeInfo"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "`name_taken`, `other_organization`",
             "content": {
               "application/json": {
                 "schema": {
@@ -3171,48 +3163,6 @@
           },
           "409": {
             "description": "`name_taken` (a file has a path's name)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/nodes/{id}/restore": {
-      "post": {
-        "tags": [
-          "nodes"
-        ],
-        "summary": "Take a file or folder out of the trash: back in its folder, or into the\nlibrary's root if that one is trashed too; renamed if its name is taken.",
-        "operationId": "restore",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Restored"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
             "content": {
               "application/json": {
                 "schema": {
@@ -4673,11 +4623,17 @@
       },
       "CopyNode": {
         "type": "object",
-        "description": "`POST /nodes/{id}/copy`.",
+        "description": "A copy.",
         "required": [
+          "id",
           "parent"
         ],
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The file or folder to copy."
+          },
           "name": {
             "type": [
               "string",
@@ -4693,6 +4649,22 @@
           "replace": {
             "type": "boolean",
             "description": "A file of that name exists there: the copy is a new version of it\n(based on its current one). Otherwise `name_taken`. Folders are never\nreplaced."
+          }
+        }
+      },
+      "CopyNodes": {
+        "type": "object",
+        "description": "`POST /nodes/copy`: copies, each in its own transaction (at most 1000).",
+        "required": [
+          "nodes"
+        ],
+        "properties": {
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CopyNode"
+            },
+            "description": "The copies, each its own outcome."
           }
         }
       },
@@ -5786,6 +5758,43 @@
           }
         }
       },
+      "NodeOutcome": {
+        "type": "object",
+        "description": "One node's outcome in a batch: the node as it is now (none after a trash),\nor why not.",
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ApiError",
+                "description": "Refused, and why."
+              }
+            ]
+          },
+          "node": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NodeInfo",
+                "description": "Done: the node now (renamed, moved, the copy); none for a trash."
+              }
+            ]
+          },
+          "status": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "With `error`: its HTTP status, as a call of its own would have answered.",
+            "minimum": 0
+          }
+        }
+      },
       "OidcRedirect": {
         "type": "object",
         "description": "Where to send the browser to continue with an OIDC provider.",
@@ -6008,6 +6017,60 @@
           "password": {
             "type": "string",
             "description": "The password (at least 8 characters)."
+          }
+        }
+      },
+      "RestoreNodes": {
+        "type": "object",
+        "description": "`POST /nodes/restore`: files and folders out of the trash, each in its own\ntransaction (at most 1000).",
+        "required": [
+          "nodes"
+        ],
+        "properties": {
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The trashed files and folders, each its own outcome."
+          }
+        }
+      },
+      "RestoreOutcome": {
+        "type": "object",
+        "description": "One restore's outcome in a batch.",
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ApiError",
+                "description": "Refused, and why."
+              }
+            ]
+          },
+          "restored": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Restored",
+                "description": "Where it went."
+              }
+            ]
+          },
+          "status": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "With `error`: its HTTP status, as a call of its own would have answered.",
+            "minimum": 0
           }
         }
       },
@@ -6457,6 +6520,27 @@
           }
         }
       },
+      "TrashNodes": {
+        "type": "object",
+        "description": "`POST /nodes/trash`: files and folders to the trash, or (`permanent`,\nalready in the trash) deleted for good; each in its own transaction (at\nmost 1000).",
+        "required": [
+          "nodes"
+        ],
+        "properties": {
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The files and folders, each its own outcome."
+          },
+          "permanent": {
+            "type": "boolean",
+            "description": "Delete for good (nodes already in the trash only)."
+          }
+        }
+      },
       "TrashedLibrary": {
         "type": "object",
         "description": "A library in its organization's trash.",
@@ -6620,8 +6704,16 @@
       },
       "UpdateNode": {
         "type": "object",
-        "description": "`PATCH /nodes/{id}`: rename and/or move.",
+        "description": "A rename and/or move.",
+        "required": [
+          "id"
+        ],
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The file or folder."
+          },
           "name": {
             "type": [
               "string",
@@ -6640,6 +6732,22 @@
           "replace": {
             "type": "boolean",
             "description": "A file of that name exists there: merge into it (its history gains\nthis file's versions after its current one, this file's current version\nbecomes current, this node goes). Otherwise `name_taken`. Folders are\nnever replaced."
+          }
+        }
+      },
+      "UpdateNodes": {
+        "type": "object",
+        "description": "`PATCH /nodes`: renames and/or moves, each in its own transaction (at\nmost 1000).",
+        "required": [
+          "nodes"
+        ],
+        "properties": {
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpdateNode"
+            },
+            "description": "The changes, each its own outcome."
           }
         }
       },

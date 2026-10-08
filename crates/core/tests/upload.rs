@@ -6,6 +6,8 @@
 //! through the router) and S3 (Garage, presigned by S3, real HTTP). S3 needs
 //! the `S3_TEST_*` variables, written by `scripts/dev.sh` and set by CI.
 
+#![allow(dead_code)] // the shared harness has more than these tests use
+
 include!("common/harness.rs");
 
 /// Runs each scenario on both backends: `filesystem::name` and `s3::name`.

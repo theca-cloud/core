@@ -770,10 +770,21 @@ pub enum TreeLine {
     Error(ApiError),
 }
 
-/// `PATCH /nodes/{id}`: rename and/or move.
+/// `PATCH /nodes`: renames and/or moves, each in its own transaction (at
+/// most 1000).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UpdateNodes {
+    /// The changes, each its own outcome.
+    pub nodes: Vec<UpdateNode>,
+}
+
+/// A rename and/or move.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateNode {
+    /// The file or folder.
+    pub id: Uuid,
     /// The new name.
     #[serde(default)]
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
@@ -789,10 +800,20 @@ pub struct UpdateNode {
     pub replace: bool,
 }
 
-/// `POST /nodes/{id}/copy`.
+/// `POST /nodes/copy`: copies, each in its own transaction (at most 1000).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CopyNodes {
+    /// The copies, each its own outcome.
+    pub nodes: Vec<CopyNode>,
+}
+
+/// A copy.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CopyNode {
+    /// The file or folder to copy.
+    pub id: Uuid,
     /// The folder to copy into (in any library of the same organization).
     pub parent: Uuid,
     /// The copy's name (default: the source's).
@@ -804,6 +825,59 @@ pub struct CopyNode {
     /// replaced.
     #[serde(default)]
     pub replace: bool,
+}
+
+/// `POST /nodes/trash`: files and folders to the trash, or (`permanent`,
+/// already in the trash) deleted for good; each in its own transaction (at
+/// most 1000).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TrashNodes {
+    /// The files and folders, each its own outcome.
+    pub nodes: Vec<Uuid>,
+    /// Delete for good (nodes already in the trash only).
+    #[serde(default)]
+    pub permanent: bool,
+}
+
+/// `POST /nodes/restore`: files and folders out of the trash, each in its own
+/// transaction (at most 1000).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RestoreNodes {
+    /// The trashed files and folders, each its own outcome.
+    pub nodes: Vec<Uuid>,
+}
+
+/// One node's outcome in a batch: the node as it is now (none after a trash),
+/// or why not.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NodeOutcome {
+    /// Done: the node now (renamed, moved, the copy); none for a trash.
+    #[serde(default)]
+    pub node: Option<NodeInfo>,
+    /// Refused, and why.
+    #[serde(default)]
+    pub error: Option<ApiError>,
+    /// With `error`: its HTTP status, as a call of its own would have answered.
+    #[serde(default)]
+    pub status: Option<u16>,
+}
+
+/// One restore's outcome in a batch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RestoreOutcome {
+    /// Where it went.
+    #[serde(default)]
+    pub restored: Option<Restored>,
+    /// Refused, and why.
+    #[serde(default)]
+    pub error: Option<ApiError>,
+    /// With `error`: its HTTP status, as a call of its own would have answered.
+    #[serde(default)]
+    pub status: Option<u16>,
 }
 
 /// A trashed file or folder.
