@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "WITH RECURSIVE tree (pk, path) AS (\n               SELECT pk, name FROM node WHERE parent = $1 AND deleted_at IS NULL\n               UNION ALL\n               SELECT n.pk, t.path || '/' || n.name\n               FROM node n JOIN tree t ON n.parent = t.pk\n               WHERE n.deleted_at IS NULL\n           )\n           SELECT n.uuid AS id, t.path AS \"path!\", n.is_file,\n                  v.created_at AS \"modified?\", v.uuid AS \"current_version?\", v.size AS \"size?\"\n           FROM tree t\n           JOIN node n ON n.pk = t.pk\n           LEFT JOIN version v ON v.pk = n.current_version\n           ORDER BY t.path",
+  "query": "WITH RECURSIVE tree (pk, path) AS (\n               SELECT pk, name FROM node WHERE parent = $1 AND deleted_at IS NULL\n               UNION ALL\n               SELECT n.pk, t.path || '/' || n.name\n               FROM node n JOIN tree t ON n.parent = t.pk\n               WHERE n.deleted_at IS NULL\n           )\n           SELECT n.uuid AS id, t.path AS \"path!\", n.is_file,\n                  v.modified_at AS \"modified?\", v.uuid AS \"current_version?\", v.size AS \"size?\"\n           FROM tree t\n           JOIN node n ON n.pk = t.pk\n           LEFT JOIN version v ON v.pk = n.current_version\n           ORDER BY t.path",
   "describe": {
     "columns": [
       {
@@ -48,5 +48,5 @@
       false
     ]
   },
-  "hash": "0765b57c10f2cf6d8f3d2b0412efb4338adc4a444bb97a71e973ae9d48e89583"
+  "hash": "05244f4731ccae5e9b7c7d77ccd9beae6a25e602fe6c0bb8c1a821d75e80fa8b"
 }

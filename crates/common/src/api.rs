@@ -88,7 +88,7 @@ pub struct Node {
     pub name: String,
     /// A file (true) or a folder (false).
     pub is_file: bool,
-    /// A file's current version date.
+    /// A file's modification time (its current version's, as its client gave it).
     pub modified: Option<DateTime<Utc>>,
     /// A file's current version (the base of a new one).
     #[serde(default)]
@@ -210,6 +210,11 @@ pub struct Commit {
     /// Description of the version.
     #[serde(default)]
     pub message: Option<String>,
+    /// The file's modification time on the client (its own, e.g. on disk);
+    /// none: the upload's. The same chunks as the current version with
+    /// another time update that version's (a touch), creating nothing.
+    #[serde(default)]
+    pub modified: Option<DateTime<Utc>>,
 }
 
 /// The result of a commit.
@@ -707,6 +712,10 @@ pub struct NodeInfo {
     /// file without a version yet.
     #[serde(default)]
     pub size: Option<i64>,
+    /// A file's modification time (its current version's, as its client gave
+    /// it); none for a folder or a file without a version yet.
+    #[serde(default)]
+    pub modified: Option<DateTime<Utc>>,
 }
 
 /// A folder above a node.
@@ -750,7 +759,7 @@ pub struct TreeNode {
     pub path: String,
     /// A file (true) or a folder (false).
     pub is_file: bool,
-    /// A file's current version date.
+    /// A file's modification time (its current version's, as its client gave it).
     pub modified: Option<DateTime<Utc>>,
     /// A file's current version.
     pub current_version: Option<Uuid>,
@@ -934,8 +943,11 @@ pub struct Version {
     pub parent: Option<Uuid>,
     /// Who committed it (their email), unless they left the organization.
     pub author: Option<String>,
-    /// When.
+    /// When it was committed.
     pub created_at: DateTime<Utc>,
+    /// The file's modification time at this version, as its client gave it
+    /// (the commit's time when none was given).
+    pub modified: DateTime<Utc>,
     /// Its description.
     pub message: Option<String>,
     /// The file's size in bytes at this version.

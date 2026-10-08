@@ -4,6 +4,8 @@
 
 use std::io;
 
+use chrono::{DateTime, Utc};
+
 use crate::rt::{BoxFuture, MaybeSync};
 
 /// Something to upload, read by range.
@@ -17,6 +19,12 @@ pub trait Source: MaybeSync {
 
     /// `len` bytes from `offset` (fewer only at the end).
     fn read(&self, offset: u64, len: usize) -> BoxFuture<'_, io::Result<Vec<u8>>>;
+
+    /// Its modification time, kept by the server on the version; none: the
+    /// upload's.
+    fn modified(&self) -> Option<DateTime<Utc>> {
+        None
+    }
 }
 
 /// Bytes in memory.
@@ -40,16 +48,18 @@ impl Source for MemorySource {
 pub struct FileSource {
     file: std::sync::Mutex<std::fs::File>,
     len: u64,
+    modified: Option<DateTime<Utc>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl FileSource {
     pub fn open(path: &std::path::Path) -> io::Result<Self> {
         let file = std::fs::File::open(path)?;
-        let len = file.metadata()?.len();
+        let metadata = file.metadata()?;
         Ok(Self {
+            len: metadata.len(),
+            modified: metadata.modified().ok().map(DateTime::<Utc>::from),
             file: std::sync::Mutex::new(file),
-            len,
         })
     }
 }
@@ -58,6 +68,10 @@ impl FileSource {
 impl Source for FileSource {
     fn len(&self) -> u64 {
         self.len
+    }
+
+    fn modified(&self) -> Option<DateTime<Utc>> {
+        self.modified
     }
 
     fn read(&self, offset: u64, len: usize) -> BoxFuture<'_, io::Result<Vec<u8>>> {

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT n.name, n.is_file, v.uuid AS \"version?\",\n                                  extract(epoch FROM v.created_at)::float8 AS \"modified?\",\n                                  v.size AS \"len?\"\n                           FROM node n LEFT JOIN version v ON v.pk = n.current_version\n                           WHERE n.parent = $1 AND n.deleted_at IS NULL ORDER BY lower(n.name)",
+  "query": "SELECT n.name, n.is_file, v.uuid AS \"version?\",\n                                  extract(epoch FROM v.modified_at)::float8 AS \"modified?\",\n                                  v.size AS \"len?\"\n                           FROM node n LEFT JOIN version v ON v.pk = n.current_version\n                           WHERE n.parent = $1 AND n.deleted_at IS NULL ORDER BY lower(n.name)",
   "describe": {
     "columns": [
       {
@@ -42,5 +42,5 @@
       false
     ]
   },
-  "hash": "484a0cba87c25d7e80b0e34ba3e536c936ff2b60274174bf4bef2e2e98b358c5"
+  "hash": "8c2ccda0a59e406432734fc9411f4d7ac375aeb972a0151c5d64cbefea70025a"
 }

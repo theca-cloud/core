@@ -150,6 +150,24 @@ async fn scenario(pool: PgPool, storage: serde_json::Value) {
     .unwrap();
     assert_eq!(fetch(&client, committed.file, None).await, original);
 
+    // The source's modification time reaches the file.
+    let when = chrono::DateTime::from_timestamp(1_600_000_000, 0).unwrap();
+    let dated = upload(
+        &client,
+        &Dated(MemorySource(b"dated".to_vec()), when),
+        Target::New {
+            library: library.id,
+            parent: library.root,
+            name: Name::new("dated.txt").unwrap(),
+        },
+        &options,
+        |_| {},
+        &Cancel::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(client.node(dated.file).await.unwrap().modified, Some(when));
+
     // An edit at the end: only the new chunks travel.
     let mut edited = original.clone();
     let end = edited.len();
@@ -268,7 +286,7 @@ async fn scenario(pool: PgPool, storage: serde_json::Value) {
         .unwrap();
     assert_eq!(me.email, "admin@test.theca");
     let listed = again.children(library.root).await.unwrap();
-    assert_eq!(listed.len(), 3);
+    assert_eq!(listed.len(), 4);
 
     // Logging out revokes that session.
     again.logout().await.unwrap();
@@ -302,6 +320,27 @@ async fn s3(pool: PgPool) {
         }),
     )
     .await;
+}
+
+/// Bytes with a modification time, as a file on disk has one.
+struct Dated(MemorySource, chrono::DateTime<chrono::Utc>);
+
+impl theca_client::Source for Dated {
+    fn len(&self) -> u64 {
+        theca_client::Source::len(&self.0)
+    }
+
+    fn read(
+        &self,
+        offset: u64,
+        len: usize,
+    ) -> std::pin::Pin<Box<dyn Future<Output = std::io::Result<Vec<u8>>> + Send + '_>> {
+        self.0.read(offset, len)
+    }
+
+    fn modified(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        Some(self.1)
+    }
 }
 
 /// A source that pauses when the upload pass reads its last chunk (the hash

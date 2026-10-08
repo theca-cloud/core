@@ -10,6 +10,7 @@ name = "theca-server"
 path = "src/main.rs"
 
 [dependencies]
+chrono.workspace = true
 argon2.workspace = true
 axum.workspace = true
 dotenvy.workspace = true

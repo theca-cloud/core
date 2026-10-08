@@ -31,6 +31,13 @@ impl Source for BlobSource {
         self.0.size() as u64
     }
 
+    /// A `File`'s `lastModified` (milliseconds); a bare `Blob` has none.
+    fn modified(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        use wasm_bindgen::JsCast;
+        let file = self.0.dyn_ref::<web_sys::File>()?;
+        chrono::DateTime::from_timestamp_millis(file.last_modified() as i64)
+    }
+
     fn read(&self, offset: u64, len: usize) -> BoxFuture<'_, io::Result<Vec<u8>>> {
         Box::pin(async move {
             let end = (offset + len as u64).min(self.len());

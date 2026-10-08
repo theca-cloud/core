@@ -6,6 +6,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use chrono::{DateTime, Utc};
+
 use theca_common::api;
 use theca_common::chunking::chunks;
 use theca_common::compression::{CompressionPolicy, compress};
@@ -283,7 +285,8 @@ pub enum Target<'a> {
 /// deduplicated here with the clients' own code, each new chunk going through
 /// the protocol's steps (lookup, declaration with the quota check, the object,
 /// then `uploaded_at`), so a row exists before its object, as always. Then
-/// committed. Returns the file.
+/// committed, with the client's modification time if it gave one. Returns the
+/// file.
 // ponytail: reads, hashes and compresses on the async thread (a chunk at a
 // time, from a local file); spawn_blocking if it shows up in latency.
 pub async fn store(
@@ -291,6 +294,7 @@ pub async fn store(
     who: &Credential,
     target: Target<'_>,
     path: &Path,
+    modified: Option<DateTime<Utc>>,
 ) -> Result<Uuid, FileError> {
     let access = match &target {
         Target::New { parent, .. } => {
@@ -353,7 +357,7 @@ pub async fn store(
         },
     };
     let mut tx = state.pool.begin().await?;
-    let committed = db::file::commit(&mut tx, &access, target, &ids, None)
+    let committed = db::file::commit(&mut tx, &access, target, &ids, None, modified)
         .await
         .map_err(|e| match e {
             db::file::CommitError::Db(e) => FileError::from(e),

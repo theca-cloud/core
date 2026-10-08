@@ -23,7 +23,7 @@ pub async fn info(pool: &PgPool, node: i64) -> sqlx::Result<api::NodeInfo> {
                WHERE n.parent IS NOT NULL
            )
            SELECT n.uuid AS id, l.uuid AS library, n.name, n.is_file, p.uuid AS "parent?",
-                  v.uuid AS "current_version?", v.size AS "size?",
+                  v.uuid AS "current_version?", v.size AS "size?", v.modified_at AS "modified?",
                   ARRAY(SELECT a.uuid FROM up JOIN node a ON a.pk = up.pk ORDER BY up.depth DESC)
                       AS "ancestor_ids!",
                   ARRAY(SELECT a.name FROM up JOIN node a ON a.pk = up.pk ORDER BY up.depth DESC)
@@ -67,6 +67,7 @@ pub async fn info(pool: &PgPool, node: i64) -> sqlx::Result<api::NodeInfo> {
         ancestors,
         current_version: r.current_version,
         size: r.size,
+        modified: r.modified,
     })
 }
 
@@ -108,7 +109,7 @@ pub fn tree(
                WHERE n.deleted_at IS NULL
            )
            SELECT n.uuid AS id, t.path AS "path!", n.is_file,
-                  v.created_at AS "modified?", v.uuid AS "current_version?", v.size AS "size?"
+                  v.modified_at AS "modified?", v.uuid AS "current_version?", v.size AS "size?"
            FROM tree t
            JOIN node n ON n.pk = t.pk
            LEFT JOIN version v ON v.pk = n.current_version
@@ -238,9 +239,9 @@ pub async fn add_version(
     content: i64,
 ) -> sqlx::Result<()> {
     let new = sqlx::query_scalar!(
-        "INSERT INTO version (organization, file, parent_version, author, size)
-         SELECT $1, pk, current_version, $3, (SELECT size FROM version WHERE pk = $4)
-         FROM node WHERE pk = $2 RETURNING pk",
+        "INSERT INTO version (organization, file, parent_version, author, size, modified_at)
+         SELECT $1, pk, current_version, $3, c.size, c.modified_at
+         FROM node, (SELECT size, modified_at FROM version WHERE pk = $4) c WHERE pk = $2 RETURNING pk",
         access.organization,
         dest,
         access.user,
@@ -318,8 +319,8 @@ pub async fn copy(
         top.get_or_insert(copy.pk);
         if let Some(version) = n.current_version {
             let new = sqlx::query_scalar!(
-                "INSERT INTO version (organization, file, author, size)
-                 SELECT $1, $2, $3, size FROM version WHERE pk = $4 RETURNING pk",
+                "INSERT INTO version (organization, file, author, size, modified_at)
+                 SELECT $1, $2, $3, size, modified_at FROM version WHERE pk = $4 RETURNING pk",
                 to.organization,
                 copy.pk,
                 to.user,
@@ -501,7 +502,7 @@ pub async fn purge(tx: &mut Transaction<'_, Postgres>, node: i64) -> sqlx::Resul
 pub async fn versions(pool: &PgPool, file: i64) -> sqlx::Result<Vec<api::Version>> {
     let rows = sqlx::query!(
         r#"SELECT v.pk, v.parent_version, v.uuid AS id, p.uuid AS "parent?", a.email AS "author?",
-                  v.created_at, v.message, v.size,
+                  v.created_at, v.modified_at, v.message, v.size,
                   v.pk = n.current_version AS "current!"
            FROM version v
            JOIN node n ON n.pk = v.file
@@ -524,6 +525,7 @@ pub async fn versions(pool: &PgPool, file: i64) -> sqlx::Result<Vec<api::Version
                 parent: r.parent,
                 author: r.author.clone(),
                 created_at: r.created_at,
+                modified: r.modified_at,
                 message: r.message.clone(),
                 size: r.size,
                 current: r.current,

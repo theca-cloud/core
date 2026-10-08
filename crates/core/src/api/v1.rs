@@ -467,6 +467,15 @@ async fn commit_one(
             ));
         }
     };
+    if req
+        .modified
+        .is_some_and(|t| !db::file::plausible_modified(t))
+    {
+        return Err(HttpError::bad_request(
+            "invalid_modified",
+            "`modified` must be between the years 1 and 9999",
+        ));
+    }
     let mut tx = state.pool.begin().await?;
     let committed = db::file::commit(
         &mut tx,
@@ -474,6 +483,7 @@ async fn commit_one(
         target,
         &req.chunks,
         req.message.as_deref(),
+        req.modified,
     )
     .await
     .map_err(|e| match e {

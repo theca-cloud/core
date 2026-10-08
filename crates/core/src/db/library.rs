@@ -232,7 +232,7 @@ pub async fn list(pool: &PgPool, who: &Credential) -> sqlx::Result<Vec<api::Libr
 pub async fn children(pool: &PgPool, folder: i64) -> sqlx::Result<Vec<api::Node>> {
     sqlx::query_as!(
         api::Node,
-        r#"SELECT n.uuid AS id, n.name, n.is_file, v.created_at AS "modified?",
+        r#"SELECT n.uuid AS id, n.name, n.is_file, v.modified_at AS "modified?",
                   v.uuid AS "current_version?", v.size AS "size?"
            FROM node n LEFT JOIN version v ON v.pk = n.current_version
            WHERE n.parent = $1 AND n.deleted_at IS NULL ORDER BY n.is_file, lower(n.name)"#,
