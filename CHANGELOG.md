@@ -1,6 +1,11 @@
 # Changelog
 
 Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
+## [0.16.0] - 2026-10-08
+
+### Features
+
+- **core**: The admin gives an organization another owner
 ## [0.15.0] - 2026-10-08
 
 ### Features
