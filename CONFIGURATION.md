@@ -59,7 +59,7 @@ Changed through the admin API (`PATCH /api/v1/admin/settings`), which validates 
 | `job_email_send_interval_secs` | `30` | How often queued emails are sent. |
 | `trash_retention_secs` | `2592000` (30 days) | How long trashed files and folders stay restorable; then the hourly purge deletes them for good (their chunks follow with the garbage collection). `0`: purged at the next run. |
 | `session_idle_lifetime_secs` | `604800` (7 days) | A session expires after this long without being used (each use extends it). At least `600`. Applies to existing sessions at once. |
-| `oidc_link_by_email` | `false` | Logging in through an OIDC provider with an identity not linked yet links it to the account with the same email, if the provider says that email is verified. Off: identities are only linked by their owner, from a session. Turn on only if you trust every provider's email verification (an organization's provider still only opens sessions restricted to that organization). |
+| `oidc_link_by_email` | `false` | Logging in through an OIDC provider with an identity not linked yet links it to the account with the same email, if the provider says that email is verified. Off: identities are only linked by their owner, from a session. Turn on only if you trust every provider's email verification. An organization's provider only links that organization's members (an invitation isn't enough), and only opens sessions restricted to it. |
 | `oidc_allow_internal_issuers` | `false` | Organizations' identity providers may use `http` and internal addresses (private networks, localhost). Off, an organization's issuer must be `https` and resolve to public addresses only, so an organization's owner can't make the server call into its own network. Turn on only when every organization on the instance is trusted (e.g. a single company's install with its Keycloak inside). Instance-wide providers are never restricted. |
 | `session_max_lifetime_secs` | `0` (no cap) | A session expires this long after login, even if used every day (users log in again). At least `600`, or `0` for no cap. |
 
@@ -71,6 +71,24 @@ Storage backends are rows of the `storage` table (created by the setup wizard). 
 |---|---|
 | `filesystem` | `{"path": "/data/chunks"}`: a directory the server can write to. Uploads and downloads go through the server (`/api/v1/blobs`, URLs signed by the server). |
 | `s3` | `{"host": "https://s3.example.com", "region": "...", "bucket": "...", "access_key_file": "/run/secrets/s3_access", "secret_key_file": "/run/secrets/s3_secret", "path_style": true}`. Clients upload and download directly with S3 presigned URLs. `path_style` (default `true`): `host/bucket/key` URLs, what self-hosted S3 servers (e.g. Garage) usually need. |
+
+**An S3 bucket needs a CORS rule**: browsers upload and download chunks with presigned URLs, on the bucket's origin, so the bucket must allow the web app's origin. The rule: origin `PUBLIC_URL`, methods `PUT` and `GET`, the headers the URLs sign (`x-amz-checksum-sha256`, `If-None-Match`), and `ETag` exposed. As S3 XML (`PutBucketCors`):
+
+```xml
+<CORSConfiguration>
+  <CORSRule>
+    <AllowedOrigin>https://cloud.example.com</AllowedOrigin>
+    <AllowedMethod>PUT</AllowedMethod>
+    <AllowedMethod>GET</AllowedMethod>
+    <AllowedHeader>x-amz-checksum-sha256</AllowedHeader>
+    <AllowedHeader>if-none-match</AllowedHeader>
+    <ExposeHeader>ETag</ExposeHeader>
+    <MaxAgeSeconds>3600</MaxAgeSeconds>
+  </CORSRule>
+</CORSConfiguration>
+```
+
+Without it, WebDAV and the CLI work (they don't run in a browser) but the web app's uploads and downloads fail. The CE's Garage example sets it up (`ce/examples/s3-garage/`). The filesystem backend needs nothing: its URLs are the server's own.
 
 ## WebDAV
 

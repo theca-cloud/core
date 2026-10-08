@@ -65,10 +65,15 @@ pub async fn account_of(
 pub async fn verified_account_by_email(
     pool: &PgPool,
     email: &str,
+    organization: Option<i64>,
 ) -> sqlx::Result<Option<(i64, Uuid)>> {
     let row = sqlx::query!(
-        "SELECT pk, uuid FROM account WHERE lower(email) = lower($1) AND verified",
-        email
+        r#"SELECT pk, uuid FROM account a
+           WHERE lower(email) = lower($1) AND verified
+             AND ($2::bigint IS NULL OR EXISTS (
+                 SELECT 1 FROM "user" u WHERE u.account = a.pk AND u.organization = $2 AND u.joined))"#,
+        email,
+        organization
     )
     .fetch_optional(pool)
     .await?;
