@@ -598,11 +598,20 @@ pub async fn set_current(pool: &PgPool, file: i64, version: i64) -> sqlx::Result
 
 /// Files and folders whose name contains `query` (case-insensitive), reachable,
 /// in the libraries the credential reaches (or one of them). At most 50.
+/// Where a search looks: everywhere the account reaches, or one of these.
+pub struct SearchScope {
+    pub library: Option<Uuid>,
+    pub organization: Option<Uuid>,
+    /// Below this folder: each candidate climbs to it (before the limit, so
+    /// the limit counts only hits inside it).
+    pub folder: Option<Uuid>,
+}
+
 pub async fn search(
     pool: &PgPool,
     who: &Credential,
     query: &str,
-    library: Option<Uuid>,
+    scope: &SearchScope,
 ) -> sqlx::Result<Vec<api::SearchResult>> {
     let escaped = query
         .replace('\\', "\\\\")
@@ -615,14 +624,27 @@ pub async fn search(
            FROM node n
            JOIN library_access($1) a ON a.library = n.library
            JOIN library l ON l.pk = n.library
+           JOIN organization o ON o.pk = l.owner
            LEFT JOIN version v ON v.pk = n.current_version
            WHERE n.name ILIKE '%' || $2 || '%' AND n.parent IS NOT NULL
-             AND ($3::uuid IS NULL OR l.uuid = $3) AND node_reachable(n.pk)
+             AND ($3::uuid IS NULL OR l.uuid = $3)
+             AND ($4::uuid IS NULL OR o.uuid = $4)
+             AND ($5::uuid IS NULL OR EXISTS (
+                 WITH RECURSIVE up (pk) AS (
+                     SELECT n.parent
+                     UNION ALL
+                     SELECT p.parent FROM node p JOIN up ON p.pk = up.pk WHERE p.parent IS NOT NULL
+                 )
+                 SELECT 1 FROM up JOIN node f ON f.pk = up.pk WHERE f.uuid = $5
+             ))
+             AND node_reachable(n.pk)
            ORDER BY lower(n.name), n.pk
            LIMIT 50"#,
         who.token,
         escaped,
-        library
+        scope.library,
+        scope.organization,
+        scope.folder
     )
     .fetch_all(pool)
     .await

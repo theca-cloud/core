@@ -4057,6 +4057,26 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "organization",
+            "in": "query",
+            "description": "Only this organization's libraries.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "folder",
+            "in": "query",
+            "description": "Only below this folder.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
