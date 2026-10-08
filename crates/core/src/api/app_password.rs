@@ -34,7 +34,7 @@ fn require_session(account: &CurrentAccount) -> Result<(), HttpError> {
 
 /// Create an app password, within what this session reaches (a restricted
 /// session: inside its organization). The password is shown only once.
-#[utoipa::path(post, path = "/api/v1/auth/app-passwords", request_body = api::CreateAppPassword, responses(
+#[utoipa::path(post, path = "/api/v1/auth/app-passwords", operation_id = "create_app_password", request_body = api::CreateAppPassword, responses(
     (status = 201, body = api::NewAppPassword),
     (status = 400, description = "`invalid_name`", body = api::ApiError),
     (status = 403, description = "`session_required`", body = api::ApiError),
@@ -89,7 +89,7 @@ pub async fn list(
 }
 
 /// Revoke an app password: refused at once.
-#[utoipa::path(delete, path = "/api/v1/auth/app-passwords/{id}", params(("id" = Uuid, Path)), responses(
+#[utoipa::path(delete, path = "/api/v1/auth/app-passwords/{id}", operation_id = "revoke_app_password", params(("id" = Uuid, Path)), responses(
     (status = 204),
     (status = 403, description = "`session_required`", body = api::ApiError),
     (status = 404, body = api::ApiError),

@@ -63,7 +63,7 @@ pub(super) fn name(name: &str) -> Result<&str, HttpError> {
 
 /// Create a company organization, owned by the account (from a full session;
 /// instance admins only when `organization_creation` is `admins`).
-#[utoipa::path(post, path = "/api/v1/organizations", request_body = api::OrganizationName, responses(
+#[utoipa::path(post, path = "/api/v1/organizations", operation_id = "create_organization", request_body = api::OrganizationName, responses(
     (status = 201, body = api::Organization),
     (status = 400, description = "`invalid_name`", body = api::ApiError),
     (status = 403, description = "`organization_creation_closed`", body = api::ApiError),
@@ -140,7 +140,7 @@ pub async fn rename(
 }
 
 /// The organization's members and pending invitations (any member).
-#[utoipa::path(get, path = "/api/v1/organizations/{id}/members", params(("id" = Uuid, Path)), responses(
+#[utoipa::path(get, path = "/api/v1/organizations/{id}/members", operation_id = "organization_members", params(("id" = Uuid, Path)), responses(
     (status = 200, body = Vec<api::Member>),
     (status = 404, body = api::ApiError),
 ))]
@@ -243,7 +243,7 @@ pub async fn remove(
 }
 
 /// The organization's identity providers (the owner).
-#[utoipa::path(get, path = "/api/v1/organizations/{id}/identity-providers", params(("id" = Uuid, Path)), responses(
+#[utoipa::path(get, path = "/api/v1/organizations/{id}/identity-providers", operation_id = "organization_providers", params(("id" = Uuid, Path)), responses(
     (status = 200, body = Vec<api::ProviderInfo>),
     (status = 404, body = api::ApiError),
 ))]
@@ -261,7 +261,7 @@ pub async fn providers(
 /// Add an identity provider for the organization (the owner): its logins open
 /// sessions restricted to the organization. `https` issuers on public
 /// addresses only; the secret as a value (stored encrypted).
-#[utoipa::path(post, path = "/api/v1/organizations/{id}/identity-providers", params(("id" = Uuid, Path)), request_body = api::ProviderRequest, responses(
+#[utoipa::path(post, path = "/api/v1/organizations/{id}/identity-providers", operation_id = "organization_create_provider", params(("id" = Uuid, Path)), request_body = api::ProviderRequest, responses(
     (status = 201, body = api::ProviderInfo),
     (status = 400, description = "`invalid_provider`, `issuer_refused`", body = api::ApiError),
 ))]
@@ -277,7 +277,7 @@ pub async fn create_provider(
 }
 
 /// Change one of the organization's identity providers (the owner).
-#[utoipa::path(patch, path = "/api/v1/organizations/{id}/identity-providers/{provider}", params(("id" = Uuid, Path), ("provider" = Uuid, Path)), request_body = api::ProviderRequest, responses(
+#[utoipa::path(patch, path = "/api/v1/organizations/{id}/identity-providers/{provider}", operation_id = "organization_update_provider", params(("id" = Uuid, Path), ("provider" = Uuid, Path)), request_body = api::ProviderRequest, responses(
     (status = 200, body = api::ProviderInfo),
     (status = 404, body = api::ApiError),
 ))]
@@ -295,7 +295,7 @@ pub async fn update_provider(
 
 /// Delete one of the organization's identity providers, and the identities
 /// linked through it (the owner).
-#[utoipa::path(delete, path = "/api/v1/organizations/{id}/identity-providers/{provider}", params(("id" = Uuid, Path), ("provider" = Uuid, Path)), responses(
+#[utoipa::path(delete, path = "/api/v1/organizations/{id}/identity-providers/{provider}", operation_id = "organization_delete_provider", params(("id" = Uuid, Path), ("provider" = Uuid, Path)), responses(
     (status = 204),
     (status = 404, body = api::ApiError),
 ))]

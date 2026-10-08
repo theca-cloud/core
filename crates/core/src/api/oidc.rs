@@ -38,7 +38,7 @@ pub fn router() -> Router<AppState> {
 
 /// The instance-wide providers, for the login page. An organization's
 /// provider isn't listed: the organization shares its start link.
-#[utoipa::path(get, path = "/api/v1/auth/oidc/providers", responses(
+#[utoipa::path(get, path = "/api/v1/auth/oidc/providers", operation_id = "login_providers", responses(
     (status = 200, body = Vec<api::IdentityProvider>),
 ))]
 pub async fn providers(
@@ -48,7 +48,7 @@ pub async fn providers(
 }
 
 /// Start logging in with a provider: redirects to it.
-#[utoipa::path(get, path = "/api/v1/auth/oidc/{provider}/start", params(("provider" = Uuid, Path)), responses(
+#[utoipa::path(get, path = "/api/v1/auth/oidc/{provider}/start", operation_id = "oidc_start", params(("provider" = Uuid, Path)), responses(
     (status = 303, description = "To the provider, or to `/login?error=...`"),
 ))]
 pub async fn start(

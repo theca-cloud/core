@@ -160,7 +160,7 @@ pub async fn sessions(
 }
 
 /// Revoke one of the account's sessions (e.g. a lost device).
-#[utoipa::path(delete, path = "/api/v1/auth/sessions/{id}", params(("id" = Uuid, Path)), responses(
+#[utoipa::path(delete, path = "/api/v1/auth/sessions/{id}", operation_id = "revoke_session", params(("id" = Uuid, Path)), responses(
     (status = 204),
     (status = 404, body = api::ApiError),
 ))]

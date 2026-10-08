@@ -76,7 +76,7 @@ fn invalid_code() -> HttpError {
 
 /// Start setting up TOTP: a new secret, not required at login until
 /// confirmed. Starting again replaces an unconfirmed secret.
-#[utoipa::path(post, path = "/api/v1/auth/totp", responses(
+#[utoipa::path(post, path = "/api/v1/auth/totp", operation_id = "totp_start", responses(
     (status = 200, body = api::TotpSetup),
     (status = 403, description = "`full_session_required`", body = api::ApiError),
     (status = 409, description = "`totp_enabled`", body = api::ApiError),
