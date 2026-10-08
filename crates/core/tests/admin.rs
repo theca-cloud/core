@@ -511,6 +511,34 @@ async fn organizations_by_their_users(pool: PgPool) {
         .unwrap_err();
     assert_eq!(refused.0, StatusCode::NOT_FOUND);
 
+    // The admin gives it another owner (a joined member, by email), and back.
+    let admin_path = format!("/api/v1/admin/organizations/{one}");
+    let bob_me: api::Me = bob.get("/api/v1/me").await.unwrap();
+    let admin_me: api::Me = admin.get("/api/v1/me").await.unwrap();
+    let owned: api::AdminOrganization = admin
+        .json(
+            "PATCH",
+            &admin_path,
+            &json!({ "owner": bob_me.email.to_uppercase() }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(owned.owner, bob_me.email);
+    let seen: api::Organization = bob
+        .get(&format!("/api/v1/organizations/{one}"))
+        .await
+        .unwrap();
+    assert!(seen.owner);
+    let stranger = admin
+        .json::<Value>("PATCH", &admin_path, &json!({ "owner": "nobody@x.ch" }))
+        .await
+        .unwrap_err();
+    assert_eq!(stranger.0, StatusCode::NOT_FOUND);
+    admin
+        .json::<api::AdminOrganization>("PATCH", &admin_path, &json!({ "owner": admin_me.email }))
+        .await
+        .unwrap();
+
     // `organization_creation = admins`: instance admins only, and `Me` says so.
     let me: api::Me = bob.get("/api/v1/me").await.unwrap();
     assert!(me.can_create_organizations);

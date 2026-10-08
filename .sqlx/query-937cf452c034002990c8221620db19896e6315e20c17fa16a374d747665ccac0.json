@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE organization o SET owner = u.pk\n           FROM \"user\" u JOIN account a ON a.pk = u.account\n           WHERE o.pk = $1 AND u.organization = o.pk AND u.joined_at IS NOT NULL\n             AND lower(a.email) = lower($2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "937cf452c034002990c8221620db19896e6315e20c17fa16a374d747665ccac0"
+}

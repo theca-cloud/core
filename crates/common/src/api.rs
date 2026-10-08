@@ -1145,6 +1145,9 @@ pub struct UpdateOrganization {
     /// Suspend or lift the suspension.
     #[serde(default)]
     pub suspended: Option<bool>,
+    /// A new owner: a joined member's email (a company organization).
+    #[serde(default)]
+    pub owner: Option<String>,
     /// A default storage, or `null` for the instance's.
     #[serde(default, deserialize_with = "double_option")]
     #[cfg_attr(feature = "openapi", schema(value_type = Option<Uuid>))]
