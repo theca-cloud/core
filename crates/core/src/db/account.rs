@@ -321,7 +321,9 @@ pub async fn sessions(
 }
 
 /// The account and its organizations (joined or invited).
-pub async fn me(pool: &PgPool, account: i64) -> sqlx::Result<api::Me> {
+/// The account and its memberships. `creation_open`: the setting
+/// `organization_creation` is `anyone` (else only instance admins create).
+pub async fn me(pool: &PgPool, account: i64, creation_open: bool) -> sqlx::Result<api::Me> {
     let a = sqlx::query!(
         r#"SELECT uuid, email, instance_admin, EXISTS (
                SELECT 1 FROM identity WHERE account = $1 AND kind = 'totp' AND details->>'confirmed' = 'true'
@@ -347,6 +349,7 @@ pub async fn me(pool: &PgPool, account: i64) -> sqlx::Result<api::Me> {
         totp: a.totp,
         instance_admin: a.instance_admin,
         organizations,
+        can_create_organizations: creation_open || a.instance_admin,
     })
 }
 

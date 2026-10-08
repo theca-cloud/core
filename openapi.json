@@ -5605,6 +5605,10 @@
             "format": "uuid",
             "description": "The account."
           },
+          "can_create_organizations": {
+            "type": "boolean",
+            "description": "It may create company organizations (the setting\n`organization_creation`, or an instance admin; a full session)."
+          },
           "email": {
             "type": "string",
             "description": "Its email."

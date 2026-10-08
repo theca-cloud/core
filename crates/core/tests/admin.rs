@@ -511,7 +511,9 @@ async fn organizations_by_their_users(pool: PgPool) {
         .unwrap_err();
     assert_eq!(refused.0, StatusCode::NOT_FOUND);
 
-    // `organization_creation = admins`: instance admins only.
+    // `organization_creation = admins`: instance admins only, and `Me` says so.
+    let me: api::Me = bob.get("/api/v1/me").await.unwrap();
+    assert!(me.can_create_organizations);
     admin
         .json::<Value>(
             "PATCH",
@@ -532,6 +534,10 @@ async fn organizations_by_their_users(pool: PgPool) {
         (closed.0, code(closed.clone())),
         (StatusCode::FORBIDDEN, "organization_creation_closed".into())
     );
+    let me: api::Me = bob.get("/api/v1/me").await.unwrap();
+    assert!(!me.can_create_organizations);
+    let me: api::Me = admin.get("/api/v1/me").await.unwrap();
+    assert!(me.can_create_organizations);
     admin
         .json::<api::Organization>(
             "POST",

@@ -352,6 +352,10 @@ pub struct Me {
     pub instance_admin: bool,
     /// Its memberships.
     pub organizations: Vec<Membership>,
+    /// It may create company organizations (the setting
+    /// `organization_creation`, or an instance admin; a full session).
+    #[serde(default)]
+    pub can_create_organizations: bool,
 }
 
 /// `GET /instance`: public, for a login page.
