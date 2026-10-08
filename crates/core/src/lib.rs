@@ -41,8 +41,8 @@ pub fn install_crypto_provider() {
 /// Starts the server and returns when it stops (SIGTERM or Ctrl-C).
 pub async fn run() -> Result<(), Error> {
     let config = Config::from_env()?;
-    let server_key = SecretKey::load_or_generate("SERVER_KEY__FILE", &config.server_key_file)?;
-    let data_key = SecretKey::load_or_generate("DATA_KEY__FILE", &config.data_key_file)?;
+    let server_key = SecretKey::load("SERVER_KEY__FILE", &config.server_key_file)?;
+    let data_key = SecretKey::load("DATA_KEY__FILE", &config.data_key_file)?;
     let cipher = DataCipher::new(&data_key.derive("theca data v1"));
     let signer =
         storage::UrlSigner::new(server_key.derive("theca blob url v1"), &config.public_url);

@@ -14,9 +14,9 @@ pub enum Error {
         path: PathBuf,
         source: io::Error,
     },
-    #[error("the key file {1} (from {0}) is empty and not writable: {2}")]
-    KeyNotWritable(&'static str, PathBuf, io::Error),
-    #[error("invalid key in {1} (from {0}): expected 64 hex characters")]
+    #[error("the secret file {path} (from {name}) is empty{hint}", hint = key_hint(name))]
+    EmptySecret { name: &'static str, path: PathBuf },
+    #[error("invalid key in {1} (from {0}): expected 64 hex characters{hint}", hint = key_hint(.0))]
     InvalidKey(&'static str, PathBuf),
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
@@ -28,4 +28,13 @@ pub enum Error {
     InvalidSetting { key: &'static str, reason: String },
     #[error("{0}")]
     Io(#[from] io::Error),
+}
+
+/// How to make a key, for the errors a first start without one meets.
+fn key_hint(name: &str) -> &'static str {
+    if name.ends_with("KEY__FILE") {
+        " (make one with `openssl rand -hex 32`)"
+    } else {
+        ""
+    }
 }
