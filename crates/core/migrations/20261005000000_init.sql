@@ -670,3 +670,21 @@ $$;
 CREATE TRIGGER user_personal_organization
     BEFORE INSERT OR UPDATE OF account, organization ON "user"
     FOR EACH ROW EXECUTE FUNCTION user_personal_organization();
+
+-- 8. A file always has a current version (a folder never has one: the CHECK
+-- node_folder_has_no_version). Checked at commit: a node and its version point
+-- at each other, so a file is inserted first without one, and purges empty it
+-- before deleting the versions and the node; a node gone by the commit passes.
+CREATE FUNCTION node_file_has_version() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM node WHERE pk = NEW.pk AND is_file AND current_version IS NULL) THEN
+        RAISE EXCEPTION 'file % has no current version', NEW.pk
+            USING ERRCODE = 'check_violation', CONSTRAINT = 'node_file_has_version';
+    END IF;
+    RETURN NULL;
+END;
+$$;
+CREATE CONSTRAINT TRIGGER node_file_has_version
+    AFTER INSERT OR UPDATE OF current_version ON node
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW WHEN (NEW.is_file) EXECUTE FUNCTION node_file_has_version();
