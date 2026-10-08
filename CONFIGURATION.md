@@ -72,6 +72,24 @@ Storage backends are rows of the `storage` table (created by the setup wizard). 
 | `filesystem` | `{"path": "/data/chunks"}`: a directory the server can write to. Uploads and downloads go through the server (`/api/v1/blobs`, URLs signed by the server). |
 | `s3` | `{"host": "https://s3.example.com", "region": "...", "bucket": "...", "access_key_file": "/run/secrets/s3_access", "secret_key_file": "/run/secrets/s3_secret", "path_style": true}`. Clients upload and download directly with S3 presigned URLs. `path_style` (default `true`): `host/bucket/key` URLs, what self-hosted S3 servers (e.g. Garage) usually need. |
 
+**An S3 bucket needs a CORS rule**: browsers upload and download chunks with presigned URLs, on the bucket's origin, so the bucket must allow the web app's origin. The rule: origin `PUBLIC_URL`, methods `PUT` and `GET`, the headers the URLs sign (`x-amz-checksum-sha256`, `If-None-Match`), and `ETag` exposed. As S3 XML (`PutBucketCors`):
+
+```xml
+<CORSConfiguration>
+  <CORSRule>
+    <AllowedOrigin>https://cloud.example.com</AllowedOrigin>
+    <AllowedMethod>PUT</AllowedMethod>
+    <AllowedMethod>GET</AllowedMethod>
+    <AllowedHeader>x-amz-checksum-sha256</AllowedHeader>
+    <AllowedHeader>if-none-match</AllowedHeader>
+    <ExposeHeader>ETag</ExposeHeader>
+    <MaxAgeSeconds>3600</MaxAgeSeconds>
+  </CORSRule>
+</CORSConfiguration>
+```
+
+Without it, WebDAV and the CLI work (they don't run in a browser) but the web app's uploads and downloads fail. The CE's Garage example sets it up (`ce/examples/s3-garage/`). The filesystem backend needs nothing: its URLs are the server's own.
+
 ## WebDAV
 
 Libraries mount as network drives at `{PUBLIC_URL}/dav/`, with an **app password** as the password (any username). The drive follows the app password's scope: the whole account (organizations, then libraries), one organization (its libraries), or one library (its files); a read-only app password gives a read-only drive.
