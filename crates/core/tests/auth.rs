@@ -1318,6 +1318,14 @@ async fn oidc_takeover_is_contained(pool: PgPool) {
         w.app_password(s, outside).await.unwrap_err().status,
         StatusCode::NOT_FOUND
     );
+
+    // An account outside organization two isn't linked at all: b is only
+    // invited there (an invitation isn't membership).
+    let outsider = w.oidc_login(evil, &idp, ("other", "b@x.ch", true)).await;
+    assert_eq!(
+        outsider.location.as_deref(),
+        Some("http://test/login?error=unknown_identity")
+    );
 }
 
 /// With registration open, an unknown identity from an instance-wide provider

@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT pk, uuid FROM account a\n           WHERE lower(email) = lower($1) AND verified\n             AND ($2::bigint IS NULL OR EXISTS (\n                 SELECT 1 FROM \"user\" u WHERE u.account = a.pk AND u.organization = $2 AND u.joined))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "b9e991f0148dbc141400ee85dfa1e619d3c1ed3d9dc2ed39be50a55019bdf01b"
+}

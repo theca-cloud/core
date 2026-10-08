@@ -254,11 +254,14 @@ async fn link_by_email(
         .email
         .as_deref()
         .filter(|_| asserted.email_verified);
-    // A verified account with the address the provider verified: linked, if allowed.
+    // A verified account with the address the provider verified: linked, if
+    // allowed. An organization's provider only links that organization's
+    // members: never beyond its bounds (an invitation isn't membership).
     if let (Some(email), true) = (verified_email, state.settings.get().oidc_link_by_email) {
-        let found = db::identity::verified_account_by_email(&state.pool, email)
-            .await
-            .map_err(|_| "internal")?;
+        let found =
+            db::identity::verified_account_by_email(&state.pool, email, provider.organization)
+                .await
+                .map_err(|_| "internal")?;
         if let Some((pk, uuid)) = found {
             db::identity::link(&state.pool, pk, provider.pk, &asserted.subject)
                 .await
