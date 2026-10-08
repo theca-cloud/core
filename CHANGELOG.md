@@ -1,6 +1,11 @@
 # Changelog
 
 Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
+## [0.14.0] - 2026-10-08
+
+### Features
+
+- **core**: Password strength (zxcvbn), password change, a link's email (**breaking**)
 ## [0.13.0] - 2026-10-08
 
 ### Features
