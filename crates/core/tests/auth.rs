@@ -528,6 +528,11 @@ async fn restricted_session(pool: PgPool) {
     let sessions = w.with("GET", "/api/v1/auth/sessions", auth, None).await;
     assert_eq!(sessions.status, StatusCode::FORBIDDEN);
     assert_eq!(sessions.code(), "full_session_required");
+    let me = w.with("GET", "/api/v1/me", auth, None).await;
+    assert_eq!(
+        me.body["can_create_organizations"], false,
+        "a full session's right"
+    );
 }
 
 impl World {

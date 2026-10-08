@@ -191,7 +191,7 @@ pub async fn add(
             "invalid email address",
         ));
     }
-    let inviter = db::account::me(&state.pool, account.account).await?.email;
+    let inviter = db::account::email_of(&mut *state.pool.acquire().await?, account.account).await?;
     let mut tx = state.pool.begin().await?;
     let user = match db::organization::add(&mut tx, &organization, &inviter, email).await? {
         Added::Joined(user) => user,

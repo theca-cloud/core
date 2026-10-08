@@ -106,7 +106,17 @@ pub async fn login(
         db::account::create_session(&state.pool, account, None, agent.0.as_deref(), ip.0).await?;
     let mut headers = HeaderMap::new();
     set_session_cookie(&mut headers, &token.token);
-    Ok((headers, Json(db::account::me(&state.pool, pk).await?)))
+    Ok((
+        headers,
+        Json(
+            db::account::me(
+                &state.pool,
+                pk,
+                state.settings.get().organization_creation_open,
+            )
+            .await?,
+        ),
+    ))
 }
 
 /// Log out: revokes this session at once if it's still valid, and clears the
@@ -183,7 +193,11 @@ pub async fn me(
     State(state): State<AppState>,
     account: CurrentAccount,
 ) -> Result<Json<api::Me>, HttpError> {
-    Ok(Json(db::account::me(&state.pool, account.account).await?))
+    let creation_open = state.settings.get().organization_creation_open;
+    let mut me = db::account::me(&state.pool, account.account, creation_open).await?;
+    // A restricted session is refused the creation (a full session's right).
+    me.can_create_organizations &= account.is_full_session();
+    Ok(Json(me))
 }
 
 /// Deletes an account, if it owns no company organization and isn't the
@@ -376,9 +390,13 @@ pub async fn export(
             totp: row.totp,
             created_at: row.created_at,
         },
-        organizations: db::account::me(&state.pool, account.account)
-            .await?
-            .organizations,
+        organizations: db::account::me(
+            &state.pool,
+            account.account,
+            state.settings.get().organization_creation_open,
+        )
+        .await?
+        .organizations,
         sessions: db::account::sessions(
             &state.pool,
             account.account_uuid,

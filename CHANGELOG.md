@@ -1,6 +1,11 @@
 # Changelog
 
 Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
+## [0.15.0] - 2026-10-08
+
+### Features
+
+- **core**: Me says whether the account may create organizations
 ## [0.14.1] - 2026-10-08
 
 ### Fixes

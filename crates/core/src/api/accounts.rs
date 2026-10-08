@@ -93,7 +93,17 @@ async fn log_in(
         db::account::create_session(&state.pool, account, None, agent.0.as_deref(), ip.0).await?;
     let mut headers = HeaderMap::new();
     set_session_cookie(&mut headers, &token.token);
-    Ok((headers, Json(db::account::me(&state.pool, pk).await?)))
+    Ok((
+        headers,
+        Json(
+            db::account::me(
+                &state.pool,
+                pk,
+                state.settings.get().organization_creation_open,
+            )
+            .await?,
+        ),
+    ))
 }
 
 /// Create an account (when registration is open): it gets a personal
