@@ -39,6 +39,7 @@ async fn fixture(pool: &PgPool) {
                    (5, 1, 2, NULL, '', false), (6, 2, 3, NULL, '', false), (7, 2, 3, 6, 'g.txt', true);
         INSERT INTO version (pk, organization, file, size) OVERRIDING SYSTEM VALUE VALUES (1, 1, 4, 0), (2, 2, 7, 0);
         UPDATE node SET current_version = 1 WHERE pk = 4;
+        UPDATE node SET current_version = 2 WHERE pk = 7;
         INSERT INTO chunk (pk, organization, library, hash, storage, plain_size, stored_size, compression,
                            stored_sha256, uploaded_at)
             OVERRIDING SYSTEM VALUE
@@ -556,9 +557,9 @@ async fn node_rules(pool: PgPool) {
         &format!("{insert} (2, 1, 1, 'wrong-org', false)"),
     )
     .await;
-    // A trashed node frees its name.
+    // A trashed node frees its name (a folder takes it: a bare file would have no version).
     assert_accepted(&pool, "UPDATE node SET deleted_at = now() WHERE pk = 4").await;
-    assert_accepted(&pool, &format!("{insert} (1, 1, 1, 'F.TXT', true)")).await;
+    assert_accepted(&pool, &format!("{insert} (1, 1, 1, 'F.TXT', false)")).await;
 }
 
 #[sqlx::test]
@@ -818,6 +819,37 @@ async fn one_membership_each(pool: PgPool) {
 #[sqlx::test]
 async fn tree_remaining_rules(pool: PgPool) {
     fixture(&pool).await;
+    // A file always has a current version, checked at commit: inserted
+    // without one and given one in the same transaction is fine; left
+    // without, or losing it, is refused; gone by the commit passes.
+    assert_accepted(
+        &pool,
+        "BEGIN; \
+         INSERT INTO node (pk, organization, library, parent, name, is_file) OVERRIDING SYSTEM VALUE \
+             VALUES (60, 1, 1, 1, 'new.txt', true); \
+         INSERT INTO version (pk, organization, file, size) OVERRIDING SYSTEM VALUE VALUES (60, 1, 60, 0); \
+         UPDATE node SET current_version = 60 WHERE pk = 60; \
+         COMMIT;",
+    )
+    .await;
+    assert_refused(
+        &pool,
+        "node_file_has_version",
+        "BEGIN; INSERT INTO node (organization, library, parent, name, is_file) VALUES (1, 1, 1, 'bare.txt', true); COMMIT;",
+    )
+    .await;
+    assert_refused(
+        &pool,
+        "node_file_has_version",
+        "BEGIN; UPDATE node SET current_version = NULL WHERE pk = 4; COMMIT;",
+    )
+    .await;
+    assert_accepted(
+        &pool,
+        "BEGIN; UPDATE node SET current_version = NULL WHERE pk = 60; \
+         DELETE FROM version WHERE file = 60; DELETE FROM node WHERE pk = 60; COMMIT;",
+    )
+    .await;
     assert_refused(
         &pool,
         "node_folder_has_no_version",

@@ -93,8 +93,9 @@ async fn chunk_gc(pool: PgPool) {
     let tomb_chunk = alice.file_chunks(tomb.file).await[0];
     w.sql(&format!(
         "DELETE FROM chunk_in_version WHERE chunk = (SELECT pk FROM chunk WHERE uuid = '{tomb_chunk}');
-         UPDATE node SET current_version = NULL WHERE uuid = '{}';
-         DELETE FROM version WHERE uuid = '{}';
+         UPDATE node SET current_version = NULL WHERE uuid = '{0}';
+         DELETE FROM version WHERE uuid = '{1}';
+         DELETE FROM node WHERE uuid = '{0}';
          UPDATE chunk SET deleting_at = now(), url_expires_at = now() - interval '1 minute'
            WHERE uuid = '{tomb_chunk}'",
         tomb.file, tomb.version
