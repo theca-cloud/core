@@ -4,7 +4,7 @@
 
 Cargo workspace with `common` (lib, native + WASM), `core` (server: lib + thin binary), `client` (lib used by every Rust client), and the SQL migrations.
 
-Crates: `crates/common` (`theca-common`), `crates/core` (`theca-core`, binary `theca-server`), `crates/client` (`theca-client`). The plan is in `roadmap/`: the global roadmap, then one file per step, each written right before implementing it.
+Crates: `crates/common` (`theca-common`), `crates/core` (`theca-core`, binary `theca-server`), `crates/client` (`theca-client`). The plan is in `roadmap/`.
 
 Build, run and test commands: see the README.
 
