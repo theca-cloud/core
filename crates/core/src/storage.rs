@@ -21,6 +21,7 @@ use object_store::aws::{AmazonS3, AmazonS3Builder};
 use object_store::local::LocalFileSystem;
 use object_store::path::Path;
 use object_store::signer::{SignedUrlOptions, Signer};
+use object_store::{ClientOptions, RetryConfig};
 use object_store::{ObjectStore, ObjectStoreExt, PutPayload};
 use sqlx::PgPool;
 use theca_common::hash::Sha256;
@@ -56,6 +57,17 @@ pub struct Presigned {
 impl Backend {
     /// Builds the backend described by a `storage` row.
     pub fn new(implementation: &str, details: &serde_json::Value) -> Result<Self, BackendError> {
+        Self::build(implementation, details, false)
+    }
+
+    /// `quick`: for probes, S3 requests fail in seconds (short timeouts, one
+    /// retry) instead of `object_store`'s default policy, which retries for
+    /// minutes (made for transient errors, not a wrong address).
+    fn build(
+        implementation: &str,
+        details: &serde_json::Value,
+        quick: bool,
+    ) -> Result<Self, BackendError> {
         let field = |name: &str| {
             details[name]
                 .as_str()
@@ -78,7 +90,21 @@ impl Backend {
                         .map_err(|e| BackendError::Details(format!("{name} ({path}): {e}")))
                 };
                 let host = field("host")?;
-                let store = AmazonS3Builder::new()
+                let mut builder = AmazonS3Builder::new();
+                if quick {
+                    builder = builder
+                        .with_client_options(
+                            ClientOptions::new()
+                                .with_connect_timeout(Duration::from_secs(5))
+                                .with_timeout(Duration::from_secs(15)),
+                        )
+                        .with_retry(RetryConfig {
+                            max_retries: 1,
+                            retry_timeout: Duration::from_secs(20),
+                            ..Default::default()
+                        });
+                }
+                let store = builder
                     .with_endpoint(host)
                     .with_region(field("region")?)
                     .with_bucket_name(field("bucket")?)
@@ -359,9 +385,10 @@ pub fn details(backend: &theca_common::api::StorageBackend) -> (&'static str, se
     (implementation, details)
 }
 
-/// Writes, reads back and deletes a small object: the storage works.
+/// Writes, reads back and deletes a small object: the storage works. Fails
+/// in seconds on S3 (a quick client), not after minutes of retries.
 pub async fn probe(implementation: &str, details: &serde_json::Value) -> Result<(), String> {
-    let backend = Backend::new(implementation, details).map_err(|e| e.to_string())?;
+    let backend = Backend::build(implementation, details, true).map_err(|e| e.to_string())?;
     let mut id = [0u8; 16];
     getrandom::fill(&mut id).expect("system randomness");
     let key = Uuid::from_bytes(id);

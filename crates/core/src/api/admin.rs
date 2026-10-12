@@ -22,6 +22,10 @@ pub fn router() -> Router<AppState> {
         .route("/admin/jobs", get(jobs))
         .route("/admin/jobs/{job}/run", post(run_job))
         .route("/admin/settings", get(settings).patch(change_settings))
+        .route("/admin/smtp/test", post(smtp_test))
+        .route("/admin/smtp/send-test", post(smtp_send_test))
+        .route("/admin/storages/test", post(storage_test))
+        .route("/admin/identity-providers/test", post(provider_test))
         .route(
             "/admin/organizations",
             get(organizations).post(create_organization),
@@ -193,6 +197,133 @@ pub async fn change_settings(
     state.settings.set(parsed);
     tracing::info!(account = %account.account_uuid, keys = ?changes.keys().collect::<Vec<_>>(), "settings changed");
     setting_list(&state).await
+}
+
+/// The SMTP settings to test: the saved ones, with the dialog's `smtp_*`
+/// values over them (`null`: the default), parsed as a save would. Nothing is
+/// stored. `None`: no server set.
+async fn smtp_to_test(
+    state: &AppState,
+    changes: &BTreeMap<String, Option<String>>,
+) -> Result<Option<crate::settings::Smtp>, HttpError> {
+    let mut values = Settings::stored(&state.pool)
+        .await
+        .map_err(HttpError::internal)?;
+    for (key, value) in changes {
+        if !key.starts_with("smtp_") || !DEFINITIONS.iter().any(|d| d.key == key) {
+            return Err(HttpError::bad_request(
+                "unknown_setting",
+                format!("no SMTP setting {key:?}"),
+            ));
+        }
+        match value {
+            Some(value) => values.insert(key.clone(), value.clone()),
+            None => values.remove(key),
+        };
+    }
+    let (parsed, _) = Settings::parse(values)
+        .map_err(|e| HttpError::bad_request("invalid_setting", e.to_string()))?;
+    Ok(parsed.smtp)
+}
+
+fn outcome(result: Result<String, String>) -> Json<api::ConnectionTest> {
+    Json(match result {
+        Ok(message) => api::ConnectionTest { ok: true, message },
+        Err(message) => api::ConnectionTest { ok: false, message },
+    })
+}
+
+const NO_SMTP: &str = "no SMTP server set (smtp_host and smtp_from)";
+
+/// Test SMTP settings (the saved ones, with the given `smtp_*` values over
+/// them, nothing stored): connect, TLS, log in. A failed test is an answer.
+#[utoipa::path(post, path = "/api/v1/admin/smtp/test", operation_id = "admin_smtp_test", request_body = BTreeMap<String, Option<String>>, responses(
+    (status = 200, body = api::ConnectionTest),
+    (status = 400, description = "`invalid_setting`, `unknown_setting`", body = api::ApiError),
+))]
+pub async fn smtp_test(
+    State(state): State<AppState>,
+    account: CurrentAccount,
+    ApiJson(changes): ApiJson<BTreeMap<String, Option<String>>>,
+) -> Result<Json<api::ConnectionTest>, HttpError> {
+    require_admin(&state, &account, true).await?;
+    let result = match smtp_to_test(&state, &changes).await? {
+        None => Err(NO_SMTP.to_owned()),
+        Some(smtp) => crate::email::test_connection(&smtp)
+            .await
+            .map(|()| format!("connected to {}:{}", smtp.host, smtp.port)),
+    };
+    Ok(outcome(result))
+}
+
+/// Send a test email to the calling admin, at once (not queued), with the
+/// SMTP settings as `smtp/test` takes them: the server's answer.
+#[utoipa::path(post, path = "/api/v1/admin/smtp/send-test", operation_id = "admin_smtp_send_test", request_body = BTreeMap<String, Option<String>>, responses(
+    (status = 200, body = api::ConnectionTest),
+    (status = 400, description = "`invalid_setting`, `unknown_setting`", body = api::ApiError),
+))]
+pub async fn smtp_send_test(
+    State(state): State<AppState>,
+    account: CurrentAccount,
+    ApiJson(changes): ApiJson<BTreeMap<String, Option<String>>>,
+) -> Result<Json<api::ConnectionTest>, HttpError> {
+    require_admin(&state, &account, true).await?;
+    let to = db::account::email_of(&mut *state.pool.acquire().await?, account.account).await?;
+    let result = match smtp_to_test(&state, &changes).await? {
+        None => Err(NO_SMTP.to_owned()),
+        Some(smtp) => {
+            let name = state.settings.get().instance_name.clone();
+            crate::email::send_test(&smtp, &name, &to)
+                .await
+                .map(|answer| format!("sent to {to}: {answer}"))
+        }
+    };
+    Ok(outcome(result))
+}
+
+/// Test a storage before adding it: write, read back, delete a small object.
+/// Nothing is saved. A failed test is an answer.
+#[utoipa::path(post, path = "/api/v1/admin/storages/test", operation_id = "admin_storage_test", request_body = api::StorageBackend, responses(
+    (status = 200, body = api::ConnectionTest),
+))]
+pub async fn storage_test(
+    State(state): State<AppState>,
+    account: CurrentAccount,
+    ApiJson(backend): ApiJson<api::StorageBackend>,
+) -> Result<Json<api::ConnectionTest>, HttpError> {
+    require_admin(&state, &account, true).await?;
+    Ok(storage_probe(&backend).await)
+}
+
+/// Test an instance-wide identity provider's issuer before saving it:
+/// discovery, the issuer it declares, its signing keys. Nothing is saved.
+#[utoipa::path(post, path = "/api/v1/admin/identity-providers/test", operation_id = "admin_provider_test", request_body = api::ProviderTest, responses(
+    (status = 200, body = api::ConnectionTest),
+))]
+pub async fn provider_test(
+    State(state): State<AppState>,
+    account: CurrentAccount,
+    ApiJson(request): ApiJson<api::ProviderTest>,
+) -> Result<Json<api::ConnectionTest>, HttpError> {
+    require_admin(&state, &account, true).await?;
+    Ok(outcome(
+        crate::oidc::test_discovery(request.issuer.trim(), false).await,
+    ))
+}
+
+/// A test's result as its answer.
+pub fn test_outcome(result: Result<String, String>) -> Json<api::ConnectionTest> {
+    outcome(result)
+}
+
+/// The storage probe as a test's answer (also the setup's `storage-test`).
+pub async fn storage_probe(backend: &api::StorageBackend) -> Json<api::ConnectionTest> {
+    let (implementation, details) = crate::storage::details(backend);
+    outcome(
+        crate::storage::probe(implementation, &details)
+            .await
+            .map(|()| "wrote, read back and deleted a test object".to_owned()),
+    )
 }
 
 #[derive(Debug, serde::Deserialize, utoipa::IntoParams)]

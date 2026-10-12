@@ -242,6 +242,37 @@
         }
       }
     },
+    "/api/v1/admin/identity-providers/test": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Test an instance-wide identity provider's issuer before saving it:\ndiscovery, the issuer it declares, its signing keys. Nothing is saved.",
+        "operationId": "admin_provider_test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderTest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTest"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/identity-providers/{id}": {
       "delete": {
         "tags": [
@@ -656,6 +687,106 @@
         }
       }
     },
+    "/api/v1/admin/smtp/send-test": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Send a test email to the calling admin, at once (not queued), with the\nSMTP settings as `smtp/test` takes them: the server's answer.",
+        "operationId": "admin_smtp_send_test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "propertyNames": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTest"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_setting`, `unknown_setting`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/smtp/test": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Test SMTP settings (the saved ones, with the given `smtp_*` values over\nthem, nothing stored): connect, TLS, log in. A failed test is an answer.",
+        "operationId": "admin_smtp_test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "propertyNames": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTest"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_setting`, `unknown_setting`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/storages": {
       "get": {
         "tags": [
@@ -722,6 +853,37 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/storages/test": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Test a storage before adding it: write, read back, delete a small object.\nNothing is saved. A failed test is an answer.",
+        "operationId": "admin_storage_test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StorageBackend"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTest"
                 }
               }
             }
@@ -3624,6 +3786,48 @@
         }
       }
     },
+    "/api/v1/organizations/{id}/identity-providers/test": {
+      "post": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Test an issuer before saving it as the organization's provider (the\nowner): discovery, the issuer it declares, its signing keys, through the\nSSRF guard as a login would (unless `oidc_allow_internal_issuers`).",
+        "operationId": "organization_test_provider",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderTest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTest"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organizations/{id}/identity-providers/{provider}": {
       "delete": {
         "tags": [
@@ -4301,6 +4505,67 @@
         }
       }
     },
+    "/api/v1/setup/storage-test": {
+      "post": {
+        "tags": [
+          "setup"
+        ],
+        "summary": "Test a storage during the setup, before submitting it (the setup probes it\nagain): write, read back, delete a small object. The setup's token, its rate\nlimit, and only while the instance isn't set up. A failed test is an answer.",
+        "operationId": "setup_storage_test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StorageBackend"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`invalid_setup_token`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`already_set_up`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/version": {
       "get": {
         "tags": [],
@@ -4758,6 +5023,24 @@
             "type": "string",
             "format": "uuid",
             "description": "The new version, now current."
+          }
+        }
+      },
+      "ConnectionTest": {
+        "type": "object",
+        "description": "A connection test's outcome (`POST /admin/smtp/test`, `/admin/smtp/send-test`,\n`/admin/storages/test`, `/setup/storage-test`): a failed test is an answer,\nnot a refused request.",
+        "required": [
+          "ok",
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "The server's answer, or what failed (in English, from the library)."
+          },
+          "ok": {
+            "type": "boolean",
+            "description": "It worked."
           }
         }
       },
@@ -6142,6 +6425,19 @@
               "null"
             ],
             "description": "Shown on the login screen."
+          }
+        }
+      },
+      "ProviderTest": {
+        "type": "object",
+        "description": "An identity provider to test (`POST .../identity-providers/test`).",
+        "required": [
+          "issuer"
+        ],
+        "properties": {
+          "issuer": {
+            "type": "string",
+            "description": "Its issuer URL, as typed."
           }
         }
       },

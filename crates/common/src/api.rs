@@ -654,6 +654,26 @@ pub struct NewStorage {
     pub backend: StorageBackend,
 }
 
+/// A connection test's outcome (`POST /admin/smtp/test`, `/admin/smtp/send-test`,
+/// `/admin/storages/test`, `/setup/storage-test`): a failed test is an answer,
+/// not a refused request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ConnectionTest {
+    /// It worked.
+    pub ok: bool,
+    /// The server's answer, or what failed (in English, from the library).
+    pub message: String,
+}
+
+/// An identity provider to test (`POST .../identity-providers/test`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ProviderTest {
+    /// Its issuer URL, as typed.
+    pub issuer: String,
+}
+
 /// A storage implementation and its settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

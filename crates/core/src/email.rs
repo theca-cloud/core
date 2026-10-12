@@ -164,7 +164,7 @@ pub async fn send_due(state: &AppState) -> Result<i64, JobError> {
     let Some(smtp) = &settings.smtp else {
         return Ok(0); // no SMTP: emails stay queued
     };
-    let mailer = mailer(smtp).map_err(JobError::Other)?;
+    let mailer = mailer(smtp, Duration::from_secs(30)).map_err(JobError::Other)?;
     let mut sent = 0;
     loop {
         let due = sqlx::query!(
@@ -325,7 +325,7 @@ async fn failed(
     Ok(())
 }
 
-fn mailer(smtp: &Smtp) -> Result<AsyncSmtpTransport<Tokio1Executor>, String> {
+fn mailer(smtp: &Smtp, timeout: Duration) -> Result<AsyncSmtpTransport<Tokio1Executor>, String> {
     let builder = match smtp.tls {
         SmtpTls::StartTls => AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&smtp.host),
         SmtpTls::Tls => AsyncSmtpTransport::<Tokio1Executor>::relay(&smtp.host),
@@ -334,9 +334,7 @@ fn mailer(smtp: &Smtp) -> Result<AsyncSmtpTransport<Tokio1Executor>, String> {
         )),
     }
     .map_err(|e| format!("SMTP: {e}"))?;
-    let mut builder = builder
-        .port(smtp.port)
-        .timeout(Some(Duration::from_secs(30)));
+    let mut builder = builder.port(smtp.port).timeout(Some(timeout));
     if let Some(username) = &smtp.username {
         let password = match &smtp.password_file {
             Some(path) => std::fs::read_to_string(path)
@@ -348,4 +346,42 @@ fn mailer(smtp: &Smtp) -> Result<AsyncSmtpTransport<Tokio1Executor>, String> {
         builder = builder.credentials(Credentials::new(username.clone(), password));
     }
     Ok(builder.build())
+}
+
+/// How long a connection test waits for the SMTP server (the queue's sends
+/// wait 30 s).
+const TEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Connects to the SMTP server, negotiates TLS, logs in, disconnects: the
+/// settings work (the admin's "Test connection").
+pub async fn test_connection(smtp: &Smtp) -> Result<(), String> {
+    match mailer(smtp, TEST_TIMEOUT)?.test_connection().await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err("the server closed the connection".into()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Sends a test email to `to` at once, not through the queue: the server's
+/// answer (the admin's "Send test email").
+pub async fn send_test(smtp: &Smtp, instance_name: &str, to: &str) -> Result<String, String> {
+    let to: Mailbox = to.parse().map_err(|e| format!("recipient: {e}"))?;
+    let from: Mailbox = smtp.from.parse().map_err(|e| format!("smtp_from: {e}"))?;
+    let message = Message::builder()
+        .from(from)
+        .to(to)
+        .subject(format!("{instance_name}: a test email"))
+        .body(format!(
+            "This is a test email from {instance_name}: its email settings work.\n"
+        ))
+        .map_err(|e| format!("message: {e}"))?;
+    let response = mailer(smtp, TEST_TIMEOUT)?
+        .send(message)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(format!(
+        "{} {}",
+        response.code(),
+        response.message().collect::<Vec<_>>().join(" ")
+    ))
 }

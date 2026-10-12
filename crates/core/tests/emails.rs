@@ -577,3 +577,70 @@ async fn invitations_need_smtp(pool: PgPool) {
         .unwrap();
     assert!(carol.joined);
 }
+
+/// The admin's SMTP tests, with the dialog's values over the saved ones:
+/// connecting, a test email to the admin (Mailpit), errors as answers, an
+/// invalid value refused like a save, nothing stored.
+#[sqlx::test]
+async fn smtp_tests(pool: PgPool) {
+    configure(&pool, "closed", 1025).await;
+    let w = world(Kind::Filesystem, pool).await;
+    // Logged in first: the address then changes to one unique to this test.
+    let admin = w.as_user(1).await;
+    let me = address("admin");
+    sqlx::query("UPDATE account SET instance_admin = true, email = $1 WHERE pk = 1")
+        .bind(&me)
+        .execute(&w.pool)
+        .await
+        .unwrap();
+    let test = |path: &'static str, body: Value| {
+        let admin = &admin;
+        async move { admin.json::<api::ConnectionTest>("POST", path, &body).await }
+    };
+
+    let ok = test("/api/v1/admin/smtp/test", json!({})).await.unwrap();
+    assert!(ok.ok, "{}", ok.message);
+    // A wrong port, as typed in the dialog: an answer, at once.
+    let started = std::time::Instant::now();
+    let wrong = test("/api/v1/admin/smtp/test", json!({ "smtp_port": "1" }))
+        .await
+        .unwrap();
+    assert!(!wrong.ok && !wrong.message.is_empty());
+    assert!(started.elapsed() < std::time::Duration::from_secs(12));
+    // Refused like a save; only SMTP settings.
+    let invalid = test("/api/v1/admin/smtp/test", json!({ "smtp_port": "nope" }))
+        .await
+        .unwrap_err();
+    assert_eq!(invalid.1["code"], "invalid_setting");
+    let other = test("/api/v1/admin/smtp/test", json!({ "registration": "open" }))
+        .await
+        .unwrap_err();
+    assert_eq!(other.1["code"], "unknown_setting");
+    // Without a server.
+    let none = test("/api/v1/admin/smtp/test", json!({ "smtp_host": null }))
+        .await
+        .unwrap();
+    assert!(!none.ok);
+
+    // A test email, to the admin, at once.
+    let sent = test("/api/v1/admin/smtp/send-test", json!({}))
+        .await
+        .unwrap();
+    assert!(sent.ok, "{}", sent.message);
+    let received = inbox(&me).await;
+    assert_eq!(received.len(), 1);
+    assert_eq!(received[0].0, "Theca: a test email");
+
+    // Nothing stored, and admins only.
+    let port: String = sqlx::query_scalar("SELECT value FROM setting WHERE key = 'smtp_port'")
+        .fetch_one(&w.pool)
+        .await
+        .unwrap();
+    assert_eq!(port, "1025");
+    let bob = w.as_user(2).await;
+    let refused = bob
+        .json::<api::ConnectionTest>("POST", "/api/v1/admin/smtp/test", &json!({}))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.1["code"], "admin_required");
+}

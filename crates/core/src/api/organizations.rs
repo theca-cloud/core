@@ -32,6 +32,10 @@ pub fn router() -> Router<AppState> {
             get(providers).post(create_provider),
         )
         .route(
+            "/organizations/{id}/identity-providers/test",
+            axum::routing::post(test_provider),
+        )
+        .route(
             "/organizations/{id}/identity-providers/{provider}",
             axum::routing::patch(update_provider).delete(delete_provider),
         )
@@ -274,6 +278,25 @@ pub async fn create_provider(
     let organization = owned(&state, &account, id).await?;
     let created = super::providers::create(&state, Some(organization.pk), &request).await?;
     Ok((StatusCode::CREATED, Json(created)))
+}
+
+/// Test an issuer before saving it as the organization's provider (the
+/// owner): discovery, the issuer it declares, its signing keys, through the
+/// SSRF guard as a login would (unless `oidc_allow_internal_issuers`).
+#[utoipa::path(post, path = "/api/v1/organizations/{id}/identity-providers/test", operation_id = "organization_test_provider", params(("id" = Uuid, Path)), request_body = api::ProviderTest, responses(
+    (status = 200, body = api::ConnectionTest),
+))]
+pub async fn test_provider(
+    State(state): State<AppState>,
+    account: CurrentAccount,
+    Path(id): Path<Uuid>,
+    ApiJson(request): ApiJson<api::ProviderTest>,
+) -> Result<Json<api::ConnectionTest>, HttpError> {
+    owned(&state, &account, id).await?;
+    let guarded = !state.settings.get().oidc_allow_internal_issuers;
+    Ok(super::admin::test_outcome(
+        crate::oidc::test_discovery(request.issuer.trim(), guarded).await,
+    ))
 }
 
 /// Change one of the organization's identity providers (the owner).

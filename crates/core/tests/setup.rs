@@ -243,3 +243,46 @@ async fn concurrent_setups_one_wins(pool: PgPool) {
         .unwrap();
     assert_eq!(admins, 1);
 }
+
+/// Testing a storage during the setup: the token, only while not set up.
+#[sqlx::test]
+async fn setup_storage_test(pool: PgPool) {
+    let app = app(&pool, Some("the-token")).await;
+    let dir = tempfile::tempdir().unwrap();
+    let storage = json!({ "implementation": "filesystem", "path": dir.path() });
+    let test = |token: Option<&'static str>| {
+        let (app, storage) = (&app, storage.clone());
+        async move {
+            let headers: Vec<(&str, &str)> = token
+                .map(|t| ("x-theca-setup-token", t))
+                .into_iter()
+                .collect();
+            send(
+                app,
+                "POST",
+                "/api/v1/setup/storage-test",
+                &headers,
+                Some(storage),
+            )
+            .await
+        }
+    };
+
+    let (status, body, _) = test(None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["code"], "invalid_setup_token");
+    let (status, body, _) = test(Some("the-token")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true, "{body}");
+
+    let (status, _, _) = setup(
+        &app,
+        Some("the-token"),
+        setup_body(json!([filesystem("main", &dir)])),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body, _) = test(Some("the-token")).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "already_set_up");
+}

@@ -159,6 +159,24 @@ async fn client(
     .set_redirect_uri(redirect))
 }
 
+/// Tests an issuer before saving it: its discovery document fetched and
+/// valid, the issuer it declares the one given, its signing keys fetched; for
+/// an organization's provider (`guarded`), through the SSRF guard as a login
+/// would. The client secret and the callback URL need a real login: not here.
+pub async fn test_discovery(issuer: &str, guarded: bool) -> Result<String, String> {
+    let http = move |request| http(request, guarded);
+    let url = IssuerUrl::new(issuer.to_owned()).map_err(|e| format!("issuer: {e}"))?;
+    let metadata = CoreProviderMetadata::discover_async(url, &http)
+        .await
+        .map_err(|e| e.to_string())?;
+    // No key is fine: a provider signing with HS256 uses the client secret.
+    let keys = metadata.jwks().keys().len();
+    Ok(format!(
+        "discovery and {keys} signing key(s) fetched; logins go to {}",
+        metadata.authorization_endpoint().url()
+    ))
+}
+
 /// The AAD of a provider's encrypted client secret.
 pub const SECRET_AAD: &[u8] = b"theca identity provider secret";
 

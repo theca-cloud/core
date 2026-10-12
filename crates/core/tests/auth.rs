@@ -1282,6 +1282,74 @@ async fn oidc_login_and_linking(pool: PgPool) {
     );
 }
 
+/// Testing an issuer before saving it: discovery and its keys; an
+/// organization's owner through the SSRF guard (a local, http provider is
+/// refused there, as its logins would be); nothing saved.
+#[sqlx::test]
+async fn provider_tests(pool: PgPool) {
+    let w = world(pool).await;
+    sqlx::query("UPDATE account SET instance_admin = true WHERE pk = 1")
+        .execute(&w.pool)
+        .await
+        .unwrap();
+    let a = w.login("a@x.ch", PASSWORD).await.session();
+    let idp = fake_idp().await;
+    let test = |path: String, issuer: String| {
+        let (w, a) = (&w, &a);
+        async move {
+            let r = w
+                .with(
+                    "POST",
+                    &path,
+                    ("cookie", a),
+                    Some(json!({ "issuer": issuer })),
+                )
+                .await;
+            assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+            serde_json::from_value::<api::ConnectionTest>(r.body).unwrap()
+        }
+    };
+    let admin = || "/api/v1/admin/identity-providers/test".to_owned();
+
+    let ok = test(admin(), idp.issuer.clone()).await;
+    assert!(ok.ok, "{}", ok.message);
+    // A typo in the issuer: the declared one differs, or nothing answers.
+    let slash = test(admin(), format!("{}/realms/x", idp.issuer)).await;
+    assert!(!slash.ok);
+    let nobody = test(admin(), "http://127.0.0.1:1".into()).await;
+    assert!(!nobody.ok);
+
+    // An organization's owner: the guard, as for its logins.
+    let [one, _] = w.organizations;
+    let org = format!("/api/v1/organizations/{one}/identity-providers/test");
+    let guarded = test(org.clone(), idp.issuer.clone()).await;
+    assert!(!guarded.ok, "{}", guarded.message);
+    assert_eq!(
+        w.with(
+            "GET",
+            &format!("/api/v1/organizations/{one}/identity-providers"),
+            ("cookie", &a),
+            None
+        )
+        .await
+        .body,
+        json!([]),
+        "nothing saved"
+    );
+    // A member of organization one, not its owner: refused, as its other
+    // provider endpoints refuse.
+    let b = w.login("b@x.ch", PASSWORD).await.session();
+    let member = w
+        .with(
+            "POST",
+            &org,
+            ("cookie", &b),
+            Some(json!({ "issuer": idp.issuer })),
+        )
+        .await;
+    assert_ne!(member.status, StatusCode::OK);
+}
+
 #[sqlx::test]
 async fn oidc_link_by_email(pool: PgPool) {
     sqlx::query("INSERT INTO setting (key, value) VALUES ('oidc_link_by_email', 'true')")
