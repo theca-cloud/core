@@ -61,6 +61,7 @@ pub struct AppState {
         version,
         setup::status,
         setup::run,
+        setup::storage_test,
         session::login,
         session::logout,
         session::sessions,
@@ -136,6 +137,11 @@ pub struct AppState {
         admin::run_job,
         admin::settings,
         admin::change_settings,
+        admin::smtp_test,
+        admin::smtp_send_test,
+        admin::storage_test,
+        admin::provider_test,
+        organizations::test_provider,
         admin::organizations,
         admin::create_organization,
         admin::update_organization,
@@ -167,6 +173,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/health", get(health))
         .route("/api/version", get(version))
         .route("/api/v1/setup", get(setup::status).post(setup::run))
+        .route(
+            "/api/v1/setup/storage-test",
+            axum::routing::post(setup::storage_test),
+        )
         .nest(
             "/api/v1",
             v1::router()

@@ -93,6 +93,54 @@ pub async fn status(State(state): State<AppState>) -> Json<api::SetupStatus> {
     })
 }
 
+/// Test a storage during the setup, before submitting it (the setup probes it
+/// again): write, read back, delete a small object. The setup's token, its rate
+/// limit, and only while the instance isn't set up. A failed test is an answer.
+#[utoipa::path(post, path = "/api/v1/setup/storage-test", operation_id = "setup_storage_test", request_body = api::StorageBackend, responses(
+    (status = 200, body = api::ConnectionTest),
+    (status = 401, description = "`invalid_setup_token`", body = api::ApiError),
+    (status = 409, description = "`already_set_up`", body = api::ApiError),
+    (status = 429, description = "`rate_limited`", body = api::ApiError),
+))]
+pub async fn storage_test(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    ip: ClientIp,
+    ApiJson(backend): ApiJson<api::StorageBackend>,
+) -> Result<Json<api::ConnectionTest>, HttpError> {
+    guard(&state, &headers, &ip)?;
+    Ok(super::admin::storage_probe(&backend).await)
+}
+
+/// The setup's rate limit, then: not set up yet, the right token.
+fn guard(state: &AppState, headers: &HeaderMap, ip: &ClientIp) -> Result<(), HttpError> {
+    if let Some(ip) = ip.0 {
+        let settings = state.settings.get();
+        state
+            .limits
+            .hit(&settings, crate::limits::Limit::SetupIp, &ip.to_string())
+            .map_err(HttpError::too_many)?;
+    }
+    if !state.setup.is_pending() {
+        return Err(HttpError::conflict(
+            "already_set_up",
+            "this instance is already set up",
+        ));
+    }
+    let token = headers
+        .get("x-theca-setup-token")
+        .and_then(|v| v.to_str().ok());
+    if !state.setup.accepts(token) {
+        tracing::warn!(anomaly = "setup_token_invalid", ip = ?ip.0, "setup with a wrong token");
+        return Err(HttpError::new(
+            StatusCode::UNAUTHORIZED,
+            "invalid_setup_token",
+            "wrong or missing setup token (see the server's logs)",
+        ));
+    }
+    Ok(())
+}
+
 /// Set up a fresh instance, once: the admin (logged in by the answer), the
 /// first organization, and the storages, each tested first (write, read back,
 /// delete). The token goes in `X-Theca-Setup-Token`.
@@ -109,28 +157,8 @@ pub async fn run(
     agent: UserAgent,
     ApiJson(req): ApiJson<api::Setup>,
 ) -> Result<(HeaderMap, Json<api::Me>), HttpError> {
-    if let Some(ip) = ip.0 {
-        let settings = state.settings.get();
-        state
-            .limits
-            .hit(&settings, crate::limits::Limit::SetupIp, &ip.to_string())
-            .map_err(HttpError::too_many)?;
-    }
+    guard(&state, &headers, &ip)?;
     let already = || HttpError::conflict("already_set_up", "this instance is already set up");
-    if !state.setup.is_pending() {
-        return Err(already());
-    }
-    let token = headers
-        .get("x-theca-setup-token")
-        .and_then(|v| v.to_str().ok());
-    if !state.setup.accepts(token) {
-        tracing::warn!(anomaly = "setup_token_invalid", ip = ?ip.0, "setup with a wrong token");
-        return Err(HttpError::new(
-            StatusCode::UNAUTHORIZED,
-            "invalid_setup_token",
-            "wrong or missing setup token (see the server's logs)",
-        ));
-    }
 
     let invalid = |message: &str| HttpError::bad_request("invalid_setup", message.to_owned());
     if !req.admin_email.contains('@') {

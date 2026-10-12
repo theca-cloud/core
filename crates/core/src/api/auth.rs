@@ -1,7 +1,8 @@
 //! Authentication of API requests.
 //!
 //! - [`authenticate`] (middleware): looks up the request's opaque token (the
-//!   session cookie, or `Bearer` for the CLI and API clients) on every request:
+//!   session cookie, `Bearer` for the CLI and API clients, Basic for WebDAV
+//!   and only on its paths) on every request:
 //!   revocation takes effect at once. It also enforces CSRF protection for
 //!   cookie-authenticated requests.
 //! - [`CurrentAccount`] (extractor): the authenticated credential. Each request
@@ -74,10 +75,14 @@ pub async fn authenticate(
 ) -> Response {
     let headers = request.headers();
     // Bearer (CLI, API clients), Basic with an app password as the password
-    // (WebDAV), or the session cookie (the web app).
+    // (WebDAV), or the session cookie (the web app). Basic only on WebDAV's
+    // paths: a browser that once logged into /dav/ keeps sending it, and on the
+    // API it would replace the user's session with that app password.
+    let path = request.uri().path();
+    let webdav = path == "/dav" || path.starts_with("/dav/");
     let explicit = bearer(headers)
         .map(str::to_owned)
-        .or_else(|| basic(headers));
+        .or_else(|| basic(headers).filter(|_| webdav));
     let via_cookie = explicit.is_none();
     let Some(token) = explicit.or_else(|| cookie(headers, SESSION_COOKIE).map(str::to_owned))
     else {

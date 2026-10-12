@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM chunk_in_version WHERE version IN (SELECT pk FROM version WHERE file = ANY($1))\n         RETURNING chunk",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "chunk",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "da3ea721d8006e0e8db56a0836219de5e9bb4d515bc9656a0a0e07a6a069e537"
+}

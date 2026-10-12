@@ -1,6 +1,20 @@
 # Changelog
 
 Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
+## [0.19.0] - 2026-10-12
+
+### Features
+
+- **core**: Connection tests for SMTP, storages and identity providers
+
+### Fixes
+
+- **core**: Basic auth only on WebDAV (**breaking**)
+- **core**: Emptying the trash frees the space at once
+
+### Documentation
+
+- **claude**: Keep only what is specific to theca, the rest is global
 ## [0.18.0] - 2026-10-08
 
 ### Features

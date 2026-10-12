@@ -618,3 +618,63 @@ async fn the_instance_to_anyone(pool: PgPool) {
     let instance: api::Instance = anyone.get("/api/v1/instance").await.unwrap();
     assert!(instance.registration);
 }
+
+/// Testing a storage before adding it: the probe, nothing saved; its errors
+/// as answers, an unreachable S3 address within seconds.
+#[sqlx::test]
+async fn storage_tests(pool: PgPool) {
+    let w = admin_world(pool).await;
+    let admin = w.as_user(1).await;
+    let test = |body: Value| {
+        let admin = &admin;
+        async move {
+            admin
+                .json::<api::ConnectionTest>("POST", "/api/v1/admin/storages/test", &body)
+                .await
+                .unwrap()
+        }
+    };
+    let with = |implementation: &str, mut details: Value| {
+        details["implementation"] = json!(implementation);
+        details
+    };
+    let storages = || async {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM storage")
+            .fetch_one(&w.pool)
+            .await
+            .unwrap()
+    };
+    let before = storages().await;
+
+    for kind in [Kind::Filesystem, Kind::S3] {
+        let (implementation, details, _dir) = storage_details(kind);
+        let ok = test(with(implementation, details)).await;
+        assert!(ok.ok, "{implementation}: {}", ok.message);
+    }
+    let (_, mut details, _) = storage_details(Kind::S3);
+    details["bucket"] = json!("no-such-bucket");
+    let wrong = test(with("s3", details.clone())).await;
+    assert!(!wrong.ok && !wrong.message.is_empty());
+    // An address nothing answers (TEST-NET-1, never routed): seconds, not minutes.
+    details["host"] = json!("http://192.0.2.1:3900");
+    let started = std::time::Instant::now();
+    let unreachable = test(with("s3", details)).await;
+    assert!(!unreachable.ok);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(30),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(storages().await, before, "nothing saved");
+
+    let bob = w.as_user(2).await;
+    let refused = bob
+        .json::<api::ConnectionTest>(
+            "POST",
+            "/api/v1/admin/storages/test",
+            &json!({ "implementation": "filesystem", "path": "/tmp" }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(code(refused), "admin_required");
+}
