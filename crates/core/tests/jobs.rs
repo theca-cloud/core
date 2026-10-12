@@ -14,7 +14,22 @@ async fn fs_world(pool: PgPool) -> World {
 }
 
 impl World {
+    /// Runs a job now, its count. A run already started (a purge starts the
+    /// GC) finishes first: two runs at once would share the work, and the
+    /// counts (the server itself never runs a job twice at once).
     async fn run(&self, job: Job) -> i64 {
+        for _ in 0..200 {
+            let running = self
+                .rows(&format!(
+                    "SELECT count(*) FROM job_run WHERE job = '{}' AND status = 'running'",
+                    job.name()
+                ))
+                .await;
+            if running == 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
         job.run(&state(&self.pool).await).await.unwrap()
     }
 
