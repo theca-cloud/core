@@ -719,6 +719,54 @@ async fn app_passwords_only_reach_data(pool: PgPool) {
     );
 }
 
+/// Basic auth is WebDAV's only: on the API it's ignored, so a browser still
+/// sending the app password it once gave /dav/ keeps its session (it could
+/// otherwise neither log out nor reach its account).
+#[sqlx::test]
+async fn basic_auth_only_on_webdav(pool: PgPool) {
+    use base64::Engine;
+    let w = world(pool).await;
+    let session = w.login("a@x.ch", PASSWORD).await.session();
+    let password = w
+        .app_password(("cookie", session.as_str()), json!({ "name": "dav" }))
+        .await
+        .unwrap();
+    let token = password.strip_prefix("Bearer ").unwrap();
+    let basic = format!(
+        "Basic {}",
+        base64::engine::general_purpose::STANDARD.encode(format!("me:{token}"))
+    );
+    let both = |method: &str, path: &str| {
+        Request::builder()
+            .method(method)
+            .uri(path)
+            .header("cookie", session.as_str())
+            .header("authorization", basic.as_str())
+            .header("content-type", "application/json")
+    };
+
+    // Alone on the API: not a credential.
+    let alone = w
+        .with("GET", "/api/v1/me", ("authorization", &basic), None)
+        .await;
+    assert_eq!(alone.status, StatusCode::UNAUTHORIZED);
+    // With the session's cookie: the session, account actions and logout included.
+    let sessions = w.send(both("GET", "/api/v1/auth/sessions"), None).await;
+    assert_eq!(sessions.status, StatusCode::OK);
+    let logout = w
+        .send(both("POST", "/api/v1/auth/logout"), Some(json!({})))
+        .await;
+    assert_eq!(logout.status, StatusCode::NO_CONTENT);
+
+    // On WebDAV, with or without the trailing slash: the app password.
+    for path in ["/dav/", "/dav"] {
+        let listed = w
+            .with("PROPFIND", path, ("authorization", &basic), None)
+            .await;
+        assert_ne!(listed.status, StatusCode::UNAUTHORIZED, "{path}");
+    }
+}
+
 #[sqlx::test]
 async fn app_passwords_from_a_restricted_session(pool: PgPool) {
     let w = world(pool).await;
