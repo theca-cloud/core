@@ -464,8 +464,9 @@ pub(crate) fn restored_name(name: &str, is_file: bool, attempt: u32) -> String {
 }
 
 /// Deletes a trashed node for good: its subtree, their versions and chunk
-/// references. The chunks themselves are left to the GC.
-pub async fn purge(tx: &mut Transaction<'_, Postgres>, node: i64) -> sqlx::Result<()> {
+/// references. Returns the chunks they referenced, for `jobs::release` once
+/// committed (those no other version uses go then, not after the grace).
+pub async fn purge(tx: &mut Transaction<'_, Postgres>, node: i64) -> sqlx::Result<Vec<i64>> {
     let subtree: Vec<i64> = sqlx::query_scalar!(
         r#"WITH RECURSIVE subtree (pk) AS (
                SELECT $1::bigint
@@ -483,19 +484,22 @@ pub async fn purge(tx: &mut Transaction<'_, Postgres>, node: i64) -> sqlx::Resul
     )
     .execute(&mut **tx)
     .await?;
-    sqlx::query!(
-        "DELETE FROM chunk_in_version WHERE version IN (SELECT pk FROM version WHERE file = ANY($1))",
+    let mut referenced: Vec<i64> = sqlx::query_scalar!(
+        "DELETE FROM chunk_in_version WHERE version IN (SELECT pk FROM version WHERE file = ANY($1))
+         RETURNING chunk",
         &subtree
     )
-    .execute(&mut **tx)
+    .fetch_all(&mut **tx)
     .await?;
+    referenced.sort_unstable();
+    referenced.dedup();
     sqlx::query!("DELETE FROM version WHERE file = ANY($1)", &subtree)
         .execute(&mut **tx)
         .await?;
     sqlx::query!("DELETE FROM node WHERE pk = ANY($1)", &subtree)
         .execute(&mut **tx)
         .await?;
-    Ok(())
+    Ok(referenced)
 }
 
 /// A file's versions, numbered RCS-style (`numbers`), in tree order.

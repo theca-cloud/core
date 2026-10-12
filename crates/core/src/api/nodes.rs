@@ -241,10 +241,16 @@ pub async fn trash_nodes(
 ) -> Result<Json<Vec<api::NodeOutcome>>, HttpError> {
     batch_size(req.nodes.len())?;
     let mut outcomes = Vec::with_capacity(req.nodes.len());
+    let mut freed = Vec::new();
     for id in &req.nodes {
         let result = trash_one(&state, &user, *id, req.permanent).await;
-        outcomes.push(node_outcome(result.map(|()| None)));
+        outcomes.push(node_outcome(result.map(|chunks| {
+            freed.extend(chunks);
+            None
+        })));
     }
+    // Emptying the trash frees the space at once, not after the GC's grace.
+    crate::jobs::release(&state, &freed).await;
     Ok(Json(outcomes))
 }
 
@@ -253,20 +259,21 @@ async fn trash_one(
     user: &CurrentAccount,
     id: Uuid,
     permanent: bool,
-) -> Result<(), HttpError> {
+) -> Result<Vec<i64>, HttpError> {
     if permanent {
         let node = db::node::trashed_access(&state.pool, user, id)
             .await?
             .ok_or_else(|| HttpError::not_found("trashed node"))?;
         require_write(&node.access)?;
         let mut tx = state.pool.begin().await?;
-        db::node::purge(&mut tx, node.node).await?;
+        let freed = db::node::purge(&mut tx, node.node).await?;
         tx.commit().await?;
+        Ok(freed)
     } else {
         let node = node(state, user, id).await?;
         files::trash(state, &node).await?;
+        Ok(Vec::new())
     }
-    Ok(())
 }
 
 /// Copy files and folders into folders of any library of the same

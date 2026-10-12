@@ -328,21 +328,22 @@ pub async fn restore(tx: &mut Transaction<'_, Postgres>, library: i64) -> sqlx::
     Ok(())
 }
 
-/// Deletes a library for good: its nodes, versions and chunk references
-/// (the chunks go with the GC), memberships, namespaces and scoped tokens.
-pub async fn purge(tx: &mut Transaction<'_, Postgres>, library: i64) -> sqlx::Result<()> {
+/// Deletes a library for good: its nodes, versions and chunk references,
+/// memberships, namespaces and scoped tokens. Returns the chunks it referenced
+/// (see `node::purge`).
+pub async fn purge(tx: &mut Transaction<'_, Postgres>, library: i64) -> sqlx::Result<Vec<i64>> {
     let root = sqlx::query_scalar!(
         "SELECT pk FROM node WHERE library = $1 AND parent IS NULL",
         library
     )
     .fetch_one(&mut **tx)
     .await?;
-    super::node::purge(tx, root).await?;
+    let referenced = super::node::purge(tx, root).await?;
     // Members, namespaces and tokens go by cascade; pending chunks forget it.
     sqlx::query!("DELETE FROM library WHERE pk = $1", library)
         .execute(&mut **tx)
         .await?;
-    Ok(())
+    Ok(referenced)
 }
 
 /// An organization's trashed libraries the account reaches.

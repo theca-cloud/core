@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT max(url_expires_at) FROM chunk\n         WHERE pk = ANY($1) AND deleting_at IS NOT NULL AND url_expires_at > now()",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "max",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "69caa41b2bfd376655f9a136f1df1e185eb7f5c57a1f053d1bf2552c18f1c432"
+}

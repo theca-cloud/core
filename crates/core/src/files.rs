@@ -254,12 +254,13 @@ pub async fn restore_library(state: &AppState, library: &Access) -> Result<(), F
     Ok(())
 }
 
-/// Deletes a trashed library for good (its chunks go with the GC).
+/// Deletes a trashed library for good; its chunks are released at once.
 pub async fn purge_library(state: &AppState, library: &Access) -> Result<(), FileError> {
     writable(library)?;
     let mut tx = state.pool.begin().await?;
-    db::library::purge(&mut tx, library.library).await?;
+    let freed = db::library::purge(&mut tx, library.library).await?;
     tx.commit().await?;
+    crate::jobs::release(state, &freed).await;
     Ok(())
 }
 

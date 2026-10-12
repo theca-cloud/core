@@ -53,6 +53,7 @@ on_both_backends!(
     attack_unsigned_headers,
     attack_pending_upload_cap,
     every_stored_byte_is_billed,
+    purges_free_the_space_at_once,
 );
 
 // Protocol.
@@ -1033,4 +1034,127 @@ async fn every_stored_byte_is_billed(kind: Kind, pool: PgPool) {
             }
         }
     }
+}
+
+/// Emptying the trash gives the space back at once, not after the GC's grace
+/// (the chunks were just uploaded: well inside it). A chunk another file still
+/// uses stays. A chunk whose upload URL is still valid is marked and stays
+/// counted, its object kept until the URL expires (it could write it again).
+async fn purges_free_the_space_at_once(kind: Kind, pool: PgPool) {
+    let w = world(kind, pool).await;
+    let mut alice = w.as_user(1).await;
+    let lib = alice.create_library("docs").await;
+    let reader = w.as_user(1).await;
+    let used = || async {
+        let org: api::Organization = reader
+            .get(&format!("/api/v1/organizations/{}", lib.organization))
+            .await
+            .unwrap();
+        org.used
+    };
+    let pool = &w.pool;
+    let count = |sql: &'static str| async move {
+        sqlx::query_scalar::<_, i64>(sql)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    };
+    // Waits for the GC the purge started (in the background): up to 10 s.
+    let settled = |expected: i64| async move {
+        for _ in 0..100 {
+            if used().await == expected {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        panic!("the usage stayed at {}, not {expected}", used().await);
+    };
+    // As uploaded a while ago (URLs expired), still inside the grace.
+    let urls_expire = || w.sql("UPDATE chunk SET url_expires_at = now() - interval '1 second'");
+
+    let kept = alice
+        .upload(&lib, new_file(&lib, "kept.bin"), &data(3 * MIB, 41))
+        .await
+        .unwrap();
+    let (kept_used, kept_chunks) = (used().await, count("SELECT count(*) FROM chunk").await);
+    let gone = alice
+        .upload(&lib, new_file(&lib, "gone.bin"), &data(3 * MIB, 42))
+        .await
+        .unwrap();
+    // The same content as kept.bin: its chunks, shared.
+    let twin = alice
+        .upload(&lib, new_file(&lib, "twin.bin"), &data(3 * MIB, 41))
+        .await
+        .unwrap();
+    assert!(used().await > kept_used);
+    urls_expire().await;
+    for file in [gone.file, twin.file] {
+        assert_eq!(alice.trash_node(file, false).await, StatusCode::NO_CONTENT);
+        assert_eq!(alice.trash_node(file, true).await, StatusCode::NO_CONTENT);
+    }
+    settled(kept_used).await;
+    assert_eq!(
+        count("SELECT count(*) FROM chunk").await,
+        kept_chunks,
+        "gone.bin's chunks deleted, kept.bin's not"
+    );
+    assert_eq!(alice.download(kept.file).await.unwrap(), data(3 * MIB, 41));
+
+    // Just uploaded (its URLs still valid): marked, still counted, kept.
+    let fresh = alice
+        .upload(&lib, new_file(&lib, "fresh.bin"), &data(2 * MIB, 43))
+        .await
+        .unwrap();
+    let with_fresh = used().await;
+    assert_eq!(
+        alice.trash_node(fresh.file, false).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        alice.trash_node(fresh.file, true).await,
+        StatusCode::NO_CONTENT
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(count("SELECT count(*) FROM chunk WHERE deleting_at IS NOT NULL").await > 0);
+    assert_eq!(
+        used().await,
+        with_fresh,
+        "counted until its object is deleted"
+    );
+    // Once the URLs expire, the GC (woken then) deletes them.
+    urls_expire().await;
+    w.sql("UPDATE account SET instance_admin = true WHERE pk = 1")
+        .await;
+    let status = alice
+        .call(
+            "POST",
+            "/api/v1/admin/jobs/chunk_gc/run",
+            Some(b"{}".to_vec()),
+            true,
+        )
+        .await
+        .0;
+    assert!(status.is_success(), "{status}");
+    settled(kept_used).await;
+
+    // A whole library, from the trash.
+    let (status, _) = alice
+        .call(
+            "DELETE",
+            &format!("/api/v1/libraries/{}", lib.id),
+            None,
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = alice
+        .call(
+            "DELETE",
+            &format!("/api/v1/libraries/{}?permanent=true", lib.id),
+            None,
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    settled(0).await;
 }

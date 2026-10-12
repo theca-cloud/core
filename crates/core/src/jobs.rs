@@ -290,20 +290,8 @@ async fn chunk_gc(state: &AppState) -> Result<i64, JobError> {
         if candidates.is_empty() {
             return Ok(deleted);
         }
-        // 1. Mark, in one statement; if a commit referenced one meanwhile, the
-        // FK refuses the whole batch: mark one by one, skipping those.
-        if let Err(e) = mark(&state.pool, &candidates).await {
-            if !is_constraint(&e, "chunk_in_version_chunk") {
-                return Err(e.into());
-            }
-            for &chunk in &candidates {
-                if let Err(e) = mark(&state.pool, &[chunk]).await
-                    && !is_constraint(&e, "chunk_in_version_chunk")
-                {
-                    return Err(e.into());
-                }
-            }
-        }
+        // 1. Mark.
+        mark_all(&state.pool, &candidates).await?;
         let marked = sqlx::query!(
             "SELECT pk, uuid, storage FROM chunk WHERE pk = ANY($1) AND deleting_at IS NOT NULL",
             &candidates
@@ -334,6 +322,26 @@ async fn chunk_gc(state: &AppState) -> Result<i64, JobError> {
     }
 }
 
+/// Marks those of `chunks` no version references, in one statement (the
+/// object itself waits for its URL to expire: the GC's candidates); if a commit referenced one meanwhile, the FK refuses the
+/// whole batch: marks them one by one, skipping those.
+async fn mark_all(pool: &PgPool, chunks: &[i64]) -> sqlx::Result<()> {
+    let Err(e) = mark(pool, chunks).await else {
+        return Ok(());
+    };
+    if !is_constraint(&e, "chunk_in_version_chunk") {
+        return Err(e);
+    }
+    for &chunk in chunks {
+        if let Err(e) = mark(pool, &[chunk]).await
+            && !is_constraint(&e, "chunk_in_version_chunk")
+        {
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
 async fn mark(pool: &PgPool, chunks: &[i64]) -> sqlx::Result<()> {
     sqlx::query!(
         "UPDATE chunk c SET deleting_at = now()
@@ -346,13 +354,54 @@ async fn mark(pool: &PgPool, chunks: &[i64]) -> sqlx::Result<()> {
     Ok(())
 }
 
+/// The chunks a purge just unreferenced (once committed): those no version
+/// uses any more are marked now, and the GC started to delete them, so the
+/// space comes back at once rather than after the grace period, which is for
+/// uploads in progress (decisions.md, Garbage collection). Marked, a chunk is
+/// still counted until its object is deleted. A chunk an upload had matched
+/// meanwhile is refused at its commit (`chunk_missing`), and uploaded again.
+/// A chunk whose upload URL is still valid (uploaded within its lifetime) keeps
+/// its object until the URL expires (the URL could write it again, unbilled):
+/// the GC is woken again then. A failure here only delays the space to the
+/// GC's own rule: logged.
+// ponytail: a GC run already finishing its last query misses the marks (the
+// trigger is a no-op while it runs), and a restart loses the delayed wake:
+// both wait for the next hourly run, still counted.
+pub async fn release(state: &AppState, chunks: &[i64]) {
+    if chunks.is_empty() {
+        return;
+    }
+    if let Err(e) = mark_all(&state.pool, chunks).await {
+        tracing::warn!(error = %e, "cannot release purged chunks: the GC will");
+        return;
+    }
+    trigger(state, Job::ChunkGc).await;
+    let latest = sqlx::query_scalar!(
+        "SELECT max(url_expires_at) FROM chunk
+         WHERE pk = ANY($1) AND deleting_at IS NOT NULL AND url_expires_at > now()",
+        chunks
+    )
+    .fetch_one(&state.pool)
+    .await;
+    if let Ok(Some(latest)) = latest {
+        let wait = (latest - chrono::Utc::now()).to_std().unwrap_or_default();
+        let state = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(wait + Duration::from_secs(1)).await;
+            trigger(&state, Job::ChunkGc).await;
+        });
+    }
+}
+
 fn is_constraint(e: &sqlx::Error, name: &str) -> bool {
     e.as_database_error().and_then(|d| d.constraint()) == Some(name)
 }
 
 /// Trashed nodes and libraries past the retention go for good (subtree,
 /// versions, chunk references), one transaction each; their chunks follow with
-/// the GC.
+/// the GC (untouched for the retention, past the grace: its next run). No
+/// release here: nobody waits on it, and a job can't start another from
+/// inside its own run.
 async fn trash_purge(state: &AppState) -> Result<i64, JobError> {
     let retention = state.settings.get().trash_retention.as_secs_f64();
     let mut purged = 0;
