@@ -1,6 +1,7 @@
-# The server image. Nothing is compiled here: the release pipeline
-# cross-compiles static binaries (scripts/release-ci.sh binaries) into
-# dist/<arch>/, and each platform's image copies its own.
+# The core image: the web app's dev and test server only, never shipped (users
+# run the CE image, which compiles the server itself). Nothing is compiled
+# here: the pipeline cross-compiles static binaries (scripts/release-ci.sh
+# binaries) into dist/<arch>/, and each platform's image copies its own.
 FROM gcr.io/distroless/static-debian12:nonroot
 ARG TARGETARCH
 COPY dist/${TARGETARCH}/theca-server /theca-server

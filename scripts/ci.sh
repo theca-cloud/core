@@ -59,6 +59,32 @@ s3() {
         S3_TEST_SECRET_KEY_FILE=/tmp/garage/secrets/s3_secret_key
 }
 
+# The last release's tag: vX.Y.Z until 1.0, X.Y.Z from it. The highest
+# version, not the nearest tag: a shallow clone can't hide it.
+last_release() {
+    git fetch -q --tags origin 2>/dev/null || true
+    version=$(git tag --list | sed -nE 's/^v?([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' | sort -V | tail -1)
+    [ -n "$version" ] || return 1
+    if git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
+        echo "$version"
+    else
+        echo "v$version"
+    fi
+}
+
+# Released migrations are never edited nor deleted (decisions.md, Schema and
+# migrations): data already depends on them. Against the working tree, so an
+# uncommitted edit fails too; renames count as a deletion.
+migration_guard() {
+    last=$(last_release) || return 0
+    edited=$(git diff --name-only --no-renames --diff-filter=MD "$last" -- crates/core/migrations)
+    if [ -n "$edited" ]; then
+        echo "released migrations edited or deleted since $last: add a new migration instead" >&2
+        echo "$edited" >&2
+        exit 1
+    fi
+}
+
 # openapi.json against the last release's: no breaking change to /api/v1 (a
 # client built against any 1.x keeps working). From 1.0 on: betas may break.
 api_compatibility() {
@@ -66,13 +92,12 @@ api_compatibility() {
         echo "oasdiff missing: API compatibility not checked here (the CI checks it)"
         return
     fi
-    git fetch -q --tags origin 2>/dev/null || true
-    last=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null) || {
+    last=$(last_release) || {
         echo "no release yet: no API to stay compatible with"
         return
     }
     case "$last" in
-    v0.*)
+    v0.* | 0.*)
         # Beta (decisions.md, Versions): the API may still break until 1.0.
         echo "last release $last is beta (0.x): breaking API changes allowed until 1.0"
         return
@@ -87,6 +112,7 @@ if [ "$step" = all ] || [ "$step" = lint ]; then
     cargo fmt --all --check
     cargo sqlx prepare --workspace --check -- --all-targets
     cargo clippy --workspace --all-targets -- -D warnings
+    migration_guard
     api_compatibility
 fi
 if [ "$step" = all ] || [ "$step" = test ]; then

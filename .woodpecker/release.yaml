@@ -1,45 +1,49 @@
-# Release candidates (dev) and releases (prod), once the checks passed. The
-# version is Cargo.toml's, written by scripts/release.sh (see the release
-# process in docs/CONTRIBUTING.md).
-# Pushes filtered as the checks are (ci.yaml), manual runs always.
+# The release, on the version tag that scripts/release.sh creates and pushes
+# with prod (`git push origin prod dev 1.2.3`). No checks here: the code is
+# what dev tested, plus the version bump.
 when:
-  - event: push
-    branch: [dev, prod]
-    # Nothing built or tested changed: docs (not CONFIGURATION.md, a test reads it),
-    # the roadmap, try/, repo housekeeping.
-    path:
-      exclude: ["README.md", "CLAUDE.md", "CONTRIBUTING.md", "CHANGELOG.md", "roadmap/**", "try/**", "LICENSE", ".gitignore", ".githooks/**", "docker-compose.yml", "cliff.toml"]
-    # Not the release merge coming back into dev: prod just tested that very code.
-    evaluate: 'not (CI_COMMIT_BRANCH == "dev" && CI_COMMIT_MESSAGE startsWith "Merge branch ''dev'' into prod")'
-  - event: manual
-    branch: [dev, prod]
+  - event: tag
+    ref: refs/tags/[0-9]*
 
-depends_on: [ci]
+# The mirror pushes to GitHub, which refuses a shallow or partial clone.
+clone:
+  git:
+    image: woodpeckerci/plugin-git:2.10.1
+    settings:
+      partial: false
+      depth: 0
 
 variables:
   - &rust
     image: git.pband.ch/theca/ci-rust:1.98.0
     pull: true
-
-steps:
-  # The image tags; on prod, refuses a version already released.
-  - name: tags
-    <<: *rust
     environment:
+      SQLX_OFFLINE: "true"
       GITEA_TOKEN:
         from_secret: gitea_token
+
+steps:
+  # The image tags: latest, 1, 1.2, 1.2.3.
+  - name: tags
+    image: alpine:3.22
+    depends_on: []
     commands:
-      - scripts/release-ci.sh tags
+      - v=$${CI_COMMIT_TAG}
+      - printf '%s\n' latest "$${v%%.*}" "$${v%.*}" "$$v" > .tags
+      - cat .tags
 
   - name: binaries
     <<: *rust
-    environment:
-      SQLX_OFFLINE: "true"
+    depends_on: []
     commands:
       - scripts/release-ci.sh binaries
 
+  # The core image, on Gitea only: web's dev and test server, never shipped.
+  # The only privileged plugin the server trusts (WOODPECKER_PLUGINS_PRIVILEGED):
+  # keep this exact version.
   - name: image
     image: woodpeckerci/plugin-docker-buildx:5.0.0
+    depends_on: [tags, binaries]
     settings:
       registry: git.pband.ch
       repo: git.pband.ch/theca/core
@@ -51,14 +55,43 @@ steps:
       password:
         from_secret: gitea_token
 
-  # Crates, browser package, tag and Gitea release.
-  - name: publish
+  # @theca/client, what web installs.
+  - name: npm
     <<: *rust
-    when:
-      - branch: prod
+    depends_on: []
+    commands:
+      - scripts/release-ci.sh npm
+
+  # The Gitea release: this version's section of CHANGELOG.md, and openapi.json.
+  - name: gitea-release
+    image: alpine:3.22
+    depends_on: [image, npm]
     environment:
-      SQLX_OFFLINE: "true"
       GITEA_TOKEN:
         from_secret: gitea_token
     commands:
-      - scripts/release-ci.sh publish
+      - apk add -q curl jq
+      - v=$${CI_COMMIT_TAG}
+      - notes=$$(awk -v h="## [$$v]" 'index($$0, h) == 1 {on = 1; next} /^## \[/ {on = 0} on' CHANGELOG.md)
+      - >
+        id=$$(jq -n --arg t "$$v" --arg b "$$notes" '{tag_name: $$t, name: $$t, body: $$b}' |
+        curl -fsS -X POST -H "Authorization: token $$GITEA_TOKEN" -H 'Content-Type: application/json'
+        --data-binary @- "https://git.pband.ch/api/v1/repos/$${CI_REPO}/releases" | jq -r .id)
+      - >
+        curl -fsS -X POST -H "Authorization: token $$GITEA_TOKEN" -F attachment=@openapi.json
+        "https://git.pband.ch/api/v1/repos/$${CI_REPO}/releases/$$id/assets?name=openapi.json" > /dev/null
+
+  # Last, once everything passed: prod (this tag's commit) to GitHub's main,
+  # with the tag. Force: Gitea is the one truth. github_deploy_key is this
+  # repository's own deploy key, with write access to its GitHub mirror only.
+  - name: mirror
+    image: alpine/git:v2.54.0
+    depends_on: [gitea-release]
+    environment:
+      KEY:
+        from_secret: github_deploy_key
+    commands:
+      - mkdir -p ~/.ssh && printf '%s\n' "$$KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+      # GitHub's host key, from https://api.github.com/meta (ssh_keys).
+      - echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > ~/.ssh/known_hosts
+      - git push --force git@github.com:theca-cloud/core.git "HEAD:refs/heads/main" "refs/tags/$${CI_COMMIT_TAG}"

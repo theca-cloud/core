@@ -1,0 +1,62 @@
+# Release candidates: on dev, once the checks passed, the core image tagged with
+# the version the next release will have (git-cliff, as scripts/release.sh
+# computes it) plus -rc: rc, 1-rc, 1.2-rc, 1.2.3-rc. The core image is web's dev
+# and test server only, never shipped (the CE image compiles its own).
+# The server inside still reports the last release's version: Cargo.toml is
+# bumped by the release itself.
+when:
+  - event: push
+    branch: dev
+    path:
+      exclude: ["README.md", "CLAUDE.md", "CONTRIBUTING.md", "CHANGELOG.md", "LICENSE", ".gitignore", ".githooks/**", "docker-compose.yml", "cliff.toml"]
+    # Not the version commit coming back into dev: that is a release, not a candidate.
+    evaluate: 'not (trim(CI_COMMIT_MESSAGE) matches "^[0-9]+[.][0-9]+[.][0-9]+$")'
+  - event: manual
+    branch: dev
+
+depends_on: [ci]
+
+# git-cliff needs the history since the last release, and its tag.
+clone:
+  git:
+    image: woodpeckerci/plugin-git:2.10.1
+    settings:
+      partial: false
+      depth: 0
+      tags: true
+
+steps:
+  - name: tags
+    image: ghcr.io/orhun/git-cliff/git-cliff:2.14.2
+    depends_on: []
+    commands:
+      # 0.x's tags carry a `v`, which git-cliff keeps.
+      - v=$$(git-cliff --bumped-version | sed 's/^v//')
+      - test -n "$$v"
+      - printf '%s\n' rc "$${v%%.*}-rc" "$${v%.*}-rc" "$$v-rc" > .tags
+      - cat .tags
+
+  - name: binaries
+    image: git.pband.ch/theca/ci-rust:1.98.0
+    pull: true
+    depends_on: []
+    environment:
+      SQLX_OFFLINE: "true"
+    commands:
+      - scripts/release-ci.sh binaries
+
+  # The only privileged plugin the server trusts (WOODPECKER_PLUGINS_PRIVILEGED):
+  # keep this exact version.
+  - name: image
+    image: woodpeckerci/plugin-docker-buildx:5.0.0
+    depends_on: [tags, binaries]
+    settings:
+      registry: git.pband.ch
+      repo: git.pband.ch/theca/core
+      platforms: linux/amd64,linux/arm64
+      dockerfile: Dockerfile
+      tags_file: .tags
+      username:
+        from_secret: gitea_user
+      password:
+        from_secret: gitea_token

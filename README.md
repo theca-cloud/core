@@ -6,7 +6,9 @@ The Theca server and the Rust libraries shared by its clients:
 - `core`: the server (API, WebDAV, background jobs, migrations).
 - `client`: the engine every Rust client is built on (auth, upload, download).
 
-Configuring a server: [CONFIGURATION.md](CONFIGURATION.md). Design and decisions: [theca/docs](https://git.pband.ch/theca/docs). Contributing: see [CONTRIBUTING.md](https://git.pband.ch/theca/docs/src/branch/prod/CONTRIBUTING.md).
+Configuring a server: [CONFIGURATION.md](CONFIGURATION.md). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+To run Theca, use the community edition's image, `thecacloud/ce` on Docker Hub: the server and the web app, built from source. The `core` image this repository builds is the web app's dev and test server only, never shipped.
 
 ## Development
 
@@ -24,23 +26,22 @@ cargo run -p theca-core -- healthcheck   # probe /api/health, exit 0 or 1
 cargo test --workspace         # needs scripts/dev.sh (tests use the dev Postgres and Garage)
 UPDATE_OPENAPI=1 cargo test    # regenerate openapi.json after changing the API
 cargo sqlx prepare --workspace -- --all-targets   # refresh .sqlx/ after changing a query
-sqlx database reset -y -f --source crates/core/migrations   # after editing the migration (rewritten in place until 1.0.0)
+sqlx database reset -y -f --source crates/core/migrations   # start the dev database over (released migrations are never edited: add one)
 scripts/ci.sh [lint|test|wasm|deny]   # every CI check natively, or one step
 scripts/ci-docker.sh           # the real Woodpecker pipeline, in Docker (needs woodpecker-cli)
 scripts/install-hooks.sh       # run scripts/ci.sh before every push (bypass: git push --no-verify)
-scripts/release.sh --dry-run   # the next version and its changelog (releases: see CONTRIBUTING.md)
-GITEA_TOKEN=... scripts/release-local.sh   # the publish step in the CI image, without publishing
+scripts/release.sh --dry-run   # the next version and its changelog
+GITEA_TOKEN=... scripts/release-local.sh   # the npm step in the CI image, without publishing
 cargo fmt --all                # fix formatting
 ```
 
-Trying it as a user (the released image, a WebDAV drive): [try/](try/README.md).
 
 Dev explorers: database (pgweb, no login) http://localhost:8081, S3 (garage-webui) http://localhost:3909, emails (Mailpit) http://localhost:8025 (SMTP on `localhost:1025`).
 
 Start over: `rm -rf data/ .env`, then `scripts/dev.sh`.
 
-CI runs in `git.pband.ch/theca/ci-rust`, built from `ci/Dockerfile` and pushed by `scripts/ci-image.sh` (after `docker login git.pband.ch`). Bumping Rust: update `rust-toolchain.toml`, run `scripts/ci-image.sh`, then update the image tag in `.woodpecker/ci.yaml`.
+CI runs in `git.pband.ch/theca/ci-rust`, built from `ci/Dockerfile` and pushed by `scripts/ci-image.sh` (after `docker login git.pband.ch`). Bumping Rust: update `rust-toolchain.toml`, run `scripts/ci-image.sh`, then update the image tag in `.woodpecker/*.yaml`.
 
-Releases: `scripts/release.sh` on `dev`, then a merge into `prod` publishes the server image (`git.pband.ch/theca/core`, amd64 and arm64), the crates and `@theca/client` on the Gitea registries, and the Gitea release (see the release process in CONTRIBUTING.md).
+Releases: `scripts/release.sh` on `dev` (`scripts/release.sh 1.0.0` for that version) merges `dev` into `prod` as the commit `X.Y.Z`, tags it, and writes the upgrade test's dump (`scripts/upgrade-dump.sh`). Pushing the tag (`git push origin prod dev X.Y.Z`) publishes: the `core` image (`git.pband.ch/theca/core`, amd64 and arm64, for the web app's dev and tests), `@theca/client` on the Gitea npm registry, the Gitea release with `openapi.json`, then `prod` mirrored to GitHub. Release candidates (`X.Y.Z-rc`, `rc`) come from `dev`. Released migrations are never edited: CI refuses it.
 
 License: AGPL-3.0.
