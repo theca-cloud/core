@@ -1,6 +1,6 @@
 # Configuration
 
-How to configure a Theca server (`theca-server`). Design and reasons: [decisions](https://git.pband.ch/theca/docs) (Configuration).
+How to configure a Theca server (`theca-server`). Its environment variables and instance settings are also the configuration reference of the CE's operator documentation ([OPERATING.md](https://github.com/theca-cloud/ce/blob/main/OPERATING.md)), copied from here at each CE release: they're written for an operator.
 
 Two kinds of configuration:
 
@@ -28,7 +28,7 @@ A test (`tests/configuration.rs`) fails if a variable or a setting read by the c
 
 ## Instance settings
 
-Changed through the admin API (`PATCH /api/v1/admin/settings`), which validates them and applies them at once, without a restart. Stored as strings in the `setting` table and typed by the server. A missing key takes its default; an invalid value is refused by the API (and stops the server at startup if written to the database by hand); an unknown key is logged as a warning.
+Changed in the web app's **Administration → Settings**, or through the admin API (`PATCH /api/v1/admin/settings`), which validates them and applies them at once, without a restart. Stored as strings in the `setting` table and typed by the server. A missing key takes its default; an invalid value is refused by the API (and stops the server at startup if written to the database by hand); an unknown key is logged as a warning.
 
 | Key | Default | Description |
 |---|---|---|
@@ -88,7 +88,7 @@ Storage backends are rows of the `storage` table (created by the setup wizard). 
 </CORSConfiguration>
 ```
 
-Without it, WebDAV and the CLI work (they don't run in a browser) but the web app's uploads and downloads fail. The CE's Garage example sets it up (`ce/examples/s3-garage/`). The filesystem backend needs nothing: its URLs are the server's own.
+Without it, WebDAV works (it doesn't run in a browser) but the web app's uploads and downloads fail. The CE's Garage example sets it up (`ce/examples/s3-garage/`). The filesystem backend needs nothing: its URLs are the server's own.
 
 ## WebDAV
 

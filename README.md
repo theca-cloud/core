@@ -1,5 +1,7 @@
 # Theca core
 
+**Looking for Theca itself?** It's a self-hosted cloud storage: run it from [theca-cloud/ce](https://github.com/theca-cloud/ce) (the `thecacloud/ce` image), or [try the demo](https://demo.theca.rs). This repository is for developers.
+
 The Theca server and the Rust libraries shared by its clients:
 
 - `common`: API types, chunking, hashing, name rules (native + WASM).
