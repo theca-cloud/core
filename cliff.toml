@@ -1,8 +1,8 @@
-# git-cliff: the changelog and the next version, from Conventional Commits
-# (docs/CONTRIBUTING.md). Used by scripts/release.sh.
+# git-cliff: the changelog and the next version from the Conventional Commits
+# squashed into dev. Used by scripts/release.sh and the release candidates.
 
 [changelog]
-header = "# Changelog\n\nEvery release of `core`: the server image, the crates, the browser package, `openapi.json`.\n"
+header = "# Changelog\n\nEvery release of `core`: the server, `@theca/client`, `openapi.json`.\n"
 body = """
 ## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
 {% for group, commits in commits | group_by(attribute="group") %}
@@ -17,9 +17,9 @@ trim = true
 [git]
 conventional_commits = true
 filter_unconventional = true
-tag_pattern = "v[0-9]*"
+# 0.x's tags were vX.Y.Z, 1.0.0's on are X.Y.Z: both bound a release.
+tag_pattern = "^v?[0-9]+\\.[0-9]+\\.[0-9]+$"
 commit_parsers = [
-    { message = "^chore\\(release\\)", skip = true },
     { message = "^docs\\(roadmap\\)", skip = true },
     { message = "^feat", group = "<!-- 0 -->Features" },
     { message = "^fix", group = "<!-- 1 -->Fixes" },
@@ -27,11 +27,11 @@ commit_parsers = [
     { message = "^refactor", group = "<!-- 3 -->Refactoring" },
     { message = "^docs", group = "<!-- 4 -->Documentation" },
     { message = "^(build|ci)", group = "<!-- 5 -->Build and CI" },
-    { message = "^(test|chore)", skip = true },
+    { message = "^(test|chore|style)", skip = true },
 ]
 
 [bump]
-# 0.x (beta): features and breaking changes bump the minor version.
+# Before 1.0.0, features and breaking changes bump the minor version: 0.x never
+# reaches 1.0.0 by itself (scripts/release.sh 1.0.0 does). From 1.0.0, semver.
 features_always_bump_minor = true
 breaking_always_bump_major = false
-initial_tag = "v0.1.0"

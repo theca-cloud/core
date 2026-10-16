@@ -1,6 +1,6 @@
 # Changelog
 
-Every release of `core`: the server image, the crates, the browser package, `openapi.json`.
+Every release of `core`: the server, `@theca/client`, `openapi.json`.
 ## [0.19.0] - 2026-10-12
 
 ### Features

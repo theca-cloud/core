@@ -4,9 +4,7 @@
 //! that sends only new chunks, a cancelled upload resumed. On the filesystem
 //! and on S3 (Garage).
 
-use std::net::TcpListener;
-use std::process::{Child, Command, Stdio};
-use std::time::Duration;
+include!("common/server.rs");
 
 use futures::TryStreamExt;
 use serde_json::json;
@@ -18,69 +16,14 @@ use theca_client::{
 use theca_common::api;
 use theca_common::name::Name;
 
-/// The server process, killed when dropped.
-struct Server {
-    child: Child,
-    url: String,
-    _dir: tempfile::TempDir,
-}
-
-impl Drop for Server {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-/// Starts `theca-server` on the test's database, with fresh keys, an open
-/// setup and a free port, and waits until it's healthy.
+/// Starts `theca-server` on the test's database, with an open setup.
 async fn start(pool: &PgPool) -> Server {
-    theca_core::install_crypto_provider();
-    dotenvy::dotenv().ok();
-    let base = std::env::var("DATABASE_URL").expect("DATABASE_URL: run scripts/dev.sh");
     let database = pool
         .connect_options()
         .get_database()
         .expect("a test database")
         .to_owned();
-    let url = format!("{}/{database}", base.rsplit_once('/').unwrap().0);
-    let dir = tempfile::tempdir().unwrap();
-    let file = |name: &str, content: &str| {
-        let path = dir.path().join(name);
-        std::fs::write(&path, content).unwrap();
-        path
-    };
-    let port = TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-    let public = format!("http://127.0.0.1:{port}");
-    let child = Command::new(env!("CARGO_BIN_EXE_theca-server"))
-        .env("DATABASE_URL__FILE", file("database_url", &url))
-        .env("SERVER_KEY__FILE", file("server_key", &"1".repeat(64)))
-        .env("DATA_KEY__FILE", file("data_key", &"2".repeat(64)))
-        .env("PUBLIC_URL", &public)
-        .env("LISTEN_ADDR", format!("127.0.0.1:{port}"))
-        .env("SETUP_OPEN", "true")
-        .env("RUST_LOG", "warn")
-        .stdout(Stdio::null())
-        .spawn()
-        .expect("the server binary");
-    let server = Server {
-        child,
-        url: public,
-        _dir: dir,
-    };
-    for _ in 0..300 {
-        if let Ok(response) = reqwest::get(format!("{}/api/health", server.url)).await
-            && response.status().is_success()
-        {
-            return server;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    panic!("the server didn't become healthy");
+    start_server(&database_url(&database), tempfile::tempdir().unwrap(), true).await
 }
 
 /// Deterministic pseudo-random bytes (incompressible, distinct chunks).

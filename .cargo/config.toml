@@ -1,6 +1,0 @@
-# The Gitea Cargo registry the crates are published to (scripts/release.sh,
-# the release pipeline). Token: CARGO_REGISTRIES_GITEA_TOKEN="Bearer <token>".
-[registries.gitea]
-index = "sparse+https://git.pband.ch/api/packages/theca/cargo/"
-# The packages are private: Cargo sends the token only with a provider set.
-credential-provider = "cargo:token"
