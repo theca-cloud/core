@@ -95,6 +95,7 @@ impl World {
             account: Uuid::nil(),
             org: Uuid::nil(),
             cookies: String::new(),
+            bearer: None,
             puts: 0,
         }
     }

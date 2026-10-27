@@ -292,6 +292,56 @@ async fn reads_and_writes(pool: PgPool) {
 /// update the current version (a touch, no new version); a restored version
 /// shows its own; a copy keeps it.
 #[sqlx::test]
+async fn writes_dedup_across_what_the_password_can_access(pool: PgPool) {
+    // The server chunks WebDAV writes through the same lookup and commit
+    // check as the engine: the dedup scope follows the app password's access.
+    let w = fs_world(pool).await;
+    let alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    let photos = alice.create_library("Photos").await;
+    let chunks = || async {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM chunk")
+            .fetch_one(&w.pool)
+            .await
+            .unwrap()
+    };
+    let account = w.dav(1, json!({})).await;
+    let big = data(3 * MIB, 30);
+    assert_eq!(
+        account.put("/one/Docs/big.bin", &big).await,
+        StatusCode::CREATED
+    );
+    let before = chunks().await;
+    assert_eq!(
+        account.put("/one/Photos/big.bin", &big).await,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        chunks().await,
+        before,
+        "Photos reuses Docs' chunks: no new chunk"
+    );
+
+    // Narrowed to Photos, it can't access Docs: what only Docs holds is stored again.
+    let only_in_docs = data(3 * MIB, 31);
+    assert_eq!(
+        account.put("/one/Docs/other.bin", &only_in_docs).await,
+        StatusCode::CREATED
+    );
+    let photos_only = w.dav(1, json!({ "library": photos.id })).await;
+    let before = chunks().await;
+    assert_eq!(
+        photos_only.put("/other.bin", &only_in_docs).await,
+        StatusCode::CREATED
+    );
+    assert!(
+        chunks().await > before,
+        "narrowed to Photos: no reuse of Docs"
+    );
+    let _ = docs;
+}
+
+#[sqlx::test]
 async fn modification_times(pool: PgPool) {
     let w = fs_world(pool).await;
     let alice = w.as_user(1).await;

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT v.pk, v.parent_version, v.uuid AS id, p.uuid AS \"parent?\", a.email AS \"author?\",\n                  v.created_at, v.modified_at, v.message, v.size,\n                  v.pk = n.current_version AS \"current!\"\n           FROM version v\n           JOIN node n ON n.pk = v.file\n           LEFT JOIN version p ON p.pk = v.parent_version\n           LEFT JOIN \"user\" u ON u.pk = v.author\n           LEFT JOIN account a ON a.pk = u.account\n           WHERE v.file = $1 ORDER BY v.pk",
+  "query": "SELECT v.pk, v.parent_version, v.uuid AS id, p.uuid AS \"parent?\", a.email AS \"author?\",\n                  v.created_at, v.modified_at, v.message, v.size,\n                  v.pk = n.current_version AS \"current!\"\n           FROM version v\n           JOIN node n ON n.pk = v.file\n           LEFT JOIN version p ON p.pk = v.parent_version\n           LEFT JOIN account a ON a.pk = v.author\n           WHERE v.file = $1 ORDER BY v.pk",
   "describe": {
     "columns": [
       {
@@ -72,5 +72,5 @@
       null
     ]
   },
-  "hash": "cfc7b366ca68b94b72c3b4143ca19e0b8fe67d70c6778e6326f66909b6a54c57"
+  "hash": "40c1c4f51a4f588342500cc7bd905638fe958e3e2e7e25d6463412cbeb024851"
 }

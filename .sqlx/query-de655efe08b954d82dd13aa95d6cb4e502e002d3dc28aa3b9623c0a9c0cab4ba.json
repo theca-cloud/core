@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.pk, c.uuid, c.ready FROM chunk c\n           WHERE c.uuid = ANY($2) AND c.organization = $3\n             AND (c.library = $1 OR EXISTS (\n                     SELECT 1 FROM chunk_in_version civ\n                     JOIN version v ON v.pk = civ.version\n                     JOIN node n ON n.pk = v.file\n                     WHERE civ.chunk = c.pk\n                       AND (n.library IN (SELECT library FROM dedup_scope($1, $5)) OR v.file = $4)))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "ready",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "UuidArray",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "de655efe08b954d82dd13aa95d6cb4e502e002d3dc28aa3b9623c0a9c0cab4ba"
+}

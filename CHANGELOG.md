@@ -1,6 +1,20 @@
 # Changelog
 
 Every release of `core`: the server, `@theca/client`, `openapi.json`.
+## [1.1.0] - 2026-10-27
+
+### Features
+
+- Deduplicate across every library the uploader can access
+
+### Fixes
+
+- **deps**: The security advisories published since 1.0.0
+
+### Documentation
+
+- The README sends users to the CE and its demo; CONFIGURATION.md reads for operators
+
 ## [1.0.0] - 2026-10-16
 
 ### Features

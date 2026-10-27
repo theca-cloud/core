@@ -585,6 +585,7 @@ async fn the_instance_to_anyone(pool: PgPool) {
         account: Uuid::nil(),
         org: Uuid::nil(),
         cookies: String::new(),
+        bearer: None,
         puts: 0,
     };
     let instance: api::Instance = anyone.get("/api/v1/instance").await.unwrap();

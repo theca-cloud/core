@@ -166,6 +166,7 @@ impl World {
             account: me.account,
             org: self.organizations[if n == 3 { 1 } else { 0 }],
             cookies: cookies.join("; "),
+            bearer: None,
             puts: 0,
         }
     }
@@ -221,13 +222,16 @@ impl World {
     }
 }
 
-/// A test client logged in as one account (session cookies). Counts uploads (`puts`).
+/// A test client logged in as one account (session cookies, or an app
+/// password: `with_app_password`). Counts uploads (`puts`).
 struct Client {
     app: Router,
     account: Uuid,
     /// The organization its libraries are created in.
     org: Uuid,
     cookies: String,
+    /// An app password, sent instead of the cookies.
+    bearer: Option<String>,
     puts: usize,
 }
 
@@ -269,7 +273,10 @@ impl Client {
             .uri(path)
             .header("content-type", "application/json");
         if auth {
-            request = request.header("cookie", &self.cookies);
+            request = match &self.bearer {
+                Some(password) => request.header("authorization", format!("Bearer {password}")),
+                None => request.header("cookie", &self.cookies),
+            };
         }
         let response = self
             .app
@@ -420,6 +427,25 @@ impl Client {
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
         self.blob("PUT", &url.url, &headers, Some(body)).await
+    }
+
+    /// The same account through a new app password (`api::CreateAppPassword`'s
+    /// scope: `organization`, `library`, `read_only`).
+    async fn with_app_password(&self, scope: Value) -> Client {
+        let mut create = json!({ "name": "test" });
+        create.as_object_mut().unwrap().extend(scope.as_object().unwrap().clone());
+        let created: api::NewAppPassword = self
+            .json("POST", "/api/v1/auth/app-passwords", &create)
+            .await
+            .unwrap();
+        Client {
+            app: self.app.clone(),
+            account: self.account,
+            org: self.org,
+            cookies: String::new(),
+            bearer: Some(created.password),
+            puts: 0,
+        }
     }
 
     async fn create_library(&self, name: &str) -> api::Library {
