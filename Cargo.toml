@@ -15,7 +15,8 @@ publish = false
 theca-common = { path = "crates/common" }
 theca-client = { path = "crates/client" }
 argon2 = "0.6"
-askama = "0.16"
+# Without "config" (an askama.toml we don't have): it pulls basic-toml, unmaintained (RUSTSEC-2026-0374).
+askama = { version = "0.16", default-features = false, features = ["derive", "std", "urlencode"] }
 # WebDAV over our own filesystem trait (no local or in-memory filesystem).
 dav-server = { version = "0.11", default-features = false }
 chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc"] }

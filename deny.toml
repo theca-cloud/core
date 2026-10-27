@@ -10,6 +10,10 @@ ignore = [
     # Marvin (RSA decryption timing, private keys): `rsa` comes with openidconnect,
     # which only verifies ID token signatures with providers' public keys.
     { id = "RUSTSEC-2023-0071", reason = "rsa only verifies signatures (public keys)" },
+    # Constant-time leaks on secret integers in crypto-bigint < 0.7.6: 0.5 comes with
+    # openidconnect 4.0.1 (p256/p384 0.13, its latest), used only to verify ID token
+    # signatures, with public keys. Drop once openidconnect moves to elliptic-curve 0.14.
+    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint only verifies signatures (public keys)" },
 ]
 
 [licenses]
