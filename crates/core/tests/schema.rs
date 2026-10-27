@@ -225,20 +225,33 @@ async fn personal_organizations(pool: PgPool) {
 
 #[sqlx::test]
 async fn a_leaving_author_keeps_their_versions(pool: PgPool) {
+    // The author is the account (sprint 06): leaving the organization deletes
+    // the membership, not the author; deleting the account clears it.
     fixture(&pool).await;
+    let author = || async {
+        sqlx::query_scalar::<_, Option<i64>>("SELECT author FROM version WHERE pk = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
     sqlx::raw_sql(r#"UPDATE version SET author = 2 WHERE pk = 1; DELETE FROM "user" WHERE pk = 2"#)
         .execute(&pool)
         .await
         .unwrap();
-    let author: Option<i64> = sqlx::query_scalar("SELECT author FROM version WHERE pk = 1")
-        .fetch_one(&pool)
+    assert_eq!(
+        author().await,
+        Some(2),
+        "the membership gone, the author stays"
+    );
+    sqlx::raw_sql("DELETE FROM account WHERE pk = 2")
+        .execute(&pool)
         .await
         .unwrap();
-    assert_eq!(author, None);
+    assert_eq!(author().await, None, "the account gone, the author goes");
     assert_refused(
         &pool,
         "version_author",
-        "UPDATE version SET author = 3 WHERE pk = 1",
+        "UPDATE version SET author = 999 WHERE pk = 1",
     )
     .await;
 }

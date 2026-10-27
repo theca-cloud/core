@@ -41,6 +41,10 @@ on_both_backends!(
     url_lifetime_setting,
     presigned_urls_cannot_be_tampered_with,
     namespaces_decide_who_dedups_with_whom,
+    dedup_follows_what_the_uploader_can_access,
+    no_dedup_with_what_the_uploader_cannot_access,
+    narrowed_app_passwords_dedup_within_their_scope,
+    authors_survive_leaving_and_go_with_their_account,
     pending_chunks_only_match_within_their_library,
     dedup_never_crosses_storages_or_organizations,
     members_only,
@@ -536,11 +540,13 @@ async fn presigned_urls_cannot_be_tampered_with(kind: Kind, pool: PgPool) {
 // Dedup scope.
 
 async fn namespaces_decide_who_dedups_with_whom(kind: Kind, pool: PgPool) {
+    // Bob can't access a: only the group lets his library b dedup with it.
     let w = world(kind, pool).await;
     let mut alice = w.as_user(1).await;
+    let mut bob = w.as_user(2).await;
     let a = alice.create_library("a").await;
-    let b = alice.create_library("b").await;
-    let outside = alice.create_library("outside").await;
+    let b = bob.create_library("b").await;
+    let outside = bob.create_library("outside").await;
     let ns = w.namespace(&[a.id, b.id]).await;
     let content = data(2 * MIB, 18);
     alice
@@ -548,22 +554,28 @@ async fn namespaces_decide_who_dedups_with_whom(kind: Kind, pool: PgPool) {
         .await
         .unwrap();
 
-    let before = alice.puts;
-    alice
-        .upload(&b, new_file(&b, "f.bin"), &content)
+    let before = bob.puts;
+    bob.upload(&b, new_file(&b, "f.bin"), &content)
         .await
         .unwrap();
-    assert_eq!(alice.puts, before, "b dedups with a (common namespace)");
+    assert_eq!(bob.puts, before, "b dedups with a (common namespace)");
 
-    let before = alice.puts;
+    let only_in_a = data(2 * MIB, 23);
     alice
-        .upload(&outside, new_file(&outside, "f.bin"), &content)
+        .upload(&a, new_file(&a, "h.bin"), &only_in_a)
         .await
         .unwrap();
-    assert!(alice.puts > before, "outside sees neither a nor b");
+    let before = bob.puts;
+    bob.upload(&outside, new_file(&outside, "h.bin"), &only_in_a)
+        .await
+        .unwrap();
+    assert!(
+        bob.puts > before,
+        "outside isn't in the group, and bob can't access a"
+    );
 
     // Removing the namespace: b's file is intact, new uploads don't see a anymore.
-    let b_file = alice
+    let b_file = bob
         .get::<Vec<api::Node>>(&format!("/api/v1/nodes/{}/children", b.root))
         .await
         .unwrap()[0]
@@ -571,7 +583,7 @@ async fn namespaces_decide_who_dedups_with_whom(kind: Kind, pool: PgPool) {
     w.sql(&format!("DELETE FROM library_namespace WHERE namespace = (SELECT pk FROM namespace WHERE uuid = '{ns}')"))
         .await;
     assert_eq!(
-        alice.download(b_file).await.unwrap(),
+        bob.download(b_file).await.unwrap(),
         content,
         "b keeps the chunks it borrowed"
     );
@@ -580,15 +592,136 @@ async fn namespaces_decide_who_dedups_with_whom(kind: Kind, pool: PgPool) {
         .upload(&a, new_file(&a, "g.bin"), &only_in_a)
         .await
         .unwrap();
-    let before = alice.puts;
-    alice
-        .upload(&b, new_file(&b, "g.bin"), &only_in_a)
+    let before = bob.puts;
+    bob.upload(&b, new_file(&b, "g.bin"), &only_in_a)
         .await
         .unwrap();
     assert!(
-        alice.puts > before,
+        bob.puts > before,
         "after the removal, b uploads blocks only present in a"
     );
+}
+
+async fn dedup_follows_what_the_uploader_can_access(kind: Kind, pool: PgPool) {
+    // No group anywhere: Alice's libraries dedup together because she can
+    // access them all (ADR 0002), a trashed one included.
+    let w = world(kind, pool).await;
+    let mut alice = w.as_user(1).await;
+    let a = alice.create_library("a").await;
+    let b = alice.create_library("b").await;
+    let content = data(2 * MIB, 24);
+    alice
+        .upload(&a, new_file(&a, "f.bin"), &content)
+        .await
+        .unwrap();
+    let before = alice.puts;
+    alice
+        .upload(&b, new_file(&b, "f.bin"), &content)
+        .await
+        .unwrap();
+    assert_eq!(alice.puts, before, "b dedups with a: alice can access both");
+
+    let trashed = data(2 * MIB, 25);
+    let in_a = alice
+        .upload(&a, new_file(&a, "t.bin"), &trashed)
+        .await
+        .unwrap()
+        .file;
+    let ids = alice.file_chunks(in_a).await;
+    w.sql(&format!(
+        "UPDATE library SET deleted_at = now() WHERE uuid = '{}'",
+        a.id
+    ))
+    .await;
+    let before = alice.puts;
+    alice
+        .upload(&b, new_file(&b, "t.bin"), &trashed)
+        .await
+        .unwrap();
+    assert_eq!(
+        alice.puts, before,
+        "a trashed library still counts: alice can restore and read it"
+    );
+    // The commit check agrees: the trashed library's chunk IDs are reusable.
+    let commit = json!({ "library": b.id, "parent": b.root, "name": "by-id.bin", "chunks": ids });
+    alice.commit(&commit).await.unwrap();
+}
+
+async fn no_dedup_with_what_the_uploader_cannot_access(kind: Kind, pool: PgPool) {
+    let w = world(kind, pool).await;
+    let mut alice = w.as_user(1).await;
+    let mut bob = w.as_user(2).await;
+    let a = alice.create_library("a").await;
+    let b = bob.create_library("b").await;
+    let content = data(2 * MIB, 26);
+    alice
+        .upload(&a, new_file(&a, "f.bin"), &content)
+        .await
+        .unwrap();
+    bob.upload(&b, new_file(&b, "f.bin"), &content)
+        .await
+        .unwrap();
+    assert!(bob.puts > 0, "bob can't access a: no oracle on it");
+
+    // Read access is enough: bob could copy a's files by hand.
+    w.add_member(a.id, 2, "read").await;
+    let c = bob.create_library("c").await;
+    let before = bob.puts;
+    bob.upload(&c, new_file(&c, "f.bin"), &content)
+        .await
+        .unwrap();
+    assert_eq!(bob.puts, before, "bob reads a now: c dedups with it");
+}
+
+async fn narrowed_app_passwords_dedup_within_their_scope(kind: Kind, pool: PgPool) {
+    let w = world(kind, pool).await;
+    let mut alice = w.as_user(1).await;
+    let a = alice.create_library("a").await;
+    let b = alice.create_library("b").await;
+    let c = alice.create_library("c").await;
+    let content = data(2 * MIB, 27);
+    alice
+        .upload(&a, new_file(&a, "f.bin"), &content)
+        .await
+        .unwrap();
+
+    let in_a = alice
+        .get::<Vec<api::Node>>(&format!("/api/v1/nodes/{}/children", a.root))
+        .await
+        .unwrap()[0]
+        .id;
+    let ids = alice.file_chunks(in_a).await;
+    let mut only_b = alice.with_app_password(json!({ "library": b.id })).await;
+    only_b
+        .upload(&b, new_file(&b, "f.bin"), &content)
+        .await
+        .unwrap();
+    assert!(
+        only_b.puts > 0,
+        "narrowed to b, it can't access a: its account's access doesn't count"
+    );
+    let commit = json!({ "library": b.id, "parent": b.root, "name": "by-id.bin", "chunks": ids });
+    let (status, error) = only_b.commit(&commit).await.unwrap_err();
+    assert_eq!(
+        (status, error["code"].as_str()),
+        (StatusCode::FORBIDDEN, Some("chunk_not_allowed")),
+        "nor reuse a's chunk IDs at commit"
+    );
+
+    let org = w.organizations[0];
+    let mut whole_org = alice
+        .with_app_password(json!({ "organization": org }))
+        .await;
+    whole_org
+        .upload(&c, new_file(&c, "f.bin"), &content)
+        .await
+        .unwrap();
+    assert_eq!(
+        whole_org.puts, 0,
+        "narrowed to the organization: c dedups with a"
+    );
+    let commit = json!({ "library": c.id, "parent": c.root, "name": "by-id.bin", "chunks": ids });
+    whole_org.commit(&commit).await.unwrap();
 }
 
 async fn pending_chunks_only_match_within_their_library(kind: Kind, pool: PgPool) {
@@ -698,11 +831,61 @@ async fn members_only(kind: Kind, pool: PgPool) {
     );
 }
 
+async fn authors_survive_leaving_and_go_with_their_account(kind: Kind, pool: PgPool) {
+    // A version's author is the account, not the membership (sprint 06).
+    let w = world(kind, pool).await;
+    let alice = w.as_user(1).await;
+    let mut bob = w.as_user(2).await;
+    let a = alice.create_library("a").await;
+    w.add_member(a.id, 2, "write").await;
+    let file = bob
+        .upload(&a, new_file(&a, "f.bin"), &data(MIB, 28))
+        .await
+        .unwrap()
+        .file;
+    let author = || async {
+        let versions: Vec<api::Version> = alice
+            .get(&format!("/api/v1/files/{file}/versions"))
+            .await
+            .unwrap();
+        versions[0].author.clone()
+    };
+    assert_eq!(author().await.as_deref(), Some("b@x.ch"));
+
+    let (org, user) = (w.organizations[0], w.users[1]);
+    let (status, _) = alice
+        .call(
+            "DELETE",
+            &format!("/api/v1/organizations/{org}/members/{user}"),
+            None,
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        author().await.as_deref(),
+        Some("b@x.ch"),
+        "the author survives leaving the organization"
+    );
+
+    let (status, _) = bob
+        .call(
+            "DELETE",
+            "/api/v1/me",
+            Some(json!({ "password": PASSWORD }).to_string().into_bytes()),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "bob deletes his account");
+    assert_eq!(author().await, None, "and with it, the trace");
+}
+
 async fn commit_refuses_chunks_outside_the_dedup_scope(kind: Kind, pool: PgPool) {
     let w = world(kind, pool).await;
     let mut alice = w.as_user(1).await;
+    let bob = w.as_user(2).await;
     let secret = alice.create_library("secret").await;
-    let other = alice.create_library("other").await;
+    let other = bob.create_library("other").await;
     let anomalies = Anomalies::capture();
     let file = alice
         .upload(&secret, new_file(&secret, "s.bin"), &data(MIB, 22))
@@ -712,12 +895,16 @@ async fn commit_refuses_chunks_outside_the_dedup_scope(kind: Kind, pool: PgPool)
     let stolen = alice.file_chunks(file).await;
     let commit =
         json!({ "library": other.id, "parent": other.root, "name": "x.bin", "chunks": stolen });
-    let (status, error) = alice.commit(&commit).await.unwrap_err();
+    let (status, error) = bob.commit(&commit).await.unwrap_err();
     assert_eq!(
         (status, error["code"].as_str()),
         (StatusCode::FORBIDDEN, Some("chunk_not_allowed"))
     );
-    assert!(anomalies.logged("commit_chunk_not_allowed", alice.account));
+    assert!(anomalies.logged("commit_chunk_not_allowed", bob.account));
+
+    // The same scope as the lookup's: once bob reads secret, he may reuse them.
+    w.add_member(secret.id, 2, "read").await;
+    bob.commit(&commit).await.unwrap();
 }
 
 async fn commit_errors(kind: Kind, pool: PgPool) {

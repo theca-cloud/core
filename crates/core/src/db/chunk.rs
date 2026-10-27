@@ -16,8 +16,10 @@ use super::library::Access;
 /// A hash matches a chunk of the library's organization, on the library's
 /// storage, not tombstoned, and either:
 /// - uploaded into this library (pending or announced, even if not committed yet), or
-/// - ready and referenced by a version of this library or of a library sharing
-///   a namespace with it (computed now, so namespace changes apply immediately).
+/// - ready and referenced by a version of a library in the dedup scope
+///   (`dedup_scope`: this library, the libraries sharing a namespace with it,
+///   and every library the credential can access in the organization, trash
+///   included; computed now, so changes apply immediately).
 ///
 /// Ready chunks win over pending ones.
 pub async fn lookup(
@@ -35,14 +37,7 @@ pub async fn lookup(
 
     let mut tx = pool.begin().await?;
     let found = sqlx::query!(
-        r#"WITH scope AS (
-               SELECT $1::bigint AS library
-               UNION
-               SELECT other.library FROM library_namespace mine
-               JOIN library_namespace other ON other.namespace = mine.namespace
-               WHERE mine.library = $1
-           )
-           SELECT DISTINCT ON (c.hash) c.pk, c.uuid, c.hash, c.ready
+        r#"SELECT DISTINCT ON (c.hash) c.pk, c.uuid, c.hash, c.ready
            FROM chunk c
            WHERE c.organization = $2 AND c.storage = $3 AND c.hash = ANY($4)
              AND c.deleting_at IS NULL
@@ -50,12 +45,13 @@ pub async fn lookup(
                      SELECT 1 FROM chunk_in_version civ
                      JOIN version v ON v.pk = civ.version
                      JOIN node n ON n.pk = v.file
-                     WHERE civ.chunk = c.pk AND n.library IN (SELECT library FROM scope))))
+                     WHERE civ.chunk = c.pk AND n.library IN (SELECT library FROM dedup_scope($1, $5)))))
            ORDER BY c.hash, c.ready DESC, c.pk"#,
         access.library,
         access.organization,
         access.storage,
-        &hashes
+        &hashes,
+        access.token
     )
     .fetch_all(&mut *tx)
     .await?;

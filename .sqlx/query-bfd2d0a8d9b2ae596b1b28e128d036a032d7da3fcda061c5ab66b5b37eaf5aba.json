@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT n.pk, n.parent, n.is_file, n.current_version, l.pk AS library, l.owner, l.storage,\n                  a.\"user\" AS \"user!\", a.can_write AS \"can_write!\"\n           FROM node n\n           JOIN library l ON l.pk = n.library\n           JOIN library_access($1) a ON a.library = l.pk\n           WHERE n.uuid = $2 AND n.deleted_at IS NOT NULL",
+  "query": "SELECT n.pk, n.parent, n.is_file, n.current_version, l.pk AS library, l.owner, l.storage,\n                  a.can_write AS \"can_write!\"\n           FROM node n\n           JOIN library l ON l.pk = n.library\n           JOIN library_access($1) a ON a.library = l.pk\n           WHERE n.uuid = $2 AND node_reachable(n.pk)",
   "describe": {
     "columns": [
       {
@@ -40,11 +40,6 @@
       },
       {
         "ordinal": 7,
-        "name": "user!",
-        "type_info": "Int8"
-      },
-      {
-        "ordinal": 8,
         "name": "can_write!",
         "type_info": "Bool"
       }
@@ -63,9 +58,8 @@
       false,
       false,
       false,
-      null,
       null
     ]
   },
-  "hash": "c556c6a066cdac05c03e006ccbf2f47ff818f26cadb4719c6dc42a6a07c8bcbc"
+  "hash": "bfd2d0a8d9b2ae596b1b28e128d036a032d7da3fcda061c5ab66b5b37eaf5aba"
 }

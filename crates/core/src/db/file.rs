@@ -116,32 +116,27 @@ pub async fn commit(
         }
     };
 
-    // Chunk IDs must be in the library's dedup scope, or come from a version of
-    // this file (unchanged chunks, restores). Code-checked: the database only
+    // Chunk IDs must be in the library's dedup scope (`dedup_scope`, the same
+    // as the lookup's), or come from a version of this file (unchanged chunks,
+    // restores). Code-checked: the database only
     // checks organization and readiness.
     let mut unique: Vec<Uuid> = chunks.to_vec();
     unique.sort();
     unique.dedup();
     let allowed = sqlx::query!(
-        r#"WITH scope AS (
-               SELECT $1::bigint AS library
-               UNION
-               SELECT other.library FROM library_namespace mine
-               JOIN library_namespace other ON other.namespace = mine.namespace
-               WHERE mine.library = $1
-           )
-           SELECT c.pk, c.uuid, c.ready FROM chunk c
+        r#"SELECT c.pk, c.uuid, c.ready FROM chunk c
            WHERE c.uuid = ANY($2) AND c.organization = $3
              AND (c.library = $1 OR EXISTS (
                      SELECT 1 FROM chunk_in_version civ
                      JOIN version v ON v.pk = civ.version
                      JOIN node n ON n.pk = v.file
                      WHERE civ.chunk = c.pk
-                       AND (n.library IN (SELECT library FROM scope) OR v.file = $4)))"#,
+                       AND (n.library IN (SELECT library FROM dedup_scope($1, $5)) OR v.file = $4)))"#,
         access.library,
         &unique,
         access.organization,
-        file_pk
+        file_pk,
+        access.token
     )
     .fetch_all(&mut **tx)
     .await?;
@@ -204,7 +199,7 @@ pub async fn commit(
         file_pk,
         base,
         message,
-        access.user,
+        access.account,
         &pks,
         modified
     )

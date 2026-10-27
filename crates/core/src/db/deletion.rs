@@ -101,9 +101,9 @@ pub async fn owned_organizations(pool: &PgPool, account: i64) -> sqlx::Result<Ve
     .await
 }
 
-/// Deletes an account: its personal organization, its memberships (its
-/// versions stay, authorless), identities, tokens, queued and sent emails,
-/// then the account. The caller checked it owns no company organization.
+/// Deletes an account: its personal organization, its memberships,
+/// identities, tokens, queued and sent emails, then the account (its versions
+/// stay, authorless: `version.author` is the account). The caller checked it owns no company organization.
 pub async fn account(db: &mut PgConnection, account: i64) -> sqlx::Result<()> {
     let personal: Option<i64> = sqlx::query_scalar!(
         "SELECT pk FROM organization WHERE personal_of = $1",

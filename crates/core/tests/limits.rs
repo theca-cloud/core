@@ -144,6 +144,7 @@ async fn emails_per_address(pool: PgPool) {
         account: Uuid::nil(),
         org: Uuid::nil(),
         cookies: String::new(),
+        bearer: None,
         puts: 0,
     };
     for _ in 0..2 {

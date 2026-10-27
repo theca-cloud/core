@@ -244,7 +244,7 @@ pub async fn add_version(
          FROM node, (SELECT size, modified_at FROM version WHERE pk = $4) c WHERE pk = $2 RETURNING pk",
         access.organization,
         dest,
-        access.user,
+        access.account,
         content
     )
     .fetch_one(&mut **tx)
@@ -323,7 +323,7 @@ pub async fn copy(
                  SELECT $1, $2, $3, size, modified_at FROM version WHERE pk = $4 RETURNING pk",
                 to.organization,
                 copy.pk,
-                to.user,
+                to.account,
                 version
             )
             .fetch_one(&mut **tx)
@@ -364,7 +364,7 @@ pub async fn trashed_access(
 ) -> sqlx::Result<Option<NodeAccess>> {
     let row = sqlx::query!(
         r#"SELECT n.pk, n.parent, n.is_file, n.current_version, l.pk AS library, l.owner, l.storage,
-                  a."user" AS "user!", a.can_write AS "can_write!"
+                  a.can_write AS "can_write!"
            FROM node n
            JOIN library l ON l.pk = n.library
            JOIN library_access($1) a ON a.library = l.pk
@@ -379,8 +379,9 @@ pub async fn trashed_access(
             library: r.library,
             organization: r.owner,
             storage: r.storage,
-            user: r.user,
+            account: who.account,
             can_write: r.can_write,
+            token: who.token,
         },
         node: r.pk,
         parent: r.parent,
@@ -511,8 +512,7 @@ pub async fn versions(pool: &PgPool, file: i64) -> sqlx::Result<Vec<api::Version
            FROM version v
            JOIN node n ON n.pk = v.file
            LEFT JOIN version p ON p.pk = v.parent_version
-           LEFT JOIN "user" u ON u.pk = v.author
-           LEFT JOIN account a ON a.pk = u.account
+           LEFT JOIN account a ON a.pk = v.author
            WHERE v.file = $1 ORDER BY v.pk"#,
         file
     )

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT l.pk, l.owner, l.storage, a.\"user\" AS \"user!\", a.can_write AS \"can_write!\"\n           FROM library l JOIN library_access($1) a ON a.library = l.pk\n           WHERE l.uuid = $2",
+  "query": "SELECT l.pk, l.owner, l.storage, a.can_write AS \"can_write!\"\n           FROM library l JOIN library_access($1) a ON a.library = l.pk\n           WHERE l.uuid = $2",
   "describe": {
     "columns": [
       {
@@ -20,11 +20,6 @@
       },
       {
         "ordinal": 3,
-        "name": "user!",
-        "type_info": "Int8"
-      },
-      {
-        "ordinal": 4,
         "name": "can_write!",
         "type_info": "Bool"
       }
@@ -39,9 +34,8 @@
       false,
       false,
       false,
-      null,
       null
     ]
   },
-  "hash": "669fd278dd9a0525ac9967dcd4bdcf3f26c0dfa5dfafc27bbdb17cef42d168e9"
+  "hash": "0fdfd5ae86111ca730ef4eb5c95d0f312b73cfb2371837e6d3bbd19994596a17"
 }

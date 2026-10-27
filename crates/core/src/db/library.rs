@@ -14,9 +14,12 @@ pub struct Access {
     pub library: i64,
     pub organization: i64,
     pub storage: i64,
-    /// The account's membership in the library's organization.
-    pub user: i64,
+    /// The account acting (a version's author).
+    pub account: i64,
     pub can_write: bool,
+    /// The credential this access was computed for: what it can access widens
+    /// the dedup scope (`dedup_scope`).
+    pub token: i64,
 }
 
 /// The account's access to a library, if it's a member.
@@ -26,7 +29,7 @@ pub async fn access(
     library: Uuid,
 ) -> sqlx::Result<Option<Access>> {
     let row = sqlx::query!(
-        r#"SELECT l.pk, l.owner, l.storage, a."user" AS "user!", a.can_write AS "can_write!"
+        r#"SELECT l.pk, l.owner, l.storage, a.can_write AS "can_write!"
            FROM library l JOIN library_access($1) a ON a.library = l.pk
            WHERE l.uuid = $2"#,
         who.token,
@@ -38,8 +41,9 @@ pub async fn access(
         library: r.pk,
         organization: r.owner,
         storage: r.storage,
-        user: r.user,
+        account: who.account,
         can_write: r.can_write,
+        token: who.token,
     }))
 }
 
@@ -62,7 +66,7 @@ pub async fn node_access(
 ) -> sqlx::Result<Option<NodeAccess>> {
     let row = sqlx::query!(
         r#"SELECT n.pk, n.parent, n.is_file, n.current_version, l.pk AS library, l.owner, l.storage,
-                  a."user" AS "user!", a.can_write AS "can_write!"
+                  a.can_write AS "can_write!"
            FROM node n
            JOIN library l ON l.pk = n.library
            JOIN library_access($1) a ON a.library = l.pk
@@ -77,8 +81,9 @@ pub async fn node_access(
             library: r.library,
             organization: r.owner,
             storage: r.storage,
-            user: r.user,
+            account: who.account,
             can_write: r.can_write,
+            token: who.token,
         },
         node: r.pk,
         parent: r.parent,
@@ -266,7 +271,7 @@ pub async fn trashed_access(
     library: Uuid,
 ) -> sqlx::Result<Option<Access>> {
     let row = sqlx::query!(
-        r#"SELECT l.pk, l.owner, l.storage, a."user" AS "user!", a.can_write AS "can_write!"
+        r#"SELECT l.pk, l.owner, l.storage, a.can_write AS "can_write!"
            FROM library l JOIN library_access_any($1) a ON a.library = l.pk
            WHERE l.uuid = $2 AND l.deleted_at IS NOT NULL"#,
         who.token,
@@ -278,8 +283,9 @@ pub async fn trashed_access(
         library: r.pk,
         organization: r.owner,
         storage: r.storage,
-        user: r.user,
+        account: who.account,
         can_write: r.can_write,
+        token: who.token,
     }))
 }
 
