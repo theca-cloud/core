@@ -45,6 +45,7 @@ on_both_backends!(
     no_dedup_with_what_the_uploader_cannot_access,
     narrowed_app_passwords_dedup_within_their_scope,
     authors_survive_leaving_and_go_with_their_account,
+    dedup_never_crosses_organizations_even_for_a_member_of_both,
     pending_chunks_only_match_within_their_library,
     dedup_never_crosses_storages_or_organizations,
     members_only,
@@ -770,6 +771,44 @@ async fn dedup_never_crosses_storages_or_organizations(kind: Kind, pool: PgPool)
         .await
         .unwrap();
     assert!(carol.puts > 0, "no dedup across organizations");
+}
+
+async fn dedup_never_crosses_organizations_even_for_a_member_of_both(kind: Kind, pool: PgPool) {
+    // Alice can access libraries in both organizations, on the same storage:
+    // only the organization keeps them apart (one organization's chunks are
+    // another's bill).
+    let w = world(kind, pool).await;
+    w.sql(r#"INSERT INTO "user" (account, organization, joined_at) VALUES (1, 2, now())"#)
+        .await;
+    let mut alice = w.as_user(1).await;
+    let mine = alice.create_library("mine").await;
+    let mut in_two = w.as_user(1).await;
+    in_two.org = w.organizations[1];
+    let theirs = in_two.create_library("theirs").await;
+    let content = data(2 * MIB, 29);
+    let file = alice
+        .upload(&mine, new_file(&mine, "f.bin"), &content)
+        .await
+        .unwrap()
+        .file;
+    in_two
+        .upload(&theirs, new_file(&theirs, "f.bin"), &content)
+        .await
+        .unwrap();
+    assert!(
+        in_two.puts > 0,
+        "alice can access both, but organization two stores its own copy"
+    );
+
+    let ids = alice.file_chunks(file).await;
+    let commit =
+        json!({ "library": theirs.id, "parent": theirs.root, "name": "by-id.bin", "chunks": ids });
+    let (status, error) = in_two.commit(&commit).await.unwrap_err();
+    assert_eq!(
+        (status, error["code"].as_str()),
+        (StatusCode::FORBIDDEN, Some("chunk_not_allowed")),
+        "nor reuses organization one's chunk IDs at commit"
+    );
 }
 
 // Authorization.
