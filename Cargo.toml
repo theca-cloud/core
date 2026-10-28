@@ -3,7 +3,7 @@ members = ["crates/common", "crates/core", "crates/client", "crates/password"]
 resolver = "3"
 
 [workspace.package]
-version = "1.1.0"
+version = "1.2.0"
 edition = "2024"
 license = "AGPL-3.0-only"
 # Not published: the CE image builds them from source (none of them is a

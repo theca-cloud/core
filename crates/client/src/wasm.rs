@@ -72,6 +72,8 @@ enum Event<'a> {
         conflict: bool,
         unchanged: bool,
     },
+    /// A file the operating system left (`.DS_Store`, `._*`...): not uploaded.
+    Skipped { path: &'a str },
     /// A file failed (the others go on).
     Failed {
         path: &'a str,
@@ -138,8 +140,9 @@ impl ThecaClient {
     ///
     /// `on_event` gets `{ kind: "progress", total, hashed, uploaded, skipped }`
     /// (bytes, every file together), and each file's outcome: `{ kind: "done",
-    /// path, file, version, conflict, unchanged }` or `{ kind: "failed", path,
-    /// code, message }`. Resolves once every file is done or failed; rejects
+    /// path, file, version, conflict, unchanged }`, `{ kind: "skipped", path }`
+    /// (a file the operating system left, `.DS_Store`, `._*`...: not uploaded)
+    /// or `{ kind: "failed", path, code, message }`. Resolves once every file is done or failed; rejects
     /// with `{ code, message }` when nothing could start (folders not created).
     #[allow(clippy::too_many_arguments)]
     pub async fn upload(
@@ -192,6 +195,10 @@ impl ThecaClient {
             for ((path, source), target) in paths.iter().zip(&sources).zip(targets) {
                 let target = match target {
                     Ok(target) => target,
+                    Err(Error::Ignored(_)) => {
+                        emit(&on_event, &Event::Skipped { path });
+                        continue;
+                    }
                     Err(e) => {
                         failed(&on_event, path, &e);
                         continue;

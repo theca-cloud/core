@@ -1,6 +1,12 @@
 # Changelog
 
 Every release of `core`: the server, `@theca/client`, `openapi.json`.
+## [1.2.0] - 2026-10-28
+
+### Features
+
+- Ignored files: skipped by the upload engine, discarded by WebDAV
+
 ## [1.1.0] - 2026-10-27
 
 ### Features

@@ -36,6 +36,10 @@ pub enum Error {
     /// A file goes where a folder has its name.
     #[error("{0}: a folder has this name")]
     FolderExists(String),
+    /// A file the operating system left (`.DS_Store`, `._*`...): skipped,
+    /// never uploaded (`theca_common::name::is_ignored`).
+    #[error("{0}: ignored")]
+    Ignored(String),
 }
 
 impl Error {
@@ -55,6 +59,7 @@ impl Error {
             Error::Storage { .. } => "storage",
             Error::InvalidName(_) => "invalid_name",
             Error::FolderExists(_) => "folder_exists",
+            Error::Ignored(_) => "ignored",
         }
     }
 

@@ -97,6 +97,18 @@ impl Name {
     }
 }
 
+/// A file the operating system leaves beside the user's (macOS's `._*` and
+/// `.DS_Store`, Windows's `Thumbs.db`, `ehthumbs.db`, `desktop.ini`): never
+/// stored by Theca's clients, nor through WebDAV. Compared without case.
+pub fn is_ignored(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower.starts_with("._")
+        || matches!(
+            lower.as_str(),
+            ".ds_store" | "thumbs.db" | "ehthumbs.db" | "desktop.ini"
+        )
+}
+
 impl TryFrom<String> for Name {
     type Error = NameError;
 
@@ -194,5 +206,32 @@ mod tests {
             "a.txt"
         );
         assert!(serde_json::from_str::<Name>("\"a/b\"").is_err());
+    }
+
+    #[test]
+    fn ignored_names() {
+        for name in [
+            "._a.txt",
+            "._",
+            ".DS_Store",
+            ".ds_store",
+            "Thumbs.db",
+            "THUMBS.DB",
+            "ehthumbs.db",
+            "desktop.ini",
+            "Desktop.ini",
+        ] {
+            assert!(is_ignored(name), "{name}");
+        }
+        for name in [
+            "a._b.txt",
+            "x.DS_Store",
+            "Thumbs.db.txt",
+            "_.a",
+            ".hidden",
+            "~$report.docx",
+        ] {
+            assert!(!is_ignored(name), "{name}");
+        }
     }
 }

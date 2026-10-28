@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use futures::StreamExt;
-use theca_common::name::Name;
+use theca_common::name::{Name, is_ignored};
 use uuid::Uuid;
 
 use crate::api::{Client, Error};
@@ -34,13 +34,18 @@ pub fn path_key(path: &str) -> String {
 }
 
 /// A file as `name` in the folder `parent`: a new version of `existing` (based
-/// on its current version), or a new file. A folder with that name refuses it.
+/// on its current version), or a new file. A folder with that name refuses it;
+/// a file the operating system left is skipped (`Error::Ignored`), even if one
+/// is already there.
 pub fn target(
     library: Uuid,
     parent: Uuid,
     name: &str,
     existing: Option<&Existing>,
 ) -> Result<Target, Error> {
+    if is_ignored(name) {
+        return Err(Error::Ignored(name.to_owned()));
+    }
     let name = Name::new(name).map_err(|e| Error::InvalidName(format!("{name}: {e}")))?;
     match existing {
         Some(e) if e.is_file => Ok(Target::Version {
