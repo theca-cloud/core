@@ -23,7 +23,7 @@ use dav_server::fs::{
 };
 use dav_server::{DavHandler, memls::MemLs};
 use futures::FutureExt;
-use theca_common::name::Name;
+use theca_common::name::{Name, is_ignored};
 use uuid::Uuid;
 
 use crate::api::AppState;
@@ -815,7 +815,9 @@ impl DavFile for WriteFile {
 
     fn flush(&mut self) -> FsFuture<'_, ()> {
         async move {
-            if self.stored {
+            // What the operating system leaves (`._*`, `.DS_Store`...):
+            // discarded, as written (a refusal can abort Finder's whole copy).
+            if self.stored || is_ignored(&self.name) {
                 return Ok(());
             }
             self.spool

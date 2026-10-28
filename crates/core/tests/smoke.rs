@@ -681,16 +681,28 @@ async fn placing_and_streaming(pool: PgPool) {
     let (id, root) = (library.id, library.root);
 
     // A tree: its folders created (an empty one too), each file a new one; a
-    // folder with an invalid name fails its files alone.
-    let files: Vec<String> = ["a.txt", "Docs/b.txt", "Docs/sub/c.txt", "bad:name/d.txt"]
-        .map(String::from)
-        .into();
+    // folder with an invalid name fails its files alone; what the operating
+    // system left is skipped.
+    let files: Vec<String> = [
+        "a.txt",
+        "Docs/b.txt",
+        "Docs/sub/c.txt",
+        "bad:name/d.txt",
+        "Docs/.DS_Store",
+        "._a.txt",
+        "Docs/sub/Thumbs.db",
+    ]
+    .map(String::from)
+    .into();
     let targets = place(&client, id, root, &["Docs/empty".into()], &files)
         .await
         .unwrap();
     assert!(matches!(&targets[0], Ok(Target::New { parent, .. }) if *parent == root));
     assert!(matches!(&targets[2], Ok(Target::New { name, .. }) if name.as_str() == "c.txt"));
     assert!(matches!(&targets[3], Err(Error::InvalidName(_))));
+    for ignored in &targets[4..] {
+        assert!(matches!(ignored, Err(Error::Ignored(_))));
+    }
     let docs = client
         .children(root)
         .await

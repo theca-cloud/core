@@ -287,6 +287,70 @@ async fn reads_and_writes(pool: PgPool) {
     assert_eq!(dav.put("/bad%3Cname", b"x").await, StatusCode::FORBIDDEN);
 }
 
+/// What the operating system leaves (`._*`, `.DS_Store`, `Thumbs.db`...) is
+/// discarded: written, never stored, then not found. A real file moved to
+/// such a name is stored as asked, and stays.
+#[sqlx::test]
+async fn discards_what_the_os_leaves(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    let dav = w.dav(1, json!({ "library": docs.id })).await;
+    let chunks = || async {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM chunk")
+            .fetch_one(&w.pool)
+            .await
+            .unwrap()
+    };
+
+    assert_eq!(dav.put("/a.txt", b"a real file").await, StatusCode::CREATED);
+    let before = chunks().await;
+    for path in ["/._a.txt", "/.DS_Store", "/Thumbs.db", "/desktop.ini"] {
+        assert_eq!(
+            dav.put(path, b"left by the OS").await,
+            StatusCode::CREATED,
+            "{path}"
+        );
+        assert_eq!(dav.get(path, None).await.0, StatusCode::NOT_FOUND, "{path}");
+        assert_eq!(
+            dav.status("PROPFIND", path, &[("depth", "0")]).await,
+            StatusCode::NOT_FOUND,
+            "{path}"
+        );
+    }
+    assert_eq!(dav.list("/").await, ["a.txt"]);
+    assert_eq!(chunks().await, before, "nothing stored");
+
+    // Never stored: deleting or moving them finds nothing.
+    assert_eq!(
+        dav.status("DELETE", "/._a.txt", &[]).await,
+        StatusCode::NOT_FOUND
+    );
+    let dest = [("destination", "/dav/._b.txt")];
+    assert_eq!(
+        dav.status("MOVE", "/._a.txt", &dest).await,
+        StatusCode::NOT_FOUND
+    );
+
+    // A real file moved to such a name: stored as asked; writing it again
+    // through WebDAV changes nothing, deleting it trashes it.
+    let dest = [("destination", "/dav/._kept.txt")];
+    assert_eq!(
+        dav.status("MOVE", "/a.txt", &dest).await,
+        StatusCode::CREATED
+    );
+    assert!(dav.put("/._kept.txt", b"overwritten?").await.is_success());
+    assert_eq!(
+        dav.get("/._kept.txt", None).await,
+        (StatusCode::OK, b"a real file".to_vec())
+    );
+    assert_eq!(
+        dav.status("DELETE", "/._kept.txt", &[]).await,
+        StatusCode::NO_CONTENT
+    );
+    assert!(dav.list("/").await.is_empty());
+}
+
 /// Each version keeps its client's modification time (`X-OC-Mtime`, as rclone
 /// sends it): shown by WebDAV and the API; the same bytes with another time
 /// update the current version (a touch, no new version); a restored version
