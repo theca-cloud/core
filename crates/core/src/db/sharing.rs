@@ -1,7 +1,7 @@
 //! What an organization's owner manages: its libraries' members and its dedup
 //! namespaces (decisions.md, Authorization and Trust boundary).
 
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use theca_common::api;
 use uuid::Uuid;
 
@@ -96,39 +96,46 @@ pub async fn members(pool: &PgPool, library: i64) -> sqlx::Result<Vec<api::Libra
 }
 
 /// Adds a member of the organization to the library, or changes its role.
-/// `false`: no such member in the organization.
+/// The member's account; `None`: no such member in the organization.
 pub async fn set_member(
-    pool: &PgPool,
+    db: &mut PgConnection,
     library: Managed,
     user: Uuid,
     write: bool,
-) -> sqlx::Result<bool> {
+) -> sqlx::Result<Option<i64>> {
     let role = if write { "write" } else { "read" };
-    let done = sqlx::query!(
-        r#"INSERT INTO library_member (organization, library, "user", role)
-           SELECT $1, $2, u.pk, $4 FROM "user" u WHERE u.uuid = $3 AND u.organization = $1
-           ON CONFLICT (library, "user") DO UPDATE SET role = EXCLUDED.role"#,
+    sqlx::query_scalar!(
+        r#"WITH u AS (SELECT pk, account FROM "user" WHERE uuid = $3 AND organization = $1),
+           set AS (
+               INSERT INTO library_member (organization, library, "user", role)
+               SELECT $1, $2, u.pk, $4 FROM u
+               ON CONFLICT (library, "user") DO UPDATE SET role = EXCLUDED.role
+               RETURNING 1
+           )
+           SELECT u.account FROM u WHERE EXISTS (SELECT 1 FROM set)"#,
         library.organization,
         library.pk,
         user,
         role
     )
-    .execute(pool)
-    .await?;
-    Ok(done.rows_affected() == 1)
+    .fetch_optional(db)
+    .await
 }
 
-/// `false`: not a member of the library.
-pub async fn remove_member(pool: &PgPool, library: i64, user: Uuid) -> sqlx::Result<bool> {
-    let done = sqlx::query!(
+/// The member's account; `None`: not a member of the library.
+pub async fn remove_member(
+    db: &mut PgConnection,
+    library: i64,
+    user: Uuid,
+) -> sqlx::Result<Option<i64>> {
+    sqlx::query_scalar!(
         r#"DELETE FROM library_member m USING "user" u
-           WHERE m.library = $1 AND m."user" = u.pk AND u.uuid = $2"#,
+           WHERE m.library = $1 AND m."user" = u.pk AND u.uuid = $2 RETURNING u.account"#,
         library,
         user
     )
-    .execute(pool)
-    .await?;
-    Ok(done.rows_affected() == 1)
+    .fetch_optional(db)
+    .await
 }
 
 pub async fn namespaces(pool: &PgPool, organization: i64) -> sqlx::Result<Vec<api::Namespace>> {

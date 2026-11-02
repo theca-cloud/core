@@ -26,11 +26,12 @@ use futures::FutureExt;
 use theca_common::name::{Name, is_ignored};
 use uuid::Uuid;
 
+use crate::actions::node::{self as files, Target};
+use crate::actions::{self, FileError};
 use crate::api::AppState;
 use crate::db;
 use crate::db::account::Credential;
 use crate::db::library::NodeAccess;
-use crate::files::{self, FileError, Target};
 use crate::stream::VersionReader;
 
 /// The WebDAV handler, built once: our filesystem, and locks in memory (one
@@ -470,7 +471,7 @@ impl GuardedFileSystem<Who> for Fs {
                     if self.child(who, &parent, name.as_str()).await?.is_some() {
                         return Err(FsError::Exists);
                     }
-                    files::create_folder(&self.state, &parent, name.as_str())
+                    files::create_folders(&self.state, &parent, &[name.as_str().to_owned()])
                         .await
                         .map_err(map)?;
                     Ok(())
@@ -592,13 +593,9 @@ impl Fs {
                     .collect()
             };
             if !children.is_empty() {
-                sqlx::query!(
-                    "UPDATE node SET deleted_at = NULL WHERE pk = ANY($1)",
-                    &children
-                )
-                .execute(&self.state.pool)
-                .await
-                .map_err(db_error)?;
+                files::untrash_below_trashed(&self.state, &children)
+                    .await
+                    .map_err(map)?;
             }
             Ok(())
         }
@@ -615,8 +612,7 @@ impl Fs {
             .fetch_one(&self.state.pool)
             .await
             .map_err(db_error)?;
-        let mut tx = self.state.pool.begin().await.map_err(db_error)?;
-        db::library::create(&mut tx, who, uuid, name, &[])
+        actions::library::create(&self.state, who, uuid, name, &[])
             .await
             .map_err(|e| match e {
                 db::library::CreateError::NotMember => FsError::Forbidden,
@@ -628,7 +624,7 @@ impl Fs {
                 }
                 _ => FsError::GeneralFailure,
             })?;
-        tx.commit().await.map_err(db_error)
+        Ok(())
     }
 }
 

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM library_member m USING \"user\" u\n           WHERE m.library = $1 AND m.\"user\" = u.pk AND u.uuid = $2 RETURNING u.account",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "account",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f784c0e52e63321b15eab870b5ece424e30343532587a9edc8ddef6c745f6aa0"
+}

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT n.pk, n.parent, n.is_file, n.current_version, l.pk AS library, l.owner, l.storage,\n                  a.can_write AS \"can_write!\"\n           FROM node n\n           JOIN library l ON l.pk = n.library\n           JOIN library_access($1) a ON a.library = l.pk\n           WHERE n.uuid = $2 AND n.deleted_at IS NOT NULL",
+  "query": "SELECT n.pk, n.uuid, n.parent, n.is_file, n.current_version, l.pk AS library, l.owner, l.storage,\n                  a.can_write AS \"can_write!\"\n           FROM node n\n           JOIN library l ON l.pk = n.library\n           JOIN library_access($1) a ON a.library = l.pk\n           WHERE n.uuid = $2 AND n.deleted_at IS NOT NULL",
   "describe": {
     "columns": [
       {
@@ -10,36 +10,41 @@
       },
       {
         "ordinal": 1,
+        "name": "uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
         "name": "parent",
         "type_info": "Int8"
       },
       {
-        "ordinal": 2,
+        "ordinal": 3,
         "name": "is_file",
         "type_info": "Bool"
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "current_version",
         "type_info": "Int8"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "library",
         "type_info": "Int8"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "owner",
         "type_info": "Int8"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "storage",
         "type_info": "Int8"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "can_write!",
         "type_info": "Bool"
       }
@@ -52,6 +57,7 @@
     },
     "nullable": [
       false,
+      false,
       true,
       false,
       true,
@@ -61,5 +67,5 @@
       null
     ]
   },
-  "hash": "c476b0ab7985d2580c7110572b0a3749e56808ecaa55808732be7cdd309bf560"
+  "hash": "6b6d6936421262f9d5e55c614559f81b411afba110ccbb0ed85997b98eeeb720"
 }

@@ -14,6 +14,9 @@ struct Server {
     /// (its dump); the others just keep it alive.
     #[allow(dead_code)]
     dir: tempfile::TempDir,
+    database_url: String,
+    port: u16,
+    setup_open: bool,
 }
 
 impl Drop for Server {
@@ -31,6 +34,34 @@ const DATA_KEY: &str = "22222222222222222222222222222222222222222222222222222222
 /// in `dir`, on a free port, and waits until it's healthy.
 async fn start_server(database_url: &str, dir: tempfile::TempDir, setup_open: bool) -> Server {
     theca_core::install_crypto_provider();
+    let port = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let mut server = Server {
+        child: spawn(database_url, &dir, port, setup_open),
+        url: format!("http://127.0.0.1:{port}"),
+        dir,
+        database_url: database_url.to_owned(),
+        port,
+        setup_open,
+    };
+    healthy(&mut server).await;
+    server
+}
+
+/// Stops the server and starts it again, on the same port.
+// Only the smoke test restarts its server; the upgrade test includes this too.
+#[allow(dead_code)]
+async fn restart(server: &mut Server) {
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+    server.child = spawn(&server.database_url, &server.dir, server.port, server.setup_open);
+    healthy(server).await;
+}
+
+fn spawn(database_url: &str, dir: &tempfile::TempDir, port: u16, setup_open: bool) -> Child {
     let file = |name: &str, content: &str| {
         let path = dir.path().join(name);
         if !path.exists() {
@@ -38,11 +69,6 @@ async fn start_server(database_url: &str, dir: tempfile::TempDir, setup_open: bo
         }
         path
     };
-    let port = TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
     let public = format!("http://127.0.0.1:{port}");
     let mut command = Command::new(env!("CARGO_BIN_EXE_theca-server"));
     command
@@ -57,16 +83,16 @@ async fn start_server(database_url: &str, dir: tempfile::TempDir, setup_open: bo
     if setup_open {
         command.env("SETUP_OPEN", "true");
     }
-    let mut server = Server {
-        child: command.spawn().expect("the server binary"),
-        url: public,
-        dir,
-    };
+    command.spawn().expect("the server binary")
+}
+
+/// Waits until the server answers healthy.
+async fn healthy(server: &mut Server) {
     for _ in 0..300 {
         if let Ok(response) = reqwest::get(format!("{}/api/health", server.url)).await
             && response.status().is_success()
         {
-            return server;
+            return;
         }
         if let Ok(Some(status)) = server.child.try_wait() {
             panic!("the server exited: {status}");

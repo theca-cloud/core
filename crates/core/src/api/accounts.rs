@@ -296,13 +296,7 @@ pub async fn accept(
         db::account::set_password(&mut tx, invited.account, &hash_password(password)).await?;
     }
     db::account::set_verified(&mut tx, invited.account_uuid).await?;
-    sqlx::query!(
-        r#"UPDATE "user" SET joined_at = now(), invited_at = NULL WHERE pk = $1"#,
-        invited.pk
-    )
-    .execute(&mut *tx)
-    .await?;
-    tx.commit().await?;
+    crate::actions::member::join(&state, tx, invited.pk, invited.account).await?;
     if new_password {
         let (headers, Json(me)) =
             log_in(&state, invited.account, invited.account_uuid, ip, agent).await?;

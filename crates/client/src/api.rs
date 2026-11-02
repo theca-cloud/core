@@ -118,7 +118,7 @@ impl Client {
         self.token.as_deref()
     }
 
-    fn request(&self, method: Method, path: &str) -> reqwest::RequestBuilder {
+    pub(crate) fn request(&self, method: Method, path: &str) -> reqwest::RequestBuilder {
         let request = self.http.request(method, format!("{}{path}", self.base));
         #[cfg(target_arch = "wasm32")]
         let request = request.fetch_credentials_include();
@@ -554,7 +554,7 @@ impl Client {
     }
 }
 
-async fn decode<T: DeserializeOwned>(response: reqwest::Response) -> Result<T, Error> {
+pub(crate) async fn decode<T: DeserializeOwned>(response: reqwest::Response) -> Result<T, Error> {
     let status = response.status();
     let bytes = response.bytes().await?;
     if !status.is_success() {

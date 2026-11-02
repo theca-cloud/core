@@ -53,6 +53,7 @@ pub async fn access(
 pub struct NodeAccess {
     pub access: Access,
     pub node: i64,
+    pub uuid: Uuid,
     /// `None`: the library's root.
     pub parent: Option<i64>,
     pub is_file: bool,
@@ -65,7 +66,7 @@ pub async fn node_access(
     node: Uuid,
 ) -> sqlx::Result<Option<NodeAccess>> {
     let row = sqlx::query!(
-        r#"SELECT n.pk, n.parent, n.is_file, n.current_version, l.pk AS library, l.owner, l.storage,
+        r#"SELECT n.pk, n.uuid, n.parent, n.is_file, n.current_version, l.pk AS library, l.owner, l.storage,
                   a.can_write AS "can_write!"
            FROM node n
            JOIN library l ON l.pk = n.library
@@ -86,6 +87,7 @@ pub async fn node_access(
             token: who.token,
         },
         node: r.pk,
+        uuid: r.uuid,
         parent: r.parent,
         is_file: r.is_file,
         current_version: r.current_version,
@@ -289,21 +291,25 @@ pub async fn trashed_access(
     }))
 }
 
-pub async fn rename(pool: &PgPool, library: i64, name: &str) -> sqlx::Result<()> {
+pub async fn rename(
+    tx: &mut Transaction<'_, Postgres>,
+    library: i64,
+    name: &str,
+) -> sqlx::Result<()> {
     sqlx::query!("UPDATE library SET name = $2 WHERE pk = $1", library, name)
-        .execute(pool)
+        .execute(&mut **tx)
         .await?;
     Ok(())
 }
 
 /// Puts a library in its organization's trash: it and everything in it are
 /// out of reach (`library_access`), its name free.
-pub async fn trash(pool: &PgPool, library: i64) -> sqlx::Result<()> {
+pub async fn trash(tx: &mut Transaction<'_, Postgres>, library: i64) -> sqlx::Result<()> {
     sqlx::query!(
         "UPDATE library SET deleted_at = now() WHERE pk = $1",
         library
     )
-    .execute(pool)
+    .execute(&mut **tx)
     .await?;
     Ok(())
 }
@@ -332,6 +338,36 @@ pub async fn restore(tx: &mut Transaction<'_, Postgres>, library: i64) -> sqlx::
     .execute(&mut **tx)
     .await?;
     Ok(())
+}
+
+pub async fn uuid_of(pool: &PgPool, library: i64) -> sqlx::Result<Uuid> {
+    sqlx::query_scalar!("SELECT uuid FROM library WHERE pk = $1", library)
+        .fetch_one(pool)
+        .await
+}
+
+/// Locks libraries' rows (as the event numbering does), in pk order.
+pub async fn lock(tx: &mut Transaction<'_, Postgres>, libraries: &[i64]) -> sqlx::Result<()> {
+    sqlx::query!(
+        "SELECT pk FROM library WHERE pk = ANY($1) ORDER BY pk FOR NO KEY UPDATE",
+        libraries
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// The accounts of a library's members (whose access a purge takes away).
+pub async fn member_accounts(
+    tx: &mut Transaction<'_, Postgres>,
+    library: i64,
+) -> sqlx::Result<Vec<i64>> {
+    sqlx::query_scalar!(
+        r#"SELECT u.account FROM library_member m JOIN "user" u ON u.pk = m."user" WHERE m.library = $1"#,
+        library
+    )
+    .fetch_all(&mut **tx)
+    .await
 }
 
 /// Deletes a library for good: its nodes, versions and chunk references,

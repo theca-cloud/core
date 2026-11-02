@@ -3,6 +3,7 @@
 //! The binary (`theca-server`) only calls [`run`], so other binaries (e.g. the
 //! enterprise edition) can embed the server.
 
+pub mod actions;
 pub mod api;
 pub mod auth;
 pub mod config;
@@ -10,7 +11,7 @@ pub mod dav;
 pub mod db;
 pub mod email;
 mod error;
-pub mod files;
+pub mod events;
 pub mod jobs;
 pub mod keys;
 pub mod limits;
@@ -79,6 +80,7 @@ pub async fn run() -> Result<(), Error> {
         setup,
         limits: Default::default(),
         proxies: std::sync::Arc::new(config.trusted_proxies.clone()),
+        events: events::Registry::new(events::INTERVAL),
     };
 
     let interrupted = jobs::mark_interrupted(&state.pool).await?;
@@ -90,6 +92,7 @@ pub async fn run() -> Result<(), Error> {
     }
     let (stop, stopping) = tokio::sync::watch::channel(false);
     let mut job_tasks = jobs::spawn_all(state.clone(), stopping);
+    tokio::spawn(events::watch_revocations(state.clone()));
 
     if let Some(addr) = config.metrics_addr {
         let handle = telemetry::install_recorder();

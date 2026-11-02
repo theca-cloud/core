@@ -44,6 +44,8 @@ pub struct Committed {
     pub conflict: bool,
     /// The content was the current version's: nothing was created.
     pub unchanged: bool,
+    /// Unchanged, but the current version's modification time changed.
+    pub touched: bool,
 }
 
 /// A modification time the database stores as a client means it: years 1 to
@@ -174,8 +176,9 @@ pub async fn commit(
         if same == pks {
             // A touch: the current version's time follows its client (a new
             // version would copy the chunk list for the same content).
-            let version = sqlx::query_scalar!(
-                "UPDATE version SET modified_at = coalesce($2, modified_at) WHERE pk = $1 RETURNING uuid",
+            let version = sqlx::query!(
+                r#"UPDATE version SET modified_at = coalesce($2, modified_at) WHERE pk = $1
+                   RETURNING uuid, old.modified_at IS DISTINCT FROM new.modified_at AS "touched!""#,
                 base,
                 modified
             )
@@ -183,9 +186,10 @@ pub async fn commit(
             .await?;
             return Ok(Committed {
                 file: file_uuid,
-                version,
+                version: version.uuid,
                 conflict: false,
                 unchanged: true,
+                touched: version.touched,
             });
         }
     }
@@ -228,6 +232,7 @@ pub async fn commit(
         version: version.uuid,
         conflict: current != base,
         unchanged: false,
+        touched: false,
     })
 }
 

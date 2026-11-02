@@ -207,6 +207,34 @@ pub async fn add(
     Ok(Added::Invited(user))
 }
 
+/// A user's account.
+pub async fn account_of(db: &mut PgConnection, user: Uuid) -> sqlx::Result<Option<i64>> {
+    sqlx::query_scalar!(r#"SELECT account FROM "user" WHERE uuid = $1"#, user)
+        .fetch_optional(db)
+        .await
+}
+
+/// The accounts of an organization's users (joined or invited).
+pub async fn member_accounts(db: &mut PgConnection, organization: i64) -> sqlx::Result<Vec<i64>> {
+    sqlx::query_scalar!(
+        r#"SELECT account FROM "user" WHERE organization = $1"#,
+        organization
+    )
+    .fetch_all(db)
+    .await
+}
+
+/// An invited user joins (its invitation accepted).
+pub async fn join(db: &mut PgConnection, user: i64) -> sqlx::Result<()> {
+    sqlx::query!(
+        r#"UPDATE "user" SET joined_at = now(), invited_at = NULL WHERE pk = $1"#,
+        user
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
 /// Why a member can't be removed.
 pub enum RemoveError {
     NotFound,

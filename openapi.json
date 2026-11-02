@@ -2063,6 +2063,47 @@
         }
       }
     },
+    "/api/v1/events": {
+      "post": {
+        "tags": [
+          "events"
+        ],
+        "summary": "The changes to the libraries the credential can access, from its\npositions, then live: Server-Sent Events. `event: libraries` (data: every\nlibrary it can access, trash included, each with its position) at the\nstart and whenever that changes; `event: changes` (data: one batch,\ncollapsed per resource, with the new positions); a `:` comment every 30 s.\nA cut stream resumes from the last positions received.",
+        "operationId": "events",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Events"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events: `libraries` (a list of FeedLibrary), then `changes` (Changes)",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changes"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`too_many_streams`: at most 10 per credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/files/commit": {
       "post": {
         "tags": [
@@ -4802,6 +4843,41 @@
           }
         }
       },
+      "Change": {
+        "type": "object",
+        "description": "A changed resource, collapsed over the events of one batch.",
+        "required": [
+          "id",
+          "kind",
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/EventAction",
+            "description": "Its latest event in the batch."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The node or the library."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ResourceKind",
+            "description": "A node or a library."
+          },
+          "state": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ChangeState",
+                "description": "Its current state; none when it's gone for this credential (purged,\ntrashed, or now somewhere it can't access)."
+              }
+            ]
+          }
+        }
+      },
       "ChangePassword": {
         "type": "object",
         "description": "A password change: the current one, and the new one.",
@@ -4817,6 +4893,94 @@
           "new": {
             "type": "string",
             "description": "The new password (at least 8 characters, and strong enough)."
+          }
+        }
+      },
+      "ChangeState": {
+        "type": "object",
+        "description": "A resource's current state, when read.",
+        "required": [
+          "library",
+          "name"
+        ],
+        "properties": {
+          "current_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "A file's current version."
+          },
+          "is_file": {
+            "type": "boolean",
+            "description": "A file (true) or a folder or library (false)."
+          },
+          "library": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The library it is in (a library: itself)."
+          },
+          "modified": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "A file's modification time."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "A node's parent folder; none for a library."
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "A file's size in bytes."
+          },
+          "trashed": {
+            "type": "boolean",
+            "description": "A library in its organization's trash."
+          }
+        }
+      },
+      "Changes": {
+        "type": "object",
+        "description": "The event feed's `changes` message: one batch, collapsed per resource;\nlibraries first, then nodes parents first, then those gone.",
+        "required": [
+          "entries",
+          "positions"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Change"
+            },
+            "description": "The changed resources."
+          },
+          "positions": {
+            "type": "object",
+            "description": "The new position of each library the batch covered.",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "propertyNames": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         }
       },
@@ -5379,6 +5543,40 @@
           "email": {
             "type": "string",
             "description": "The address."
+          }
+        }
+      },
+      "EventAction": {
+        "type": "string",
+        "description": "What happened to a resource (its latest event, for display: the state is\nwhat a client applies).",
+        "enum": [
+          "created",
+          "versioned",
+          "touched",
+          "version_restored",
+          "renamed",
+          "moved",
+          "trashed",
+          "restored",
+          "purged",
+          "unknown"
+        ]
+      },
+      "Events": {
+        "type": "object",
+        "description": "`POST /events`: the cursor, the last event the client applied in each\nlibrary it follows. Empty on a first launch.",
+        "properties": {
+          "after": {
+            "type": "object",
+            "description": "Library → the number of the last event applied.",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "propertyNames": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         }
       },
@@ -6474,6 +6672,15 @@
             "description": "The password (at least 8 characters)."
           }
         }
+      },
+      "ResourceKind": {
+        "type": "string",
+        "description": "What an event is about.",
+        "enum": [
+          "node",
+          "library",
+          "unknown"
+        ]
       },
       "RestoreNodes": {
         "type": "object",

@@ -69,6 +69,7 @@ async fn world(pool: PgPool) -> World {
             setup: theca_core::api::setup::SetupState::done(),
             limits: Default::default(),
             proxies: Default::default(),
+            events: theca_core::events::Registry::new(theca_core::events::INTERVAL),
         }),
         pool,
         organizations: [organizations[0], organizations[1]],

@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT e.library, e.seq, e.resource, e.resource_kind, e.action\n             FROM unnest($1::bigint[], $2::bigint[]) AS c (library, seq)\n             JOIN event e ON e.library = c.library AND e.seq > c.seq\n             JOIN library_access_any($3) a ON a.library = e.library\n             ORDER BY e.library, e.seq LIMIT $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "library",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "seq",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "resource",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "resource_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "action",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array",
+        "Int8Array",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c757be532efb9ee7d9002297fc74135505c289b2e9c5f4fa95e02b1922c60032"
+}

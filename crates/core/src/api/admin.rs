@@ -399,22 +399,20 @@ pub async fn update_organization(
     let pk = db::admin::organization_pk(&state.pool, id)
         .await?
         .ok_or_else(|| HttpError::not_found("organization"))?;
-    let mut tx = state.pool.begin().await?;
-    if let Some(owner) = &update.owner {
-        if organization(&state, id).await?.personal {
-            return Err(HttpError::conflict(
-                "personal_organization",
-                "a personal organization keeps its owner",
-            ));
-        }
-        if !db::admin::set_owner(&mut tx, pk, owner).await? {
-            return Err(HttpError::not_found("member"));
-        }
+    if update.owner.is_some() && organization(&state, id).await?.personal {
+        return Err(HttpError::conflict(
+            "personal_organization",
+            "a personal organization keeps its owner",
+        ));
     }
-    if !db::admin::update_organization(&mut tx, pk, &update).await? {
-        return Err(HttpError::not_found("storage"));
-    }
-    tx.commit().await?;
+    use crate::actions::member::UpdateError;
+    crate::actions::member::update_organization(&state, pk, &update)
+        .await
+        .map_err(|e| match e {
+            UpdateError::Member => HttpError::not_found("member"),
+            UpdateError::Storage => HttpError::not_found("storage"),
+            UpdateError::Db(e) => e.into(),
+        })?;
     Ok(Json(organization(&state, id).await?))
 }
 

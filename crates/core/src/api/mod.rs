@@ -6,6 +6,7 @@ mod app_password;
 pub mod auth;
 mod content;
 pub mod error;
+mod events;
 mod nodes;
 mod oidc;
 mod organizations;
@@ -50,6 +51,8 @@ pub struct AppState {
     pub limits: crate::limits::Limits,
     /// Reverse proxies whose `X-Forwarded-For` is believed (`TRUSTED_PROXIES`).
     pub proxies: Arc<Vec<sqlx::types::ipnetwork::IpNetwork>>,
+    /// The event feed's open streams.
+    pub events: Arc<crate::events::Registry>,
 }
 
 /// The OpenAPI description of the API, committed as `openapi.json`.
@@ -124,6 +127,7 @@ pub struct AppState {
         organizations::members,
         sharing::libraries,
         sharing::members,
+        events::events,
         sharing::set_member,
         sharing::remove_member,
         sharing::namespaces,
@@ -185,6 +189,7 @@ pub fn router(state: AppState) -> Router {
                 .merge(accounts::router())
                 .merge(organizations::router())
                 .merge(sharing::router())
+                .merge(events::router())
                 .merge(session::router())
                 .merge(app_password::router())
                 .merge(totp::router())
@@ -335,6 +340,7 @@ mod tests {
             setup: setup::SetupState::done(),
             limits: Default::default(),
             proxies: Default::default(),
+            events: crate::events::Registry::new(crate::events::INTERVAL),
         })
     }
 

@@ -419,9 +419,7 @@ async fn trash_purge(state: &AppState) -> Result<i64, JobError> {
         }
         for node in nodes {
             // A node inside an already purged folder went with it.
-            let mut tx = state.pool.begin().await?;
-            crate::db::node::purge(&mut tx, node).await?;
-            tx.commit().await?;
+            crate::actions::node::purge_expired(state, node).await?;
             purged += 1;
         }
     }
@@ -439,9 +437,7 @@ async fn trash_purge(state: &AppState) -> Result<i64, JobError> {
             return Ok(purged);
         }
         for library in libraries {
-            let mut tx = state.pool.begin().await?;
-            crate::db::library::purge(&mut tx, library).await?;
-            tx.commit().await?;
+            crate::actions::library::purge_expired(state, library).await?;
             purged += 1;
         }
     }

@@ -91,7 +91,7 @@ async fn update_library(
     ApiJson(req): ApiJson<api::UpdateLibrary>,
 ) -> Result<Json<api::Library>, HttpError> {
     let access = library_access(&state, &user, id).await?;
-    crate::files::rename_library(&state, &access, req.name.as_str()).await?;
+    crate::actions::library::rename(&state, &access, req.name.as_str()).await?;
     Ok(Json(db::library::get(&state.pool, &access).await?))
 }
 
@@ -117,10 +117,10 @@ async fn delete_library(
 ) -> Result<StatusCode, HttpError> {
     if params.permanent {
         let access = trashed_library(&state, &user, id).await?;
-        crate::files::purge_library(&state, &access).await?;
+        crate::actions::library::purge(&state, &access).await?;
     } else {
         let access = library_access(&state, &user, id).await?;
-        crate::files::trash_library(&state, &access).await?;
+        crate::actions::library::trash(&state, &access).await?;
     }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -137,7 +137,7 @@ async fn restore_library(
     Path(id): Path<Uuid>,
 ) -> Result<Json<api::Library>, HttpError> {
     let access = trashed_library(&state, &user, id).await?;
-    crate::files::restore_library(&state, &access).await?;
+    crate::actions::library::restore(&state, &access).await?;
     Ok(Json(db::library::get(&state.pool, &access).await?))
 }
 
@@ -189,9 +189,8 @@ async fn create_library(
     ApiJson(req): ApiJson<api::CreateLibrary>,
 ) -> Result<(StatusCode, Json<api::Library>), HttpError> {
     use db::library::CreateError;
-    let mut tx = state.pool.begin().await?;
-    let library = db::library::create(
-        &mut tx,
+    let library = crate::actions::library::create(
+        &state,
         &user,
         req.organization,
         req.name.as_str(),
@@ -210,7 +209,6 @@ async fn create_library(
         CreateError::UnknownNamespaces(n) => HttpError::not_found("namespace").with_chunks(n),
         CreateError::Db(e) => e.into(),
     })?;
-    tx.commit().await?;
     Ok((StatusCode::CREATED, Json(library)))
 }
 
@@ -476,9 +474,8 @@ async fn commit_one(
             "`modified` must be between the years 1 and 9999",
         ));
     }
-    let mut tx = state.pool.begin().await?;
-    let committed = db::file::commit(
-        &mut tx,
+    let committed = crate::actions::node::commit_file(
+        state,
         &access,
         target,
         &req.chunks,
@@ -504,7 +501,6 @@ async fn commit_one(
         }
         CommitError::Db(e) => e.into(),
     })?;
-    tx.commit().await?;
     Ok(api::Committed {
         file: committed.file,
         version: committed.version,

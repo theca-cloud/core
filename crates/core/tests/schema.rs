@@ -987,3 +987,54 @@ async fn references_must_exist(pool: PgPool) {
         assert_refused(&pool, constraint, sql).await;
     }
 }
+
+// The event feed (sprint 08).
+
+#[sqlx::test]
+async fn events(pool: PgPool) {
+    fixture(&pool).await;
+    let event = |seq: i64, kind: &str, action: &str| {
+        format!(
+            "INSERT INTO event (library, seq, resource, resource_kind, action, actor)
+             VALUES (1, {seq}, gen_random_uuid(), '{kind}', '{action}', 2)"
+        )
+    };
+    // Accepted ones are kept: each its own number.
+    assert_accepted(&pool, &event(1, "node", "versioned")).await;
+    assert_accepted(&pool, &event(2, "library", "renamed")).await;
+    assert_refused(&pool, "event_action", &event(1, "library", "versioned")).await;
+    assert_refused(&pool, "event_action", &event(1, "node", "exploded")).await;
+    assert_refused(&pool, "event_seq_positive", &event(0, "node", "created")).await;
+    assert_refused(&pool, "event_seq_unique", &event(1, "node", "moved")).await;
+
+    // The actor's account deleted: the event stays, without it.
+    sqlx::raw_sql(
+        "INSERT INTO account (pk, email) OVERRIDING SYSTEM VALUE VALUES (5, 'e@x.ch');
+         UPDATE event SET actor = 5;
+         DELETE FROM account WHERE pk = 5;",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let actors: Vec<Option<i64>> = sqlx::query_scalar("SELECT actor FROM event")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(actors, [None, None]);
+    // The library purged: its events go with it.
+    sqlx::raw_sql(
+        "UPDATE node SET current_version = NULL WHERE library = 1;
+         DELETE FROM chunk_in_version; DELETE FROM version WHERE file = 4;
+         DELETE FROM node WHERE library = 1 AND parent IS NOT NULL;
+         DELETE FROM node WHERE library = 1; DELETE FROM chunk WHERE library = 1;
+         DELETE FROM library WHERE pk = 1",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM event")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+}
