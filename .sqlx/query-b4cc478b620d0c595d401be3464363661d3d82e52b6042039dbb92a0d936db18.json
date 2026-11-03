@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE library SET event_seq = event_seq + $2 WHERE pk = $1 RETURNING event_seq",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_seq",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b4cc478b620d0c595d401be3464363661d3d82e52b6042039dbb92a0d936db18"
+}

@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT t.pk FROM token t JOIN account a ON a.uuid = t.resource AND a.suspended_at IS NULL\n           WHERE t.pk = ANY($1) AND t.usage IN ('session', 'app_password') AND t.revoked_at IS NULL\n             AND (t.usage <> 'session' OR (t.last_seen > now() - make_interval(secs => $2)\n                  AND ($3::float8 IS NULL OR t.created_at > now() - make_interval(secs => $3))))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array",
+        "Float8",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "270a5fe981d9038917fd198c226afd852eaff372dbc02301686fcc8e28812324"
+}

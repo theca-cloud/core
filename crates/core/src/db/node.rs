@@ -71,27 +71,6 @@ pub async fn info(pool: &PgPool, node: i64) -> sqlx::Result<api::NodeInfo> {
     })
 }
 
-/// Creates a folder.
-pub async fn create_folder(
-    pool: &PgPool,
-    parent: &NodeAccess,
-    name: &str,
-) -> sqlx::Result<api::Node> {
-    sqlx::query_as!(
-        api::Node,
-        r#"INSERT INTO node (organization, library, parent, name, is_file)
-           VALUES ($1, $2, $3, $4, false)
-           RETURNING uuid AS id, name, is_file, NULL::timestamptz AS modified,
-                     NULL::uuid AS current_version, NULL::bigint AS size"#,
-        parent.access.organization,
-        parent.access.library,
-        parent.node,
-        name
-    )
-    .fetch_one(pool)
-    .await
-}
-
 /// A folder's subtree outside the trash, as it streams from the database:
 /// paths below the folder, parents before their children (byte order puts a
 /// path before its extensions).
@@ -156,7 +135,7 @@ pub async fn folder_child(
 /// checked by the caller), its `library` changes and the database cascades it
 /// to the subtree (`node_parent`), so the history follows.
 pub async fn update(
-    pool: &PgPool,
+    tx: &mut Transaction<'_, Postgres>,
     node: &NodeAccess,
     name: Option<&str>,
     parent: Option<&NodeAccess>,
@@ -170,27 +149,29 @@ pub async fn update(
         parent,
         library
     )
-    .execute(pool)
+    .execute(&mut **tx)
     .await?;
     Ok(())
 }
 
-/// The reachable child of `folder` named `name` (ignoring case), if any:
-/// `(pk, is_file, current_version)`.
-pub async fn child_named(
-    pool: &PgPool,
-    folder: i64,
-    name: &str,
-) -> sqlx::Result<Option<(i64, bool, Option<i64>)>> {
-    let row = sqlx::query!(
-        "SELECT pk, is_file, current_version FROM node
+/// A child found by name.
+pub struct Child {
+    pub pk: i64,
+    pub uuid: Uuid,
+    pub is_file: bool,
+}
+
+/// The reachable child of `folder` named `name` (ignoring case), if any.
+pub async fn child_named(pool: &PgPool, folder: i64, name: &str) -> sqlx::Result<Option<Child>> {
+    sqlx::query_as!(
+        Child,
+        "SELECT pk, uuid, is_file FROM node
          WHERE parent = $1 AND lower(name) = lower($2) AND deleted_at IS NULL",
         folder,
         name
     )
     .fetch_optional(pool)
-    .await?;
-    Ok(row.map(|r| (r.pk, r.is_file, r.current_version)))
+    .await
 }
 
 /// Merges the file `source` into the file `dest` (a move onto it): the
@@ -277,7 +258,7 @@ pub async fn copy(
     source: &NodeAccess,
     dest: &NodeAccess,
     name: Option<&str>,
-) -> sqlx::Result<i64> {
+) -> sqlx::Result<(i64, Uuid)> {
     let nodes = sqlx::query!(
         r#"WITH RECURSIVE subtree (pk, parent, name, is_file, current_version, depth) AS (
                SELECT pk, parent, name, is_file, current_version, 0 FROM node WHERE pk = $1
@@ -316,7 +297,7 @@ pub async fn copy(
         .fetch_one(&mut **tx)
         .await?;
         copies.insert(n.pk, copy.pk);
-        top.get_or_insert(copy.pk);
+        top.get_or_insert((copy.pk, copy.uuid));
         if let Some(version) = n.current_version {
             let new = sqlx::query_scalar!(
                 "INSERT INTO version (organization, file, author, size, modified_at)
@@ -349,10 +330,21 @@ pub async fn copy(
 }
 
 /// Puts a node in the trash: only that node is flagged.
-pub async fn trash(pool: &PgPool, node: i64) -> sqlx::Result<()> {
+pub async fn trash(tx: &mut Transaction<'_, Postgres>, node: i64) -> sqlx::Result<()> {
     sqlx::query!("UPDATE node SET deleted_at = now() WHERE pk = $1", node)
-        .execute(pool)
+        .execute(&mut **tx)
         .await?;
+    Ok(())
+}
+
+/// Clears nodes' trash flags.
+pub async fn untrash(tx: &mut Transaction<'_, Postgres>, nodes: &[i64]) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE node SET deleted_at = NULL WHERE pk = ANY($1)",
+        nodes
+    )
+    .execute(&mut **tx)
+    .await?;
     Ok(())
 }
 
@@ -363,7 +355,7 @@ pub async fn trashed_access(
     node: Uuid,
 ) -> sqlx::Result<Option<NodeAccess>> {
     let row = sqlx::query!(
-        r#"SELECT n.pk, n.parent, n.is_file, n.current_version, l.pk AS library, l.owner, l.storage,
+        r#"SELECT n.pk, n.uuid, n.parent, n.is_file, n.current_version, l.pk AS library, l.owner, l.storage,
                   a.can_write AS "can_write!"
            FROM node n
            JOIN library l ON l.pk = n.library
@@ -384,6 +376,7 @@ pub async fn trashed_access(
             token: who.token,
         },
         node: r.pk,
+        uuid: r.uuid,
         parent: r.parent,
         is_file: r.is_file,
         current_version: r.current_version,
@@ -579,6 +572,23 @@ fn numbers(rows: &[(i64, Option<i64>)]) -> Vec<(usize, String)> {
     out
 }
 
+/// A node's library and uuid, if it still exists.
+pub async fn library_of(
+    tx: &mut Transaction<'_, Postgres>,
+    node: i64,
+) -> sqlx::Result<Option<(i64, Uuid)>> {
+    let row = sqlx::query!("SELECT library, uuid FROM node WHERE pk = $1", node)
+        .fetch_optional(&mut **tx)
+        .await?;
+    Ok(row.map(|r| (r.library, r.uuid)))
+}
+
+pub async fn version_uuid(pool: &PgPool, version: i64) -> sqlx::Result<Uuid> {
+    sqlx::query_scalar!("SELECT uuid FROM version WHERE pk = $1", version)
+        .fetch_one(pool)
+        .await
+}
+
 /// A version of a file, by its uuid.
 pub async fn version_of(pool: &PgPool, file: i64, version: Uuid) -> sqlx::Result<Option<i64>> {
     sqlx::query_scalar!(
@@ -591,13 +601,17 @@ pub async fn version_of(pool: &PgPool, file: i64, version: Uuid) -> sqlx::Result
 }
 
 /// Makes a version current: the next commit based on it branches the tree.
-pub async fn set_current(pool: &PgPool, file: i64, version: i64) -> sqlx::Result<()> {
+pub async fn set_current(
+    tx: &mut Transaction<'_, Postgres>,
+    file: i64,
+    version: i64,
+) -> sqlx::Result<()> {
     sqlx::query!(
         "UPDATE node SET current_version = $2 WHERE pk = $1",
         file,
         version
     )
-    .execute(pool)
+    .execute(&mut **tx)
     .await?;
     Ok(())
 }

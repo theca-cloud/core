@@ -23,6 +23,7 @@ async fn app(pool: &PgPool, token: Option<&str>) -> Router {
         setup: SetupState::pending(token.map(str::to_owned)),
         limits: Default::default(),
         proxies: Default::default(),
+        events: theca_core::events::Registry::new(theca_core::events::INTERVAL),
     })
 }
 

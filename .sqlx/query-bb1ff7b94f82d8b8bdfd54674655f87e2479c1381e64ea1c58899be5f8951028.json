@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT library, uuid FROM node WHERE pk = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "library",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "bb1ff7b94f82d8b8bdfd54674655f87e2479c1381e64ea1c58899be5f8951028"
+}

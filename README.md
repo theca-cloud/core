@@ -38,7 +38,7 @@ cargo fmt --all                # fix formatting
 ```
 
 
-Dev explorers: database (pgweb, no login) http://localhost:8081, S3 (garage-webui) http://localhost:3909, emails (Mailpit) http://localhost:8025 (SMTP on `localhost:1025`).
+Dev explorers: database (pgweb, no login) http://localhost:8081, S3 (garage-webui) http://localhost:3909, emails (Mailpit) http://localhost:8025 (SMTP on `localhost:1025`). Those are the defaults: `scripts/dev.sh` takes the next free port when another project holds one, and writes every port to `.env` (edit them there).
 
 Start over: `rm -rf data/ .env`, then `scripts/dev.sh`.
 

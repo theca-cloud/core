@@ -1,6 +1,13 @@
 # Changelog
 
 Every release of `core`: the server, `@theca/client`, `openapi.json`.
+## [1.3.0] - 2026-11-03
+
+### Features
+
+- The event feed: every change numbered per library, followed over SSE
+- Devices log in through the browser, a library's size, an app password logging itself out
+
 ## [1.2.0] - 2026-10-28
 
 ### Features

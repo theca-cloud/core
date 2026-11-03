@@ -130,7 +130,7 @@ pub async fn set_member(
             ));
         }
     };
-    if !db::sharing::set_member(&state.pool, library, user, write).await? {
+    if !crate::actions::member::set(&state, library, user, write).await? {
         return Err(HttpError::not_found("member"));
     }
     Ok(Json(db::sharing::members(&state.pool, library.pk).await?))
@@ -148,7 +148,7 @@ pub async fn remove_member(
     Path((id, user)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, HttpError> {
     let library = managed_library(&state, &account, id).await?;
-    if !db::sharing::remove_member(&state.pool, library.pk, user).await? {
+    if !crate::actions::member::remove(&state, library.pk, user).await? {
         return Err(HttpError::not_found("member"));
     }
     Ok(StatusCode::NO_CONTENT)

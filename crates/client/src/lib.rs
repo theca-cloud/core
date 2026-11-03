@@ -4,6 +4,8 @@
 
 mod api;
 mod download;
+#[cfg(not(target_arch = "wasm32"))]
+mod events;
 mod place;
 mod rt;
 mod source;
@@ -19,6 +21,8 @@ pub use download::{
     DownloadOptions, DownloadProgress, Downloaded, Downloader, Fetched, MemorySink, Sink, download,
     stream,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use events::FeedMessage;
 pub use place::{Existing, path_key, place, target};
 #[cfg(not(target_arch = "wasm32"))]
 pub use source::FileSource;

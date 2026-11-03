@@ -69,6 +69,7 @@ async fn world(pool: PgPool) -> World {
             setup: theca_core::api::setup::SetupState::done(),
             limits: Default::default(),
             proxies: Default::default(),
+            events: theca_core::events::Registry::new(theca_core::events::INTERVAL),
         }),
         pool,
         organizations: [organizations[0], organizations[1]],
@@ -678,7 +679,8 @@ async fn app_passwords_only_reach_data(pool: PgPool) {
         StatusCode::OK
     );
 
-    // No account actions, no more app passwords, no logout.
+    // No account actions, no more app passwords (logging out revokes it:
+    // an_app_password_logs_itself_out).
     let sessions = w.with("GET", "/api/v1/auth/sessions", cli, None).await;
     assert_eq!(sessions.code(), "full_session_required");
     let more = w
@@ -688,10 +690,6 @@ async fn app_passwords_only_reach_data(pool: PgPool) {
     assert_eq!(more.code(), "session_required");
     let listed = w.with("GET", "/api/v1/auth/app-passwords", cli, None).await;
     assert_eq!(listed.code(), "session_required");
-    let logout = w
-        .with("POST", "/api/v1/auth/logout", cli, Some(json!({})))
-        .await;
-    assert_eq!(logout.status, StatusCode::FORBIDDEN);
 
     // Not a login password either.
     let token = password.strip_prefix("Bearer ").unwrap();
@@ -1499,4 +1497,214 @@ async fn oidc_sign_up(pool: PgPool) {
         refused.location.as_deref(),
         Some("http://test/login?error=unknown_identity")
     );
+}
+
+impl World {
+    /// A request without any credential.
+    async fn anonymous(&self, method: &str, path: &str, body: Value) -> Response {
+        let request = Request::builder()
+            .method(method)
+            .uri(path)
+            .header("content-type", "application/json");
+        self.send(request, Some(body)).await
+    }
+
+    /// Starts a login flow: (its UUID, poll secret, code).
+    async fn start_flow(&self, name: &str) -> (Uuid, String, String) {
+        let started = self
+            .anonymous("POST", "/api/v1/auth/flows", json!({ "name": name }))
+            .await;
+        assert_eq!(started.status, StatusCode::CREATED, "{started:?}");
+        let flow: api::LoginFlow = serde_json::from_value(started.body).unwrap();
+        let id = flow
+            .url
+            .rsplit_once("/connect/")
+            .unwrap()
+            .1
+            .parse()
+            .unwrap();
+        (id, flow.poll, flow.code)
+    }
+
+    async fn poll_flow(&self, poll: &str) -> Response {
+        self.anonymous("POST", "/api/v1/auth/flows/poll", json!({ "poll": poll }))
+            .await
+    }
+}
+
+/// A device logs in through the browser: started anonymously, shown and
+/// approved from a full session, its app password returned by one poll only.
+#[sqlx::test]
+async fn login_flow(pool: PgPool) {
+    let w = world(pool).await;
+    let session = w.login("a@x.ch", PASSWORD).await.session();
+    let a = ("cookie", session.as_str());
+    let (id, poll, code) = w.start_flow("pascal-mbp").await;
+    assert!(
+        code.len() == 7
+            && code.chars().enumerate().all(|(i, c)| if i == 3 {
+                c == '-'
+            } else {
+                c.is_ascii_uppercase() || c.is_ascii_digit()
+            }),
+        "{code}"
+    );
+
+    // Pending: the device waits; the page shows its name and code.
+    assert_eq!(w.poll_flow(&poll).await.status, StatusCode::ACCEPTED);
+    let shown = w
+        .with("GET", &format!("/api/v1/auth/flows/{id}"), a, None)
+        .await;
+    assert_eq!(shown.status, StatusCode::OK);
+    assert_eq!(shown.body["name"], "pascal-mbp");
+    assert_eq!(shown.body["code"], code.as_str());
+
+    // Approved: one poll gets an app password for the whole account.
+    let approve = format!("/api/v1/auth/flows/{id}/approve");
+    assert_eq!(
+        w.with("POST", &approve, a, Some(json!({}))).await.status,
+        StatusCode::NO_CONTENT
+    );
+    let polled = w.poll_flow(&poll).await;
+    assert_eq!(polled.status, StatusCode::OK);
+    let created: api::NewAppPassword = serde_json::from_value(polled.body).unwrap();
+    assert_eq!(created.app_password.name, "pascal-mbp");
+    assert!(created.app_password.organization.is_none() && !created.app_password.read_only);
+    let bearer = format!("Bearer {}", created.password);
+    let device = ("authorization", bearer.as_str());
+    assert_eq!(
+        w.with("GET", "/api/v1/libraries", device, None)
+            .await
+            .status,
+        StatusCode::OK
+    );
+    let listed = w.with("GET", "/api/v1/auth/app-passwords", a, None).await;
+    assert_eq!(listed.body[0]["name"], "pascal-mbp");
+
+    // Gone: a second poll, the page, a second approval.
+    assert_eq!(w.poll_flow(&poll).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        w.with("GET", &format!("/api/v1/auth/flows/{id}"), a, None)
+            .await
+            .status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        w.with("POST", &approve, a, Some(json!({}))).await.status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(w.poll_flow("th_00.00").await.status, StatusCode::NOT_FOUND);
+}
+
+/// Only a full session approves (an app password for the whole account);
+/// nobody anonymous sees a flow; a flow expires after 15 minutes; a name is
+/// checked.
+#[sqlx::test]
+async fn login_flow_refusals(pool: PgPool) {
+    let w = world(pool).await;
+    let session = w.login("a@x.ch", PASSWORD).await.session();
+    let a = ("cookie", session.as_str());
+    let (id, poll, _) = w.start_flow("laptop").await;
+    let show = format!("/api/v1/auth/flows/{id}");
+    let approve = format!("/api/v1/auth/flows/{id}/approve");
+
+    let shown = w.anonymous("GET", &show, json!({})).await;
+    assert_eq!(shown.status, StatusCode::UNAUTHORIZED);
+    let password = w.app_password(a, json!({ "name": "cli" })).await.unwrap();
+    let refused = w
+        .with(
+            "POST",
+            &approve,
+            ("authorization", &password),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(refused.status, StatusCode::FORBIDDEN);
+    assert_eq!(refused.code(), "full_session_required");
+    let account: Uuid = sqlx::query_scalar("SELECT uuid FROM account WHERE pk = 1")
+        .fetch_one(&w.pool)
+        .await
+        .unwrap();
+    let (token, _) = theca_core::db::account::create_session(&w.pool, account, Some(2), None, None)
+        .await
+        .unwrap();
+    let restricted = format!("Bearer {}", token.token);
+    let refused = w
+        .with(
+            "POST",
+            &approve,
+            ("authorization", &restricted),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(refused.code(), "full_session_required");
+    assert_eq!(w.poll_flow(&poll).await.status, StatusCode::ACCEPTED);
+
+    // Expired, approved or not.
+    sqlx::query("UPDATE login_flow SET created_at = now() - interval '16 minutes'")
+        .execute(&w.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        w.with("GET", &show, a, None).await.status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        w.with("POST", &approve, a, Some(json!({}))).await.status,
+        StatusCode::NOT_FOUND
+    );
+    let (late, late_poll, _) = w.start_flow("late").await;
+    let late_approve = format!("/api/v1/auth/flows/{late}/approve");
+    assert_eq!(
+        w.with("POST", &late_approve, a, Some(json!({})))
+            .await
+            .status,
+        StatusCode::NO_CONTENT
+    );
+    sqlx::query("UPDATE login_flow SET created_at = now() - interval '16 minutes'")
+        .execute(&w.pool)
+        .await
+        .unwrap();
+    assert_eq!(w.poll_flow(&late_poll).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(w.poll_flow(&poll).await.status, StatusCode::NOT_FOUND);
+
+    for name in ["", "   ", &"x".repeat(201)] {
+        let refused = w
+            .anonymous("POST", "/api/v1/auth/flows", json!({ "name": name }))
+            .await;
+        assert_eq!(refused.code(), "invalid_name", "{name:?}");
+    }
+}
+
+/// An app password logging out revokes itself, and nothing else.
+#[sqlx::test]
+async fn an_app_password_logs_itself_out(pool: PgPool) {
+    let w = world(pool).await;
+    let session = w.login("a@x.ch", PASSWORD).await.session();
+    let a = ("cookie", session.as_str());
+    let one = w.app_password(a, json!({ "name": "one" })).await.unwrap();
+    let two = w.app_password(a, json!({ "name": "two" })).await.unwrap();
+    let out = w
+        .with(
+            "POST",
+            "/api/v1/auth/logout",
+            ("authorization", &one),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(out.status, StatusCode::NO_CONTENT);
+    assert!(
+        out.cookies.is_empty(),
+        "no cookie to clear for a Bearer credential"
+    );
+    for (auth, expected) in [
+        (("authorization", one.as_str()), StatusCode::UNAUTHORIZED),
+        (("authorization", two.as_str()), StatusCode::OK),
+        (a, StatusCode::OK),
+    ] {
+        assert_eq!(
+            w.with("GET", "/api/v1/libraries", auth, None).await.status,
+            expected
+        );
+    }
 }

@@ -154,9 +154,9 @@ impl From<sqlx::Error> for HttpError {
     }
 }
 
-impl From<crate::files::FileError> for HttpError {
-    fn from(error: crate::files::FileError) -> Self {
-        use crate::files::FileError as E;
+impl From<crate::actions::FileError> for HttpError {
+    fn from(error: crate::actions::FileError) -> Self {
+        use crate::actions::FileError as E;
         match error {
             E::NotFound(what) => Self::not_found(what),
             E::ReadOnly => Self::forbidden("read-only access to this library"),

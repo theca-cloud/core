@@ -55,7 +55,8 @@ impl SessionLifetime {
 }
 
 /// The credential for a token presented by a client: not revoked, and for a
-/// session, within its lifetimes. Slides `last_seen` (written at most every
+/// session, within its lifetimes (the same conditions as [`valid_tokens`]:
+/// change both). Slides `last_seen` (written at most every
 /// [`LAST_SEEN_PRECISION`]).
 pub async fn authenticate(
     pool: &PgPool,
@@ -97,6 +98,27 @@ pub async fn authenticate(
         library: r.library,
         read_only: r.read_only,
     }))
+}
+
+/// Of `tokens`, those still valid (the conditions of [`authenticate`]: not
+/// revoked, a session within its lifetimes, the account not suspended).
+pub async fn valid_tokens(
+    db: impl sqlx::PgExecutor<'_>,
+    tokens: &[i64],
+    lifetime: SessionLifetime,
+) -> sqlx::Result<Vec<i64>> {
+    let (idle, max) = lifetime.secs();
+    sqlx::query_scalar!(
+        r#"SELECT t.pk FROM token t JOIN account a ON a.uuid = t.resource AND a.suspended_at IS NULL
+           WHERE t.pk = ANY($1) AND t.usage IN ('session', 'app_password') AND t.revoked_at IS NULL
+             AND (t.usage <> 'session' OR (t.last_seen > now() - make_interval(secs => $2)
+                  AND ($3::float8 IS NULL OR t.created_at > now() - make_interval(secs => $3))))"#,
+        tokens,
+        idle,
+        max
+    )
+    .fetch_all(db)
+    .await
 }
 
 /// Self-registration: an unverified account with its password and its
@@ -409,16 +431,35 @@ pub async fn create_app_password(
     scope: Scope,
     read_only: bool,
 ) -> sqlx::Result<(OpaqueToken, api::AppPassword)> {
+    let (token, uuid, _) =
+        insert_app_password(pool, who.account_uuid, name, scope, read_only).await?;
+    let created = app_passwords(pool, who)
+        .await?
+        .into_iter()
+        .find(|p| p.id == uuid)
+        .expect("just created");
+    Ok((token, created))
+}
+
+/// Inserts an app password for the account `account` (its UUID): the token,
+/// and the row's UUID and creation time.
+pub async fn insert_app_password(
+    db: impl sqlx::PgExecutor<'_>,
+    account: Uuid,
+    name: &str,
+    scope: Scope,
+    read_only: bool,
+) -> sqlx::Result<(OpaqueToken, Uuid, chrono::DateTime<chrono::Utc>)> {
     let token = OpaqueToken::generate();
     let (organization, library) = match scope {
         Scope::Account => (None, None),
         Scope::Organization(o) => (Some(o), None),
         Scope::Library(o, l) => (Some(o), Some(l)),
     };
-    let uuid = sqlx::query_scalar!(
+    let row = sqlx::query!(
         "INSERT INTO token (usage, resource, name, prefix, hash, organization, library, read_only)
-         VALUES ('app_password', $1, $2, $3, $4, $5, $6, $7) RETURNING uuid",
-        who.account_uuid,
+         VALUES ('app_password', $1, $2, $3, $4, $5, $6, $7) RETURNING uuid, created_at",
+        account,
         name,
         token.prefix,
         &token.hash[..],
@@ -426,14 +467,9 @@ pub async fn create_app_password(
         library,
         read_only
     )
-    .fetch_one(pool)
+    .fetch_one(db)
     .await?;
-    let created = app_passwords(pool, who)
-        .await?
-        .into_iter()
-        .find(|p| p.id == uuid)
-        .expect("just created");
-    Ok((token, created))
+    Ok((token, row.uuid, row.created_at))
 }
 
 /// The account's app passwords (a restricted session: only those limited to

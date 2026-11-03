@@ -123,10 +123,10 @@ pub async fn login(
 /// cookie in any case. No session needed: an expired or revoked session's
 /// cookie would otherwise stay, as only the server clears an `httpOnly`
 /// cookie. A valid session stays protected by the CSRF rule (a `POST`, never
-/// a `GET` another site could trigger). App passwords can't log out.
+/// a `GET` another site could trigger). An app password logging out revokes
+/// itself: a device signing out, its credential gone with it.
 #[utoipa::path(post, path = "/api/v1/auth/logout", responses(
     (status = 204),
-    (status = 403, description = "`not_a_session` (an app password)", body = api::ApiError),
 ))]
 pub async fn logout(
     State(state): State<AppState>,
@@ -134,9 +134,8 @@ pub async fn logout(
 ) -> Result<(StatusCode, HeaderMap), HttpError> {
     if let Some(axum::Extension(account)) = credential {
         if !account.session {
-            return Err(
-                HttpError::forbidden("app passwords can't log out").into_code("not_a_session")
-            );
+            db::account::revoke_app_password(&state.pool, &account, account.token_uuid).await?;
+            return Ok((StatusCode::NO_CONTENT, HeaderMap::new()));
         }
         db::account::revoke_session(
             &state.pool,

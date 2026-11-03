@@ -196,16 +196,16 @@ pub async fn add(
         ));
     }
     let inviter = db::account::email_of(&mut *state.pool.acquire().await?, account.account).await?;
-    let mut tx = state.pool.begin().await?;
-    let user = match db::organization::add(&mut tx, &organization, &inviter, email).await? {
-        Added::Joined(user) => user,
-        Added::Invited(_) if state.settings.get().smtp.is_none() => return Err(email_unavailable()),
-        Added::Invited(user) => user,
-        Added::AlreadyMember => {
+    let can_invite = state.settings.get().smtp.is_some();
+    let added =
+        crate::actions::member::add(&state, &organization, &inviter, email, can_invite).await?;
+    let user = match added {
+        Some(Added::Joined(user) | Added::Invited(user)) => user,
+        None => return Err(email_unavailable()),
+        Some(Added::AlreadyMember) => {
             return Err(HttpError::conflict("already_member", "already a member"));
         }
     };
-    tx.commit().await?;
     let member = db::organization::members(&state.pool, organization.pk)
         .await?
         .into_iter()
@@ -233,8 +233,7 @@ pub async fn remove(
     Path((id, user)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, HttpError> {
     let organization = owned(&state, &account, id).await?;
-    let mut tx = state.pool.begin().await?;
-    match db::organization::remove(&mut tx, organization.pk, user).await {
+    match crate::actions::member::leave(&state, organization.pk, user).await {
         Ok(()) => {}
         Err(RemoveError::NotFound) => return Err(HttpError::not_found("member")),
         Err(RemoveError::Owner) => {
@@ -242,7 +241,6 @@ pub async fn remove(
         }
         Err(RemoveError::Db(e)) => return Err(e.into()),
     }
-    tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -376,9 +374,7 @@ pub async fn delete_organization(
 
 /// Deletes an organization and starts the GC (also for the admin API).
 pub(super) async fn erase(state: &AppState, organization: i64) -> Result<StatusCode, HttpError> {
-    let mut tx = state.pool.begin().await?;
-    db::deletion::organization(&mut tx, organization).await?;
-    tx.commit().await?;
+    crate::actions::member::delete_organization(state, organization).await?;
     crate::jobs::trigger(state, crate::jobs::Job::ChunkGc).await;
     tracing::info!(organization, "organization deleted");
     Ok(StatusCode::NO_CONTENT)

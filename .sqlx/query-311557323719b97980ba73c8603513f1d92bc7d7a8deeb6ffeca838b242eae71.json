@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT l.pk, l.uuid AS id, o.uuid AS organization, l.name, n.uuid AS root,\n                      a.can_write AS \"writable!\", l.deleted_at IS NOT NULL AS \"trashed!\", l.event_seq\n               FROM library_access_any($1) a\n               JOIN library l ON l.pk = a.library\n               JOIN organization o ON o.pk = l.owner\n               JOIN node n ON n.library = l.pk AND n.parent IS NULL\n               ORDER BY lower(o.name), lower(l.name)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "organization",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "root",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "writable!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "trashed!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "event_seq",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      null,
+      false
+    ]
+  },
+  "hash": "311557323719b97980ba73c8603513f1d92bc7d7a8deeb6ffeca838b242eae71"
+}

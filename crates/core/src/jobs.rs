@@ -419,9 +419,7 @@ async fn trash_purge(state: &AppState) -> Result<i64, JobError> {
         }
         for node in nodes {
             // A node inside an already purged folder went with it.
-            let mut tx = state.pool.begin().await?;
-            crate::db::node::purge(&mut tx, node).await?;
-            tx.commit().await?;
+            crate::actions::node::purge_expired(state, node).await?;
             purged += 1;
         }
     }
@@ -439,15 +437,13 @@ async fn trash_purge(state: &AppState) -> Result<i64, JobError> {
             return Ok(purged);
         }
         for library in libraries {
-            let mut tx = state.pool.begin().await?;
-            crate::db::library::purge(&mut tx, library).await?;
-            tx.commit().await?;
+            crate::actions::library::purge_expired(state, library).await?;
             purged += 1;
         }
     }
 }
 
-/// Revoked tokens and expired sessions, job history and emails older than 30
+/// Revoked tokens and expired sessions, expired login flows, job history and emails older than 30
 /// days, expired invitations, never verified accounts.
 async fn cleanup(state: &AppState) -> Result<i64, JobError> {
     let lifetime = state.settings.get().session_lifetime();
@@ -486,6 +482,12 @@ async fn cleanup(state: &AppState) -> Result<i64, JobError> {
         crate::db::organization::delete_if_phantom(&mut *state.pool.acquire().await?, row.account)
             .await?;
     }
+    // Login flows past their 15 minutes, approved or not.
+    let flows =
+        sqlx::query!("DELETE FROM login_flow WHERE created_at < now() - interval '15 minutes'")
+            .execute(&state.pool)
+            .await?
+            .rows_affected();
     // Deleted organizations whose last chunk the GC has removed.
     let deleted = sqlx::query!(
         "DELETE FROM organization o WHERE o.deleted_at IS NOT NULL
@@ -508,7 +510,9 @@ async fn cleanup(state: &AppState) -> Result<i64, JobError> {
     for &account in &unverified {
         delete_unverified(&state.pool, account).await?;
     }
-    Ok((tokens + runs + emails + deleted) as i64 + expired.len() as i64 + unverified.len() as i64)
+    Ok((tokens + runs + emails + flows + deleted) as i64
+        + expired.len() as i64
+        + unverified.len() as i64)
 }
 
 /// Deletes a never verified account: its memberships, its personal

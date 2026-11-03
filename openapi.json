@@ -7,7 +7,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "1.2.0"
+    "version": "1.3.0"
   },
   "paths": {
     "/api/health": {
@@ -1064,6 +1064,198 @@
         }
       }
     },
+    "/api/v1/auth/flows": {
+      "post": {
+        "tags": [
+          "flows"
+        ],
+        "summary": "Start a login flow: anyone may, limited per address like logins.",
+        "operationId": "start_login_flow",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartLoginFlow"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginFlow"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_name`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/flows/poll": {
+      "post": {
+        "tags": [
+          "flows"
+        ],
+        "summary": "Poll a flow: `202` while it waits, the app password once approved (the\nflow then gone), `404` when expired or unknown.",
+        "operationId": "poll_login_flow",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PollLoginFlow"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewAppPassword"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Not approved yet"
+          },
+          "404": {
+            "description": "Unknown, expired, or already returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/flows/{id}": {
+      "get": {
+        "tags": [
+          "flows"
+        ],
+        "summary": "A flow waiting for approval: what the approval page shows.",
+        "operationId": "login_flow",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingLoginFlow"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`full_session_required`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown, expired or already approved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/flows/{id}/approve": {
+      "post": {
+        "tags": [
+          "flows"
+        ],
+        "summary": "Approve a flow: its device gets an app password for this account at its\nnext poll. A full session only: an app password for the whole account.",
+        "operationId": "approve_login_flow",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": "`full_session_required`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown, expired or already approved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/identities": {
       "get": {
         "tags": [
@@ -1199,21 +1391,11 @@
         "tags": [
           "session"
         ],
-        "summary": "Log out: revokes this session at once if it's still valid, and clears the\ncookie in any case. No session needed: an expired or revoked session's\ncookie would otherwise stay, as only the server clears an `httpOnly`\ncookie. A valid session stays protected by the CSRF rule (a `POST`, never\na `GET` another site could trigger). App passwords can't log out.",
+        "summary": "Log out: revokes this session at once if it's still valid, and clears the\ncookie in any case. No session needed: an expired or revoked session's\ncookie would otherwise stay, as only the server clears an `httpOnly`\ncookie. A valid session stays protected by the CSRF rule (a `POST`, never\na `GET` another site could trigger). An app password logging out revokes\nitself: a device signing out, its credential gone with it.",
         "operationId": "logout",
         "responses": {
           "204": {
             "description": ""
-          },
-          "403": {
-            "description": "`not_a_session` (an app password)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
           }
         }
       }
@@ -2063,6 +2245,47 @@
         }
       }
     },
+    "/api/v1/events": {
+      "post": {
+        "tags": [
+          "events"
+        ],
+        "summary": "The changes to the libraries the credential can access, from its\npositions, then live: Server-Sent Events. `event: libraries` (data: every\nlibrary it can access, trash included, each with its position) at the\nstart and whenever that changes; `event: changes` (data: one batch,\ncollapsed per resource, with the new positions); a `:` comment every 30 s.\nA cut stream resumes from the last positions received.",
+        "operationId": "events",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Events"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events: `libraries` (a list of FeedLibrary), then `changes` (Changes)",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changes"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`too_many_streams`: at most 10 per credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/files/commit": {
       "post": {
         "tags": [
@@ -2444,6 +2667,46 @@
       }
     },
     "/api/v1/libraries/{id}": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "A library, with the size and number of its files (their current versions,\noutside the trash): a sync client decides from it whether to sync it.",
+        "operationId": "library",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "tags": [
           "v1"
@@ -4802,6 +5065,41 @@
           }
         }
       },
+      "Change": {
+        "type": "object",
+        "description": "A changed resource, collapsed over the events of one batch.",
+        "required": [
+          "id",
+          "kind",
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/EventAction",
+            "description": "Its latest event in the batch."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The node or the library."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ResourceKind",
+            "description": "A node or a library."
+          },
+          "state": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ChangeState",
+                "description": "Its current state; none when it's gone for this credential (purged,\ntrashed, or now somewhere it can't access)."
+              }
+            ]
+          }
+        }
+      },
       "ChangePassword": {
         "type": "object",
         "description": "A password change: the current one, and the new one.",
@@ -4817,6 +5115,94 @@
           "new": {
             "type": "string",
             "description": "The new password (at least 8 characters, and strong enough)."
+          }
+        }
+      },
+      "ChangeState": {
+        "type": "object",
+        "description": "A resource's current state, when read.",
+        "required": [
+          "library",
+          "name"
+        ],
+        "properties": {
+          "current_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "A file's current version."
+          },
+          "is_file": {
+            "type": "boolean",
+            "description": "A file (true) or a folder or library (false)."
+          },
+          "library": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The library it is in (a library: itself)."
+          },
+          "modified": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "A file's modification time."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "A node's parent folder; none for a library."
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "A file's size in bytes."
+          },
+          "trashed": {
+            "type": "boolean",
+            "description": "A library in its organization's trash."
+          }
+        }
+      },
+      "Changes": {
+        "type": "object",
+        "description": "The event feed's `changes` message: one batch, collapsed per resource;\nlibraries first, then nodes parents first, then those gone.",
+        "required": [
+          "entries",
+          "positions"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Change"
+            },
+            "description": "The changed resources."
+          },
+          "positions": {
+            "type": "object",
+            "description": "The new position of each library the batch covered.",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "propertyNames": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         }
       },
@@ -5382,6 +5768,40 @@
           }
         }
       },
+      "EventAction": {
+        "type": "string",
+        "description": "What happened to a resource (its latest event, for display: the state is\nwhat a client applies).",
+        "enum": [
+          "created",
+          "versioned",
+          "touched",
+          "version_restored",
+          "renamed",
+          "moved",
+          "trashed",
+          "restored",
+          "purged",
+          "unknown"
+        ]
+      },
+      "Events": {
+        "type": "object",
+        "description": "`POST /events`: the cursor, the last event the client applied in each\nlibrary it follows. Empty on a first launch.",
+        "properties": {
+          "after": {
+            "type": "object",
+            "description": "Library → the number of the last event applied.",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "propertyNames": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      },
       "Export": {
         "type": "object",
         "description": "Everything the server holds about an account (`GET /me/export`), never\nsecrets. Files come through the usual paths (CLI, WebDAV).",
@@ -5743,6 +6163,34 @@
           }
         }
       },
+      "LibraryInfo": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Library",
+            "description": "The library (its fields inline)."
+          },
+          {
+            "type": "object",
+            "required": [
+              "size",
+              "files"
+            ],
+            "properties": {
+              "files": {
+                "type": "integer",
+                "format": "int64",
+                "description": "How many files."
+              },
+              "size": {
+                "type": "integer",
+                "format": "int64",
+                "description": "The sum of their sizes, in bytes."
+              }
+            }
+          }
+        ],
+        "description": "A library and how much it holds: its files' current versions, outside the\ntrash (what a sync client would download)."
+      },
       "LibraryMember": {
         "type": "object",
         "description": "A library's member.",
@@ -5822,6 +6270,29 @@
               "null"
             ],
             "description": "The current TOTP code (or a recovery code), if TOTP is on. Without it,\na right password gets `totp_required`: ask for the code, send again."
+          }
+        }
+      },
+      "LoginFlow": {
+        "type": "object",
+        "description": "A login flow, as its device sees it: valid 15 minutes.",
+        "required": [
+          "url",
+          "poll",
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Shown by the device: the approval page shows it too."
+          },
+          "poll": {
+            "type": "string",
+            "description": "The secret to poll with (`POST /auth/flows/poll`); never shown."
+          },
+          "url": {
+            "type": "string",
+            "description": "The page where the account approves the device: opened in a browser."
           }
         }
       },
@@ -6331,6 +6802,43 @@
           }
         }
       },
+      "PendingLoginFlow": {
+        "type": "object",
+        "description": "A login flow waiting for approval, as the approval page shows it.",
+        "required": [
+          "name",
+          "code",
+          "created_at"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The code the device shows."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the device started it."
+          },
+          "name": {
+            "type": "string",
+            "description": "The device's name."
+          }
+        }
+      },
+      "PollLoginFlow": {
+        "type": "object",
+        "description": "Poll a login flow.",
+        "required": [
+          "poll"
+        ],
+        "properties": {
+          "poll": {
+            "type": "string",
+            "description": "The flow's poll secret."
+          }
+        }
+      },
       "ProviderInfo": {
         "type": "object",
         "description": "An OIDC identity provider (never its secret).",
@@ -6474,6 +6982,15 @@
             "description": "The password (at least 8 characters)."
           }
         }
+      },
+      "ResourceKind": {
+        "type": "string",
+        "description": "What an event is about.",
+        "enum": [
+          "node",
+          "library",
+          "unknown"
+        ]
       },
       "RestoreNodes": {
         "type": "object",
@@ -6774,6 +7291,19 @@
           "token_required": {
             "type": "boolean",
             "description": "The setup needs the token printed in the server's logs."
+          }
+        }
+      },
+      "StartLoginFlow": {
+        "type": "object",
+        "description": "Start a device's login through the browser (docs/decisions.md, Authentication).",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The device's name, given to its app password (1 to 200 characters)."
           }
         }
       },

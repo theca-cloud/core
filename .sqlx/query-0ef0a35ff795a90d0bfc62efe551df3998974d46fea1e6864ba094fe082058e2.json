@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT n.uuid, l.uuid AS library, p.uuid AS \"parent?\", n.name, n.is_file,\n                      v.uuid AS \"current_version?\", v.size AS \"size?\", v.modified_at AS \"modified?\",\n                      node_path(n.pk) AS \"path!\"\n               FROM node n\n               JOIN library_access_any($1) a ON a.library = n.library\n               JOIN library l ON l.pk = n.library\n               LEFT JOIN node p ON p.pk = n.parent\n               LEFT JOIN version v ON v.pk = n.current_version\n               WHERE n.uuid = ANY($2) AND n.parent IS NOT NULL AND node_reachable(n.pk)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "library",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "parent?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_file",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "current_version?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "size?",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "modified?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "path!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "0ef0a35ff795a90d0bfc62efe551df3998974d46fea1e6864ba094fe082058e2"
+}

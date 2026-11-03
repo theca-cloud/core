@@ -78,6 +78,20 @@ pub struct Library {
     pub writable: bool,
 }
 
+/// A library and how much it holds: its files' current versions, outside the
+/// trash (what a sync client would download).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LibraryInfo {
+    /// The library (its fields inline).
+    #[serde(flatten)]
+    pub library: Library,
+    /// The sum of their sizes, in bytes.
+    pub size: i64,
+    /// How many files.
+    pub files: i64,
+}
+
 /// A file or folder.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -557,6 +571,46 @@ pub struct NewAppPassword {
     pub password: String,
     /// What it is.
     pub app_password: AppPassword,
+}
+
+/// Start a device's login through the browser (docs/decisions.md, Authentication).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct StartLoginFlow {
+    /// The device's name, given to its app password (1 to 200 characters).
+    pub name: String,
+}
+
+/// A login flow, as its device sees it: valid 15 minutes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LoginFlow {
+    /// The page where the account approves the device: opened in a browser.
+    pub url: String,
+    /// The secret to poll with (`POST /auth/flows/poll`); never shown.
+    pub poll: String,
+    /// Shown by the device: the approval page shows it too.
+    pub code: String,
+}
+
+/// A login flow waiting for approval, as the approval page shows it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PendingLoginFlow {
+    /// The device's name.
+    pub name: String,
+    /// The code the device shows.
+    pub code: String,
+    /// When the device started it.
+    pub created_at: DateTime<Utc>,
+}
+
+/// Poll a login flow.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PollLoginFlow {
+    /// The flow's poll secret.
+    pub poll: String,
 }
 
 /// A TOTP secret being set up (not required at login until confirmed).
@@ -1347,4 +1401,201 @@ pub struct ExportedFile {
     pub path: String,
     /// How many versions it has.
     pub versions: i64,
+}
+
+/// `POST /events`: the cursor, the last event the client applied in each
+/// library it follows. Empty on a first launch.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Events {
+    /// Library → the number of the last event applied.
+    #[serde(default)]
+    pub after: BTreeMap<Uuid, i64>,
+}
+
+/// A library of the event feed's `libraries` message: every library the
+/// credential can access, trash included.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct FeedLibrary {
+    /// The library.
+    pub id: Uuid,
+    /// The organization owning it.
+    pub organization: Uuid,
+    /// Its name.
+    pub name: String,
+    /// Its root folder.
+    pub root: Uuid,
+    /// Whether the credential may write in it.
+    #[serde(default)]
+    pub writable: bool,
+    /// In its organization's trash.
+    #[serde(default)]
+    pub trashed: bool,
+    /// The number of its last event: a library the client doesn't follow yet
+    /// is followed from here (after listing its tree).
+    pub position: i64,
+    /// The client's position was beyond this library's last event (the
+    /// database was restored from a backup): it is followed from `position`,
+    /// and the client resyncs it.
+    #[serde(default)]
+    pub reset: bool,
+}
+
+/// What an event is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum ResourceKind {
+    /// A file or a folder.
+    Node,
+    /// A library.
+    Library,
+    /// A kind this version doesn't know.
+    #[serde(other)]
+    Unknown,
+}
+
+/// What happened to a resource (its latest event, for display: the state is
+/// what a client applies).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum EventAction {
+    /// A file or folder created (a commit, a folder, a copy).
+    Created,
+    /// A file's new version.
+    Versioned,
+    /// A file's modification time changed, its content didn't.
+    Touched,
+    /// An older version made current.
+    VersionRestored,
+    /// Renamed in the same folder.
+    Renamed,
+    /// Moved to another folder (perhaps renamed), or to another library.
+    Moved,
+    /// Put in the trash.
+    Trashed,
+    /// Taken out of the trash.
+    Restored,
+    /// Deleted for good.
+    Purged,
+    /// An action this version doesn't know.
+    #[serde(other)]
+    Unknown,
+}
+
+impl ResourceKind {
+    /// As stored (`event.resource_kind`) and serialized.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Node => "node",
+            Self::Library => "library",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+impl EventAction {
+    const ALL: [Self; 9] = [
+        Self::Created,
+        Self::Versioned,
+        Self::Touched,
+        Self::VersionRestored,
+        Self::Renamed,
+        Self::Moved,
+        Self::Trashed,
+        Self::Restored,
+        Self::Purged,
+    ];
+
+    /// As stored (`event.action`) and serialized.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Versioned => "versioned",
+            Self::Touched => "touched",
+            Self::VersionRestored => "version_restored",
+            Self::Renamed => "renamed",
+            Self::Moved => "moved",
+            Self::Trashed => "trashed",
+            Self::Restored => "restored",
+            Self::Purged => "purged",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    /// The action stored as `action`; `Unknown` for any other.
+    pub fn parse(action: &str) -> Self {
+        Self::ALL
+            .into_iter()
+            .find(|a| a.as_str() == action)
+            .unwrap_or(Self::Unknown)
+    }
+}
+
+/// A changed resource, collapsed over the events of one batch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Change {
+    /// The node or the library.
+    pub id: Uuid,
+    /// A node or a library.
+    pub kind: ResourceKind,
+    /// Its latest event in the batch.
+    pub action: EventAction,
+    /// Its current state; none when it's gone for this credential (purged,
+    /// trashed, or now somewhere it can't access).
+    pub state: Option<ChangeState>,
+}
+
+/// A resource's current state, when read.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ChangeState {
+    /// The library it is in (a library: itself).
+    pub library: Uuid,
+    /// A node's parent folder; none for a library.
+    pub parent: Option<Uuid>,
+    /// Its name.
+    pub name: String,
+    /// A file (true) or a folder or library (false).
+    #[serde(default)]
+    pub is_file: bool,
+    /// A file's current version.
+    pub current_version: Option<Uuid>,
+    /// A file's size in bytes.
+    #[serde(default)]
+    pub size: Option<i64>,
+    /// A file's modification time.
+    pub modified: Option<DateTime<Utc>>,
+    /// A library in its organization's trash.
+    #[serde(default)]
+    pub trashed: bool,
+}
+
+/// The event feed's `changes` message: one batch, collapsed per resource;
+/// libraries first, then nodes parents first, then those gone.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Changes {
+    /// The changed resources.
+    pub entries: Vec<Change>,
+    /// The new position of each library the batch covered.
+    pub positions: BTreeMap<Uuid, i64>,
+}
+
+#[cfg(test)]
+mod event_names {
+    use super::EventAction;
+
+    #[test]
+    fn stored_as_serialized() {
+        for action in EventAction::ALL {
+            let json = serde_json::to_value(action).unwrap();
+            assert_eq!(json, action.as_str());
+            assert_eq!(EventAction::parse(action.as_str()), action);
+        }
+        assert_eq!(EventAction::parse("exploded"), EventAction::Unknown);
+    }
 }

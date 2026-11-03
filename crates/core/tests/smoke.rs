@@ -231,6 +231,27 @@ async fn scenario(pool: PgPool, storage: serde_json::Value) {
     let listed = again.children(library.root).await.unwrap();
     assert_eq!(listed.len(), 4);
 
+    // A device logs in through the browser, approved by that session.
+    let device = Client::new(&server.url).unwrap();
+    let flow = device.start_login_flow("smoke device").await.unwrap();
+    assert!(device.poll_login_flow(&flow.poll).await.unwrap().is_none());
+    let id = flow.url.rsplit_once("/connect/").unwrap().1;
+    again
+        .call::<()>(
+            reqwest::Method::POST,
+            &format!("/api/v1/auth/flows/{id}/approve"),
+            Some(&serde_json::json!({})),
+        )
+        .await
+        .unwrap();
+    let created = device.poll_login_flow(&flow.poll).await.unwrap().unwrap();
+    let device = device.with_token(created.password);
+    let files = listed.iter().filter(|n| n.is_file).count();
+    assert_eq!(
+        device.library(library.id).await.unwrap().files,
+        files as i64
+    );
+
     // Logging out revokes that session.
     again.logout().await.unwrap();
     assert_eq!(
@@ -772,4 +793,80 @@ async fn placing_and_streaming(pool: PgPool) {
         .unwrap();
     assert!(chunks.len() > 2);
     assert_eq!(chunks.concat(), big);
+}
+
+/// The feed's next message, in time.
+async fn next<S>(feed: &mut S) -> theca_client::FeedMessage
+where
+    S: futures::Stream<Item = Result<theca_client::FeedMessage, Error>> + Unpin,
+{
+    use futures::StreamExt;
+    tokio::time::timeout(std::time::Duration::from_secs(15), feed.next())
+        .await
+        .expect("a message in time")
+        .expect("the stream goes on")
+        .unwrap()
+}
+
+/// The event feed through `theca-client`: libraries, then changes; the server
+/// restarted mid-stream, the client reconnects by itself from its positions
+/// and loses nothing; a refused credential ends the stream.
+#[sqlx::test]
+async fn the_event_feed_resumes_after_a_cut(pool: PgPool) {
+    use futures::StreamExt;
+    use theca_client::FeedMessage;
+
+    let mut server = start(&pool).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut client = Client::new(&server.url).unwrap();
+    let setup: api::Setup = serde_json::from_value(json!({
+        "admin_email": "admin@test.theca",
+        "admin_password": "a long password",
+        "organization": "Acme",
+        "storages": [{ "name": "main", "implementation": "filesystem", "path": dir.path() }],
+    }))
+    .unwrap();
+    let me = client.setup(&setup, None).await.unwrap();
+    let library = client
+        .create_library(me.organizations[0].organization, "Docs")
+        .await
+        .unwrap();
+    let mut feed = Box::pin(client.events(Default::default()));
+    let FeedMessage::Libraries(libraries) = next(&mut feed).await else {
+        panic!("libraries first");
+    };
+    assert!(libraries.iter().any(|l| l.id == library.id));
+
+    let made = client
+        .create_folders(library.root, &["before".into()])
+        .await
+        .unwrap();
+    let FeedMessage::Changes(changes) = next(&mut feed).await else {
+        panic!("changes");
+    };
+    assert_eq!(changes.entries[0].id, made[0].id);
+
+    // Cut: the server stops; changes made while the client is away reach it.
+    restart(&mut server).await;
+    let made = client
+        .create_folders(library.root, &["while away".into()])
+        .await
+        .unwrap();
+    loop {
+        match next(&mut feed).await {
+            FeedMessage::Libraries(_) => {}
+            FeedMessage::Changes(changes) => {
+                let ids: Vec<_> = changes.entries.iter().map(|c| c.id).collect();
+                assert_eq!(ids, [made[0].id], "only what it missed");
+                break;
+            }
+        }
+    }
+
+    // A credential refused: the error, then the end.
+    let stranger = Client::new(&server.url).unwrap().with_token("not-a-token");
+    let mut feed = Box::pin(stranger.events(Default::default()));
+    let error = feed.next().await.unwrap().unwrap_err();
+    assert_eq!(error.code(), Some("unauthenticated"));
+    assert!(feed.next().await.is_none());
 }

@@ -14,9 +14,9 @@ use super::AppState;
 use super::auth::CurrentAccount;
 use super::error::{ApiJson, HttpError};
 use super::v1::{library_access, require_write};
+use crate::actions;
 use crate::db;
 use crate::db::library::NodeAccess;
-use crate::files;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -91,7 +91,7 @@ pub async fn create_folder(
     }
     let parent = node(&state, &user, id).await?;
     Ok(Json(
-        files::create_folders(&state, &parent, &req.paths).await?,
+        actions::node::create_folders(&state, &parent, &req.paths).await?,
     ))
 }
 
@@ -223,7 +223,8 @@ async fn update_one(
         None => None,
     };
     let name = change.name.as_ref().map(|n| n.as_str());
-    let now = files::rename_move(state, &node, name, parent.as_ref(), change.replace).await?;
+    let now =
+        actions::node::rename_move(state, &node, name, parent.as_ref(), change.replace).await?;
     Ok(db::node::info(&state.pool, now).await?)
 }
 
@@ -264,14 +265,10 @@ async fn trash_one(
         let node = db::node::trashed_access(&state.pool, user, id)
             .await?
             .ok_or_else(|| HttpError::not_found("trashed node"))?;
-        require_write(&node.access)?;
-        let mut tx = state.pool.begin().await?;
-        let freed = db::node::purge(&mut tx, node.node).await?;
-        tx.commit().await?;
-        Ok(freed)
+        Ok(actions::node::purge(state, &node).await?)
     } else {
         let node = node(state, user, id).await?;
-        files::trash(state, &node).await?;
+        actions::node::trash(state, &node).await?;
         Ok(Vec::new())
     }
 }
@@ -304,7 +301,7 @@ async fn copy_one(
     let source = node(state, user, copy.id).await?;
     let dest = node(state, user, copy.parent).await?;
     let name = copy.name.as_ref().map(|n| n.as_str());
-    let made = files::copy(state, &source, &dest, name, copy.replace).await?;
+    let made = actions::node::copy(state, &source, &dest, name, copy.replace).await?;
     Ok(db::node::info(&state.pool, made).await?)
 }
 
@@ -357,11 +354,7 @@ async fn restore_one(
     let node = db::node::trashed_access(&state.pool, user, id)
         .await?
         .ok_or_else(|| HttpError::not_found("trashed node"))?;
-    require_write(&node.access)?;
-    let mut tx = state.pool.begin().await?;
-    let restored = db::node::restore(&mut tx, &node).await?;
-    tx.commit().await?;
-    Ok(restored)
+    Ok(actions::node::restore(state, &node).await?)
 }
 
 /// A file's versions: a tree (branches after conflicts and restores).
@@ -393,7 +386,7 @@ pub async fn restore_version(
     let version = db::node::version_of(&state.pool, file.node, version)
         .await?
         .ok_or_else(|| HttpError::not_found("version"))?;
-    db::node::set_current(&state.pool, file.node, version).await?;
+    actions::node::restore_version(&state, &file, version).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
