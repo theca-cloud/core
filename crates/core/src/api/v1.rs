@@ -4,7 +4,7 @@
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::StatusCode;
-use axum::routing::{get, patch, post};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use theca_common::api;
@@ -26,7 +26,7 @@ pub fn router() -> Router<AppState> {
         .route("/libraries", post(create_library).get(list_libraries))
         .route(
             "/libraries/{id}",
-            patch(update_library).delete(delete_library),
+            get(library).patch(update_library).delete(delete_library),
         )
         .route("/libraries/{id}/restore", post(restore_library))
         .route("/organizations/{id}/trash", get(organization_trash))
@@ -219,6 +219,23 @@ async fn list_libraries(
     user: CurrentAccount,
 ) -> Result<Json<Vec<api::Library>>, HttpError> {
     Ok(Json(db::library::list(&state.pool, &user).await?))
+}
+
+/// A library, with the size and number of its files (their current versions,
+/// outside the trash): a sync client decides from it whether to sync it.
+#[utoipa::path(get, path = "/api/v1/libraries/{id}", operation_id = "library", params(("id" = Uuid, Path)), responses(
+    (status = 200, body = api::LibraryInfo),
+    (status = 404, body = api::ApiError),
+))]
+async fn library(
+    State(state): State<AppState>,
+    user: CurrentAccount,
+    Path(id): Path<Uuid>,
+) -> Result<Json<api::LibraryInfo>, HttpError> {
+    db::library::info(&state.pool, &user, id)
+        .await?
+        .map(Json)
+        .ok_or_else(|| HttpError::not_found("library"))
 }
 
 /// A folder's children.

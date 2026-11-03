@@ -78,6 +78,20 @@ pub struct Library {
     pub writable: bool,
 }
 
+/// A library and how much it holds: its files' current versions, outside the
+/// trash (what a sync client would download).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LibraryInfo {
+    /// The library (its fields inline).
+    #[serde(flatten)]
+    pub library: Library,
+    /// The sum of their sizes, in bytes.
+    pub size: i64,
+    /// How many files.
+    pub files: i64,
+}
+
 /// A file or folder.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -557,6 +571,46 @@ pub struct NewAppPassword {
     pub password: String,
     /// What it is.
     pub app_password: AppPassword,
+}
+
+/// Start a device's login through the browser (docs/decisions.md, Authentication).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct StartLoginFlow {
+    /// The device's name, given to its app password (1 to 200 characters).
+    pub name: String,
+}
+
+/// A login flow, as its device sees it: valid 15 minutes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LoginFlow {
+    /// The page where the account approves the device: opened in a browser.
+    pub url: String,
+    /// The secret to poll with (`POST /auth/flows/poll`); never shown.
+    pub poll: String,
+    /// Shown by the device: the approval page shows it too.
+    pub code: String,
+}
+
+/// A login flow waiting for approval, as the approval page shows it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PendingLoginFlow {
+    /// The device's name.
+    pub name: String,
+    /// The code the device shows.
+    pub code: String,
+    /// When the device started it.
+    pub created_at: DateTime<Utc>,
+}
+
+/// Poll a login flow.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PollLoginFlow {
+    /// The flow's poll secret.
+    pub poll: String,
 }
 
 /// A TOTP secret being set up (not required at login until confirmed).

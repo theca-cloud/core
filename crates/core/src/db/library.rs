@@ -219,6 +219,53 @@ pub async fn create(
 
 /// The libraries the account is a member of, in every organization it has
 /// joined, within the credential's scope.
+/// One library the credential reaches, with the size and number of the files
+/// reachable from its root (their current versions).
+pub async fn info(
+    pool: &PgPool,
+    who: &Credential,
+    library: Uuid,
+) -> sqlx::Result<Option<api::LibraryInfo>> {
+    let row = sqlx::query!(
+        r#"WITH RECURSIVE reachable AS (
+               SELECT n.pk, n.is_file, n.current_version
+               FROM library_access($1) a
+               JOIN library l ON l.pk = a.library
+               JOIN node n ON n.library = l.pk AND n.parent IS NULL
+               WHERE l.uuid = $2
+             UNION ALL
+               SELECT c.pk, c.is_file, c.current_version
+               FROM reachable r JOIN node c ON c.parent = r.pk
+               WHERE NOT r.is_file AND c.deleted_at IS NULL
+           )
+           SELECT l.uuid AS id, o.uuid AS organization, l.name, n.uuid AS root,
+                  a.can_write AS "writable!",
+                  (SELECT coalesce(sum(v.size), 0)::bigint FROM reachable r
+                     JOIN version v ON v.pk = r.current_version) AS "size!",
+                  (SELECT count(*) FROM reachable r WHERE r.is_file) AS "files!"
+           FROM library_access($1) a
+           JOIN library l ON l.pk = a.library
+           JOIN organization o ON o.pk = l.owner
+           JOIN node n ON n.library = l.pk AND n.parent IS NULL
+           WHERE l.uuid = $2"#,
+        who.token,
+        library
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| api::LibraryInfo {
+        library: api::Library {
+            id: r.id,
+            organization: r.organization,
+            name: r.name,
+            root: r.root,
+            writable: r.writable,
+        },
+        size: r.size,
+        files: r.files,
+    }))
+}
+
 pub async fn list(pool: &PgPool, who: &Credential) -> sqlx::Result<Vec<api::Library>> {
     sqlx::query_as!(
         api::Library,

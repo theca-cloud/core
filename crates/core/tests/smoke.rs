@@ -231,6 +231,27 @@ async fn scenario(pool: PgPool, storage: serde_json::Value) {
     let listed = again.children(library.root).await.unwrap();
     assert_eq!(listed.len(), 4);
 
+    // A device logs in through the browser, approved by that session.
+    let device = Client::new(&server.url).unwrap();
+    let flow = device.start_login_flow("smoke device").await.unwrap();
+    assert!(device.poll_login_flow(&flow.poll).await.unwrap().is_none());
+    let id = flow.url.rsplit_once("/connect/").unwrap().1;
+    again
+        .call::<()>(
+            reqwest::Method::POST,
+            &format!("/api/v1/auth/flows/{id}/approve"),
+            Some(&serde_json::json!({})),
+        )
+        .await
+        .unwrap();
+    let created = device.poll_login_flow(&flow.poll).await.unwrap().unwrap();
+    let device = device.with_token(created.password);
+    let files = listed.iter().filter(|n| n.is_file).count();
+    assert_eq!(
+        device.library(library.id).await.unwrap().files,
+        files as i64
+    );
+
     // Logging out revokes that session.
     again.logout().await.unwrap();
     assert_eq!(

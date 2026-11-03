@@ -7,6 +7,7 @@ pub mod auth;
 mod content;
 pub mod error;
 mod events;
+mod flows;
 mod nodes;
 mod oidc;
 mod organizations;
@@ -76,6 +77,10 @@ pub struct AppState {
         app_password::create,
         app_password::list,
         app_password::revoke,
+        flows::start,
+        flows::show,
+        flows::approve,
+        flows::poll,
         totp::start,
         totp::confirm,
         totp::disable,
@@ -90,6 +95,7 @@ pub struct AppState {
         v1::instance,
         v1::create_library,
         v1::list_libraries,
+        v1::library,
         v1::update_library,
         v1::delete_library,
         v1::restore_library,
@@ -192,6 +198,7 @@ pub fn router(state: AppState) -> Router {
                 .merge(events::router())
                 .merge(session::router())
                 .merge(app_password::router())
+                .merge(flows::router())
                 .merge(totp::router())
                 .merge(oidc::router())
                 .layer(axum::middleware::from_fn_with_state(

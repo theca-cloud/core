@@ -58,6 +58,10 @@ struct Library {
     files: Vec<File>,
     /// Names of the trashed files.
     trash: Vec<String>,
+    /// Its event feed's position (the number of its last event) as the admin
+    /// sees it; none in dumps from before the feed (core 1.3.0).
+    #[serde(default)]
+    position: Option<i64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -77,6 +81,25 @@ struct Version {
     author: Option<String>,
     message: Option<String>,
     content: String,
+}
+
+/// Each library's position, as the event feed's `libraries` message
+/// announces it on a stream opened from `after`.
+async fn positions(
+    client: &Client,
+    after: std::collections::BTreeMap<Uuid, i64>,
+) -> std::collections::BTreeMap<Uuid, i64> {
+    use futures::StreamExt;
+    let mut feed = Box::pin(client.events(after));
+    let first = tokio::time::timeout(std::time::Duration::from_secs(15), feed.next())
+        .await
+        .expect("the feed answers")
+        .expect("a message")
+        .unwrap();
+    let theca_client::FeedMessage::Libraries(libraries) = first else {
+        panic!("the feed starts with libraries");
+    };
+    libraries.into_iter().map(|l| (l.id, l.position)).collect()
 }
 
 fn dumps() -> std::path::PathBuf {
@@ -142,7 +165,8 @@ fn new_file(library: &api::Library, parent: Uuid, name: &str) -> Target {
 /// The token in an email's link, from Mailpit (`MAILPIT_TEST_HOST`).
 async fn emailed_token(to: &str) -> String {
     let host = std::env::var("MAILPIT_TEST_HOST").expect("MAILPIT_TEST_HOST: run scripts/dev.sh");
-    let base = format!("http://{host}:8025/api/v1");
+    let api = std::env::var("MAILPIT_TEST_API_PORT").unwrap_or_else(|_| "8025".into());
+    let base = format!("http://{host}:{api}/api/v1");
     let query = format!("to%3A%22{}%22", to.replace('@', "%40"));
     for _ in 0..100 {
         let search = reqwest::get(format!("{base}/search?query={query}"))
@@ -203,6 +227,7 @@ async fn fill() {
     let me = admin.setup(&setup, None).await.unwrap();
     let organization = me.organizations[0].organization;
     let host = std::env::var("MAILPIT_TEST_HOST").expect("MAILPIT_TEST_HOST: run scripts/dev.sh");
+    let smtp_port = std::env::var("MAILPIT_TEST_SMTP_PORT").unwrap_or_else(|_| "1025".into());
     // Emails through Mailpit; the trash kept for ten years, so the purge never
     // empties an old dump's.
     let _: serde_json::Value = admin
@@ -210,7 +235,7 @@ async fn fill() {
             reqwest::Method::PATCH,
             "/api/v1/admin/settings",
             Some(&json!({
-                "smtp_host": host, "smtp_port": "1025", "smtp_tls": "none",
+                "smtp_host": host, "smtp_port": smtp_port, "smtp_tls": "none",
                 "smtp_from": "Theca <theca@upgrade.theca>", "trash_retention_secs": "315360000",
             })),
         )
@@ -416,7 +441,12 @@ async fn fill() {
             listing,
             files: manifest_files,
             trash,
+            position: None,
         });
+    }
+    let positions = positions(&admin, std::collections::BTreeMap::new()).await;
+    for library in &mut libraries {
+        library.position = positions.get(&library.id).copied();
     }
     let manifest = Manifest {
         version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -647,5 +677,44 @@ async fn check(server: &Server, manifest: &Manifest, context: &dyn Fn(&str) -> S
             .map(|t| t.name)
             .collect();
         assert_eq!(trash, library.trash, "{}", what("trash"));
+    }
+
+    // The event feed: each library's numbering survived, and its events
+    // replay from the start up to it.
+    let recorded: std::collections::BTreeMap<Uuid, i64> = manifest
+        .libraries
+        .iter()
+        .filter_map(|l| l.position.map(|p| (l.id, p)))
+        .collect();
+    if !recorded.is_empty() {
+        use futures::StreamExt;
+        let announced = positions(&admin, std::collections::BTreeMap::new()).await;
+        for (library, position) in &recorded {
+            assert_eq!(
+                announced.get(library),
+                Some(position),
+                "{}",
+                context("event positions")
+            );
+        }
+        let from_start = recorded.keys().map(|l| (*l, 0)).collect();
+        let mut feed = Box::pin(admin.events(from_start));
+        let mut reached = std::collections::BTreeMap::new();
+        while reached != recorded {
+            let message = tokio::time::timeout(std::time::Duration::from_secs(15), feed.next())
+                .await
+                .unwrap_or_else(|_| {
+                    panic!("{}: stalled at {reached:?}", context("events replayed"))
+                })
+                .expect("a message")
+                .unwrap();
+            if let theca_client::FeedMessage::Changes(changes) = message {
+                for (library, position) in changes.positions {
+                    if recorded.contains_key(&library) {
+                        reached.insert(library, position);
+                    }
+                }
+            }
+        }
     }
 }

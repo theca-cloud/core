@@ -1,7 +1,8 @@
 name: theca-core
 
 # Dev services. Run scripts/dev.sh rather than `docker compose up` directly:
-# it writes the .env this file reads its variables from.
+# it writes the .env this file reads its variables from, the host ports
+# included (free ones, chosen on its first run).
 services:
   postgres:
     image: postgres:18
@@ -12,7 +13,7 @@ services:
       # Built-in C.UTF-8 collation: full Unicode lower(), identical on every install.
       POSTGRES_INITDB_ARGS: --locale-provider=builtin --builtin-locale=C.UTF-8
     ports:
-      - 127.0.0.1:5432:5432
+      - 127.0.0.1:${POSTGRES_PORT:-5432}:5432
     volumes:
       - ./data/postgres:/var/lib/postgresql
     healthcheck:
@@ -29,9 +30,9 @@ services:
       - ./data/garage/meta:/var/lib/garage/meta
       - ./data/garage/data:/var/lib/garage/data
     ports:
-      - 127.0.0.1:3900:3900
+      - 127.0.0.1:${S3_PORT:-3900}:3900
 
-  # S3 explorer (dev only): http://localhost:3909.
+  # S3 explorer (dev only): http://localhost:$GARAGE_WEBUI_PORT.
   garage-webui:
     image: khairul169/garage-webui:1.1.0
     volumes:
@@ -40,25 +41,25 @@ services:
       API_BASE_URL: http://garage:3903
       S3_ENDPOINT_URL: http://garage:3900
     ports:
-      - 127.0.0.1:3909:3909
+      - 127.0.0.1:${GARAGE_WEBUI_PORT:-3909}:3909
     depends_on:
       - garage
 
-  # Catches every email (dev and tests): SMTP on 1025, web UI and API on
-  # http://localhost:8025.
+  # Catches every email (dev and tests): SMTP on $MAILPIT_SMTP_PORT, web UI
+  # and API on http://localhost:$MAILPIT_PORT.
   mailpit:
     image: axllent/mailpit:v1.31.4
     ports:
-      - 127.0.0.1:1025:1025
-      - 127.0.0.1:8025:8025
+      - 127.0.0.1:${MAILPIT_SMTP_PORT:-1025}:1025
+      - 127.0.0.1:${MAILPIT_PORT:-8025}:8025
 
-  # Database explorer (dev only): http://localhost:8081, no login screen.
+  # Database explorer (dev only): http://localhost:$PGWEB_PORT, no login screen.
   pgweb:
     image: sosedoff/pgweb:latest
     environment:
       PGWEB_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
     ports:
-      - 127.0.0.1:8081:8081
+      - 127.0.0.1:${PGWEB_PORT:-8081}:8081
     depends_on:
       postgres:
         condition: service_healthy

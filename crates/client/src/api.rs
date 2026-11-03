@@ -229,7 +229,7 @@ impl Client {
         self.get("/api/v1/me").await
     }
 
-    /// Revokes the session in use (`not_a_session` with an app password).
+    /// Revokes the credential in use: the session, or the app password.
     pub async fn logout(&self) -> Result<(), Error> {
         self.call(Method::POST, "/api/v1/auth/logout", None::<&()>)
             .await
@@ -237,6 +237,37 @@ impl Client {
 
     pub async fn libraries(&self) -> Result<Vec<api::Library>, Error> {
         self.get("/api/v1/libraries").await
+    }
+
+    /// A library, with the size and number of its files.
+    pub async fn library(&self, library: Uuid) -> Result<api::LibraryInfo, Error> {
+        self.get(&format!("/api/v1/libraries/{library}")).await
+    }
+
+    /// Starts a device's login through the browser (no credential needed).
+    pub async fn start_login_flow(&self, name: &str) -> Result<api::LoginFlow, Error> {
+        self.post(
+            "/api/v1/auth/flows",
+            &api::StartLoginFlow { name: name.into() },
+        )
+        .await
+    }
+
+    /// Polls a login flow: `None` while it waits for approval, the device's
+    /// app password once (`not_found` when expired or already returned).
+    pub async fn poll_login_flow(&self, poll: &str) -> Result<Option<api::NewAppPassword>, Error> {
+        let body = serde_json::to_vec(&api::PollLoginFlow { poll: poll.into() })
+            .map_err(|e| Error::Decode(e.to_string()))?;
+        let response = self
+            .request(Method::POST, "/api/v1/auth/flows/poll")
+            .header("content-type", "application/json")
+            .body(body)
+            .send()
+            .await?;
+        if response.status() == StatusCode::ACCEPTED {
+            return Ok(None);
+        }
+        decode(response).await.map(Some)
     }
 
     pub async fn create_library(

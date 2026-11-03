@@ -1064,6 +1064,198 @@
         }
       }
     },
+    "/api/v1/auth/flows": {
+      "post": {
+        "tags": [
+          "flows"
+        ],
+        "summary": "Start a login flow: anyone may, limited per address like logins.",
+        "operationId": "start_login_flow",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartLoginFlow"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginFlow"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_name`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/flows/poll": {
+      "post": {
+        "tags": [
+          "flows"
+        ],
+        "summary": "Poll a flow: `202` while it waits, the app password once approved (the\nflow then gone), `404` when expired or unknown.",
+        "operationId": "poll_login_flow",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PollLoginFlow"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewAppPassword"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Not approved yet"
+          },
+          "404": {
+            "description": "Unknown, expired, or already returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/flows/{id}": {
+      "get": {
+        "tags": [
+          "flows"
+        ],
+        "summary": "A flow waiting for approval: what the approval page shows.",
+        "operationId": "login_flow",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingLoginFlow"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`full_session_required`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown, expired or already approved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/flows/{id}/approve": {
+      "post": {
+        "tags": [
+          "flows"
+        ],
+        "summary": "Approve a flow: its device gets an app password for this account at its\nnext poll. A full session only: an app password for the whole account.",
+        "operationId": "approve_login_flow",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": "`full_session_required`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown, expired or already approved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/identities": {
       "get": {
         "tags": [
@@ -1199,21 +1391,11 @@
         "tags": [
           "session"
         ],
-        "summary": "Log out: revokes this session at once if it's still valid, and clears the\ncookie in any case. No session needed: an expired or revoked session's\ncookie would otherwise stay, as only the server clears an `httpOnly`\ncookie. A valid session stays protected by the CSRF rule (a `POST`, never\na `GET` another site could trigger). App passwords can't log out.",
+        "summary": "Log out: revokes this session at once if it's still valid, and clears the\ncookie in any case. No session needed: an expired or revoked session's\ncookie would otherwise stay, as only the server clears an `httpOnly`\ncookie. A valid session stays protected by the CSRF rule (a `POST`, never\na `GET` another site could trigger). An app password logging out revokes\nitself: a device signing out, its credential gone with it.",
         "operationId": "logout",
         "responses": {
           "204": {
             "description": ""
-          },
-          "403": {
-            "description": "`not_a_session` (an app password)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
           }
         }
       }
@@ -2485,6 +2667,46 @@
       }
     },
     "/api/v1/libraries/{id}": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "A library, with the size and number of its files (their current versions,\noutside the trash): a sync client decides from it whether to sync it.",
+        "operationId": "library",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "tags": [
           "v1"
@@ -5941,6 +6163,34 @@
           }
         }
       },
+      "LibraryInfo": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Library",
+            "description": "The library (its fields inline)."
+          },
+          {
+            "type": "object",
+            "required": [
+              "size",
+              "files"
+            ],
+            "properties": {
+              "files": {
+                "type": "integer",
+                "format": "int64",
+                "description": "How many files."
+              },
+              "size": {
+                "type": "integer",
+                "format": "int64",
+                "description": "The sum of their sizes, in bytes."
+              }
+            }
+          }
+        ],
+        "description": "A library and how much it holds: its files' current versions, outside the\ntrash (what a sync client would download)."
+      },
       "LibraryMember": {
         "type": "object",
         "description": "A library's member.",
@@ -6020,6 +6270,29 @@
               "null"
             ],
             "description": "The current TOTP code (or a recovery code), if TOTP is on. Without it,\na right password gets `totp_required`: ask for the code, send again."
+          }
+        }
+      },
+      "LoginFlow": {
+        "type": "object",
+        "description": "A login flow, as its device sees it: valid 15 minutes.",
+        "required": [
+          "url",
+          "poll",
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Shown by the device: the approval page shows it too."
+          },
+          "poll": {
+            "type": "string",
+            "description": "The secret to poll with (`POST /auth/flows/poll`); never shown."
+          },
+          "url": {
+            "type": "string",
+            "description": "The page where the account approves the device: opened in a browser."
           }
         }
       },
@@ -6529,6 +6802,43 @@
           }
         }
       },
+      "PendingLoginFlow": {
+        "type": "object",
+        "description": "A login flow waiting for approval, as the approval page shows it.",
+        "required": [
+          "name",
+          "code",
+          "created_at"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The code the device shows."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the device started it."
+          },
+          "name": {
+            "type": "string",
+            "description": "The device's name."
+          }
+        }
+      },
+      "PollLoginFlow": {
+        "type": "object",
+        "description": "Poll a login flow.",
+        "required": [
+          "poll"
+        ],
+        "properties": {
+          "poll": {
+            "type": "string",
+            "description": "The flow's poll secret."
+          }
+        }
+      },
       "ProviderInfo": {
         "type": "object",
         "description": "An OIDC identity provider (never its secret).",
@@ -6981,6 +7291,19 @@
           "token_required": {
             "type": "boolean",
             "description": "The setup needs the token printed in the server's logs."
+          }
+        }
+      },
+      "StartLoginFlow": {
+        "type": "object",
+        "description": "Start a device's login through the browser (docs/decisions.md, Authentication).",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The device's name, given to its app password (1 to 200 characters)."
           }
         }
       },

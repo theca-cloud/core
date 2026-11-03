@@ -431,16 +431,35 @@ pub async fn create_app_password(
     scope: Scope,
     read_only: bool,
 ) -> sqlx::Result<(OpaqueToken, api::AppPassword)> {
+    let (token, uuid, _) =
+        insert_app_password(pool, who.account_uuid, name, scope, read_only).await?;
+    let created = app_passwords(pool, who)
+        .await?
+        .into_iter()
+        .find(|p| p.id == uuid)
+        .expect("just created");
+    Ok((token, created))
+}
+
+/// Inserts an app password for the account `account` (its UUID): the token,
+/// and the row's UUID and creation time.
+pub async fn insert_app_password(
+    db: impl sqlx::PgExecutor<'_>,
+    account: Uuid,
+    name: &str,
+    scope: Scope,
+    read_only: bool,
+) -> sqlx::Result<(OpaqueToken, Uuid, chrono::DateTime<chrono::Utc>)> {
     let token = OpaqueToken::generate();
     let (organization, library) = match scope {
         Scope::Account => (None, None),
         Scope::Organization(o) => (Some(o), None),
         Scope::Library(o, l) => (Some(o), Some(l)),
     };
-    let uuid = sqlx::query_scalar!(
+    let row = sqlx::query!(
         "INSERT INTO token (usage, resource, name, prefix, hash, organization, library, read_only)
-         VALUES ('app_password', $1, $2, $3, $4, $5, $6, $7) RETURNING uuid",
-        who.account_uuid,
+         VALUES ('app_password', $1, $2, $3, $4, $5, $6, $7) RETURNING uuid, created_at",
+        account,
         name,
         token.prefix,
         &token.hash[..],
@@ -448,14 +467,9 @@ pub async fn create_app_password(
         library,
         read_only
     )
-    .fetch_one(pool)
+    .fetch_one(db)
     .await?;
-    let created = app_passwords(pool, who)
-        .await?
-        .into_iter()
-        .find(|p| p.id == uuid)
-        .expect("just created");
-    Ok((token, created))
+    Ok((token, row.uuid, row.created_at))
 }
 
 /// The account's app passwords (a restricted session: only those limited to

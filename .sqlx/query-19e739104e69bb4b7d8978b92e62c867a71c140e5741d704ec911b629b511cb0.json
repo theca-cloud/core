@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT f.pk, f.name, a.uuid AS \"account?\" FROM login_flow f\n           LEFT JOIN account a ON a.pk = f.account\n           WHERE f.poll_hash = $1 AND f.created_at > now() - interval '15 minutes'\n           FOR UPDATE OF f",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "account?",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "19e739104e69bb4b7d8978b92e62c867a71c140e5741d704ec911b629b511cb0"
+}

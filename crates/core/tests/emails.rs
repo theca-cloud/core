@@ -15,6 +15,20 @@ fn mailpit() -> String {
     std::env::var("MAILPIT_TEST_HOST").expect("MAILPIT_TEST_HOST is required: run scripts/dev.sh")
 }
 
+/// A Mailpit port: `MAILPIT_TEST_<name>` (scripts/dev.sh may move them), else
+/// the default CI's Mailpit listens on.
+fn mailpit_port(name: &str, default: u16) -> u16 {
+    dotenvy::dotenv().ok();
+    std::env::var(format!("MAILPIT_TEST_{name}"))
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(default)
+}
+
+fn smtp_port() -> u16 {
+    mailpit_port("SMTP_PORT", 1025)
+}
+
 /// A fresh address.
 fn address(name: &str) -> String {
     format!("{name}-{}@test.theca", Uuid::now_v7())
@@ -36,13 +50,17 @@ async fn configure(pool: &PgPool, registration: &str, smtp_port: u16) {
 }
 
 async fn mail_world(pool: PgPool) -> World {
-    configure(&pool, "open", 1025).await;
+    configure(&pool, "open", smtp_port()).await;
     world(Kind::Filesystem, pool).await
 }
 
 /// A received email: `(subject, text)`, oldest first.
 async fn inbox(to: &str) -> Vec<(String, String)> {
-    let base = format!("http://{}:8025/api/v1", mailpit());
+    let base = format!(
+        "http://{}:{}/api/v1",
+        mailpit(),
+        mailpit_port("API_PORT", 8025)
+    );
     let get = |url: String| async move {
         let bytes = reqwest::get(url).await.unwrap().bytes().await.unwrap();
         serde_json::from_slice::<Value>(&bytes).unwrap()
@@ -584,7 +602,7 @@ async fn invitations_need_smtp(pool: PgPool) {
 /// invalid value refused like a save, nothing stored.
 #[sqlx::test]
 async fn smtp_tests(pool: PgPool) {
-    configure(&pool, "closed", 1025).await;
+    configure(&pool, "closed", smtp_port()).await;
     let w = world(Kind::Filesystem, pool).await;
     // Logged in first: the address then changes to one unique to this test.
     let admin = w.as_user(1).await;
@@ -637,7 +655,7 @@ async fn smtp_tests(pool: PgPool) {
         .fetch_one(&w.pool)
         .await
         .unwrap();
-    assert_eq!(port, "1025");
+    assert_eq!(port, smtp_port().to_string());
     let bob = w.as_user(2).await;
     let refused = bob
         .json::<api::ConnectionTest>("POST", "/api/v1/admin/smtp/test", &json!({}))

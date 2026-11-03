@@ -35,3 +35,27 @@ CREATE TABLE event (
     )
 );
 CREATE INDEX event_actor ON event (actor);
+
+-- Sprint 09, the sync client's browser login (docs/decisions.md, Authentication).
+
+-- login_flow : a device logging in through the browser. The device starts it
+-- (a name, a code it shows) and polls with a secret; the account approves it on
+-- the web app from a full session; the poll that finds it approved creates the
+-- device's app password, returns it, and deletes the flow, in one transaction:
+-- the app password is never stored here. Valid for 15 minutes from creation
+-- (checked by the queries; the cleanup job deletes expired ones).
+CREATE TABLE login_flow (
+    pk bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    uuid uuid NOT NULL UNIQUE DEFAULT uuidv7(),
+    -- The device's name: the app password's.
+    name text NOT NULL CHECK (length(name) BETWEEN 1 AND 200),
+    -- Shown by the device and on the approval page, so the person approving
+    -- checks it's their device's flow.
+    code text NOT NULL,
+    -- SHA-256 of the poll secret, which only the device knows.
+    poll_hash bytea NOT NULL UNIQUE CHECK (length(poll_hash) = 32),
+    -- Who approved it; NULL while pending.
+    account bigint REFERENCES account ON DELETE CASCADE,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX login_flow_account ON login_flow (account);

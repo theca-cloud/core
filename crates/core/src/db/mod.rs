@@ -7,6 +7,7 @@ pub mod admin;
 pub mod chunk;
 pub mod deletion;
 pub mod file;
+pub mod flow;
 pub mod identity;
 pub mod library;
 pub mod node;

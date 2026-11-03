@@ -1110,3 +1110,43 @@ async fn batches_of_nodes(pool: PgPool) {
         (StatusCode::BAD_REQUEST, "batch_too_large".into())
     );
 }
+
+/// A library's size: its files' current versions outside the trash.
+#[sqlx::test]
+async fn library_size(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let mut alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    let path = format!("/api/v1/libraries/{}", docs.id);
+    let sized = |info: api::LibraryInfo| (info.library.name, info.size, info.files);
+    let empty: api::LibraryInfo = alice.get(&path).await.unwrap();
+    assert_eq!(sized(empty), ("Docs".to_owned(), 0, 0));
+
+    let sub = alice.mkdir(docs.root, "sub").await;
+    let a = alice.file(&docs, docs.root, "a.txt", &data(100, 1)).await;
+    alice.file(&docs, sub, "b.txt", &data(200, 2)).await;
+    alice
+        .upload(&docs, json!({ "file": a }), &data(300, 3))
+        .await
+        .unwrap();
+    let full: api::LibraryInfo = alice.get(&path).await.unwrap();
+    assert_eq!(
+        sized(full),
+        ("Docs".to_owned(), 500, 2),
+        "current versions only"
+    );
+
+    alice.trash(sub).await;
+    let trashed: api::LibraryInfo = alice.get(&path).await.unwrap();
+    assert_eq!(
+        (trashed.size, trashed.files),
+        (300, 1),
+        "the trash excluded"
+    );
+
+    let bob = w.as_user(2).await;
+    assert_eq!(
+        bob.get::<api::LibraryInfo>(&path).await.unwrap_err().0,
+        StatusCode::NOT_FOUND
+    );
+}

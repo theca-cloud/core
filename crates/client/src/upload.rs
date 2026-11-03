@@ -30,7 +30,7 @@ use futures::channel::mpsc::TryRecvError;
 use futures::channel::{mpsc, oneshot};
 use futures::future::{Either, select};
 use futures::stream::FuturesUnordered;
-use futures::{StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use theca_common::api;
 use theca_common::chunking::AsyncChunker;
 use theca_common::compression::{CompressionPolicy, compress};
@@ -553,25 +553,62 @@ async fn hash_stage<P: FnMut(&UploadProgress)>(
 }
 
 /// The hash pass of one file: its chunks, read through the chunker.
+/// A source's content as blocks of `BLOCK` bytes. A `Stream` written out, not
+/// `unfold` with a closure returning an `async` block: rustc can't prove that
+/// one `Send` ("not general enough"), and clients spawn the engine.
+struct Blocks<'a> {
+    source: &'a dyn Source,
+    offset: u64,
+    len: u64,
+    reading: Option<rt::BoxFuture<'a, io::Result<Vec<u8>>>>,
+}
+
+impl Stream for Blocks<'_> {
+    type Item = io::Result<Vec<u8>>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        use std::task::Poll;
+        if self.reading.is_none() {
+            if self.offset >= self.len {
+                return Poll::Ready(None);
+            }
+            let (source, offset) = (self.source, self.offset);
+            self.reading = Some(source.read(offset, BLOCK));
+        }
+        let read = match self.reading.as_mut().expect("set above").as_mut().poll(cx) {
+            Poll::Pending => return Poll::Pending,
+            Poll::Ready(read) => read,
+        };
+        self.reading = None;
+        Poll::Ready(match read {
+            Ok(data) if data.is_empty() => None,
+            Ok(data) => {
+                self.offset += data.len() as u64;
+                Some(Ok(data))
+            }
+            Err(e) => {
+                self.offset = self.len;
+                Some(Err(e))
+            }
+        })
+    }
+}
+
 async fn hash<P: FnMut(&UploadProgress)>(
     source: &dyn Source,
     state: &Shared<'_, P>,
     cancel: &Cancel,
 ) -> Result<Vec<Part>, Error> {
     let len = source.len();
-    let blocks = futures::stream::unfold(0u64, move |offset| async move {
-        if offset >= len {
-            return None;
-        }
-        match source.read(offset, BLOCK).await {
-            Ok(data) if data.is_empty() => None,
-            Ok(data) => {
-                let next = offset + data.len() as u64;
-                Some((Ok::<_, io::Error>(data), next))
-            }
-            Err(e) => Some((Err(e), len)),
-        }
-    });
+    let blocks = Blocks {
+        source,
+        offset: 0,
+        len,
+        reading: None,
+    };
     let mut chunker = AsyncChunker::new(Box::pin(blocks).into_async_read());
     let mut chunks = std::pin::pin!(chunker.stream());
     let mut parts = Vec::new();
