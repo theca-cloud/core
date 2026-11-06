@@ -57,9 +57,10 @@ pub fn plausible_modified(t: DateTime<Utc>) -> bool {
 
 /// Creates the file if needed and a new version with the given chunks (in
 /// order), and makes it current. `conflict`: the base wasn't the current version.
-/// The same chunks as the base, still current: nothing is created, the current
-/// version is returned (`unchanged`; the message is dropped), its modification
-/// time set to `modified` if given (a touch). `modified`: the file's time on
+/// The same chunks as the current version: nothing is created, it is returned
+/// (`unchanged`; the message is dropped), its modification time set to
+/// `modified` if given (a touch). The same chunks as a base no longer current:
+/// nothing either, the base returned (`unchanged`), the current one kept. `modified`: the file's time on
 /// the client; none, the commit's.
 pub async fn commit(
     tx: &mut Transaction<'_, Postgres>,
@@ -165,33 +166,47 @@ pub async fn commit(
         .map(|u| allowed.iter().find(|a| a.uuid == *u).expect("allowed").pk)
         .collect();
 
-    // Uploading a folder again only versions what changed.
-    if base.is_some() && base == current {
-        let same: Vec<i64> = sqlx::query_scalar!(
-            "SELECT chunk FROM chunk_in_version WHERE version = $1 ORDER BY position",
-            base
-        )
-        .fetch_all(&mut **tx)
-        .await?;
-        if same == pks {
-            // A touch: the current version's time follows its client (a new
-            // version would copy the chunk list for the same content).
-            let version = sqlx::query!(
-                r#"UPDATE version SET modified_at = coalesce($2, modified_at) WHERE pk = $1
-                   RETURNING uuid, old.modified_at IS DISTINCT FROM new.modified_at AS "touched!""#,
-                base,
-                modified
-            )
+    // Content a version already has changes nothing (decisions.md,
+    // Conflicts): the current one's (a folder uploaded again, a file only
+    // touched, a sync client re-uploading what it downloaded before a crash:
+    // a fork would bury a newer version), or the base's while a newer one is
+    // current (a stale copy only touched: the newer stays current, and the
+    // client downloads it).
+    if let Some(stale) = base
+        && base != current
+        && chunks_of(tx, stale).await? == pks
+    {
+        let version = sqlx::query_scalar!("SELECT uuid FROM version WHERE pk = $1", stale)
             .fetch_one(&mut **tx)
             .await?;
-            return Ok(Committed {
-                file: file_uuid,
-                version: version.uuid,
-                conflict: false,
-                unchanged: true,
-                touched: version.touched,
-            });
-        }
+        return Ok(Committed {
+            file: file_uuid,
+            version,
+            conflict: false,
+            unchanged: true,
+            touched: false,
+        });
+    }
+    if let Some(now) = current
+        && chunks_of(tx, now).await? == pks
+    {
+        // A touch: the current version's time follows its client (a new
+        // version would copy the chunk list for the same content).
+        let version = sqlx::query!(
+            r#"UPDATE version SET modified_at = coalesce($2, modified_at) WHERE pk = $1
+               RETURNING uuid, old.modified_at IS DISTINCT FROM new.modified_at AS "touched!""#,
+            now,
+            modified
+        )
+        .fetch_one(&mut **tx)
+        .await?;
+        return Ok(Committed {
+            file: file_uuid,
+            version: version.uuid,
+            conflict: false,
+            unchanged: true,
+            touched: version.touched,
+        });
     }
 
     let version = sqlx::query!(
@@ -234,6 +249,19 @@ pub async fn commit(
         unchanged: false,
         touched: false,
     })
+}
+
+/// A version's chunks, in order.
+async fn chunks_of(
+    tx: &mut Transaction<'_, Postgres>,
+    version: i64,
+) -> Result<Vec<i64>, sqlx::Error> {
+    sqlx::query_scalar!(
+        "SELECT chunk FROM chunk_in_version WHERE version = $1 ORDER BY position",
+        version
+    )
+    .fetch_all(&mut **tx)
+    .await
 }
 
 /// One chunk of a version, in order.

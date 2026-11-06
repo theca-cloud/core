@@ -35,7 +35,12 @@ pub fn router() -> Router<AppState> {
         .route("/chunks/upload-urls", post(upload_urls))
         .route("/chunks/announce", post(announce))
         .route("/chunks/cancel", post(cancel))
-        .route("/files/commit", post(commit))
+        // A chunk ID is ~39 bytes of JSON: axum's 2 MB default would cap a
+        // commit near 52 GiB of file. 64 MiB is ~1.7 million chunks.
+        .route(
+            "/files/commit",
+            post(commit).layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
+        )
         .route("/files/download", post(download))
         .route(
             "/blobs/{chunk}",

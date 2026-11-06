@@ -198,15 +198,29 @@ async fn unchanged_content_creates_no_version(kind: Kind, pool: PgPool) {
     };
     assert_eq!(count().await, 1);
 
-    // From a base no longer current, the same content is a real version.
+    // From a base no longer current: the base's own content is stale (a sync
+    // client that only touched its copy), so nothing changes, the newer version
+    // stays current; the current one's content forks nothing either (a client
+    // re-uploading what it had downloaded before a crash).
     let v2 = alice
         .upload(&lib, on(v1.version), &data(MIB, 8))
         .await
         .unwrap();
     let stale = alice.upload(&lib, on(v1.version), &content).await.unwrap();
-    assert!(!stale.unchanged && stale.conflict);
-    assert_ne!(stale.version, v2.version);
-    assert_eq!(count().await, 3);
+    assert!(stale.unchanged && !stale.conflict);
+    assert_eq!(stale.version, v1.version, "the base, the newer one kept");
+    let again = alice
+        .upload(&lib, on(v1.version), &data(MIB, 8))
+        .await
+        .unwrap();
+    assert!(again.unchanged && !again.conflict);
+    assert_eq!(again.version, v2.version, "the current version");
+    assert_eq!(count().await, 2);
+    let listed: Vec<api::Node> = alice
+        .get(&format!("/api/v1/nodes/{}/children", lib.root))
+        .await
+        .unwrap();
+    assert_eq!(listed[0].current_version, Some(v2.version));
 }
 
 /// The commit's `modified` is the file's time everywhere; the same chunks with
@@ -981,6 +995,14 @@ async fn commit_errors(kind: Kind, pool: PgPool) {
         (status, error["code"].as_str()),
         (StatusCode::CONFLICT, Some("chunk_missing"))
     );
+
+    // C17: a big file's commit is read (60,000 chunks, ~60 GB, over axum's
+    // 2 MB default body): refused here for its chunks, not for its size.
+    let many: Vec<Uuid> = (0..60_000).map(|_| Uuid::now_v7()).collect();
+    let commit =
+        json!({ "library": lib.id, "parent": lib.root, "name": "big.bin", "chunks": many });
+    let (_, error) = alice.commit(&commit).await.unwrap_err();
+    assert_eq!(error["code"].as_str(), Some("chunk_not_allowed"), "{error}");
 
     let taken = json!({ "name": "MISC", "organization": alice.org });
     let (status, error) = alice
