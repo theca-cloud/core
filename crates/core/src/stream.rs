@@ -91,8 +91,11 @@ impl VersionReader {
             .await?
             .get(c.uuid)
             .await?;
-        let plain =
-            decompress(c.compression, &stored).map_err(|_| StreamError::Corrupted(c.uuid))?;
+        // Never past its size: uploads are checked only against the hash of
+        // the stored bytes, so a writer could store a frame expanding ~255 times.
+        let limit = usize::try_from(c.plain_size).map_err(|_| StreamError::Corrupted(c.uuid))?;
+        let plain = decompress(c.compression, &stored, limit)
+            .map_err(|_| StreamError::Corrupted(c.uuid))?;
         if ChunkHash::of(&plain) != c.hash {
             tracing::error!(chunk = %c.uuid, "a stored chunk doesn't match its hash");
             return Err(StreamError::Corrupted(c.uuid));

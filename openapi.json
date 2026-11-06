@@ -7,7 +7,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "1.3.1"
+    "version": "1.3.2"
   },
   "paths": {
     "/api/health": {
@@ -5403,7 +5403,7 @@
           },
           "unchanged": {
             "type": "boolean",
-            "description": "The same content as the base, still current: no version was created,\n`version` is the current one."
+            "description": "The same content as a version already has: no version was created.\n`version` is the current one when its content matched; the base, when\nthe content was the base's and a newer version is current (stale: that\none stays current)."
           },
           "version": {
             "type": "string",

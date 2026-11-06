@@ -158,6 +158,9 @@ const BLOCK: usize = 4 * 1024 * 1024;
 const LOOKUP_BATCH: usize = 1000;
 /// Files per commit request (the server's limit).
 const COMMIT_BATCH: usize = 100;
+/// Chunks per commit request, at most (~39 bytes each in JSON: about 39 MB,
+/// under the server's 64 MiB for a commit).
+const COMMIT_CHUNKS: usize = 1_000_000;
 /// Rounds of re-uploading chunks the server lost before committing.
 const COMMIT_ROUNDS: usize = 3;
 /// How often a cancel is noticed.
@@ -356,6 +359,7 @@ fn again(error: &Error) -> Error {
             status: *status,
             error: error.clone(),
         },
+        Error::Http(e) => Error::Http(e.clone()),
         Error::Cancelled => Error::Cancelled,
         Error::SourceChanged => Error::SourceChanged,
         Error::Version => Error::Version,
@@ -991,55 +995,75 @@ async fn commit_stage<P: FnMut(&UploadProgress)>(
         if commits.is_empty() {
             continue;
         }
-        let requests: Vec<api::Commit> = commits.iter().map(|(_, c)| c.clone()).collect();
-        let answer = rt::retry(options.retries, || client.commit(&requests)).await;
-        let mut s = lock(state);
-        let outcomes = match answer {
-            Ok(outcomes) => outcomes,
-            Err(e) => {
-                for (f, _) in commits {
-                    s.resolve(f, Err(again(&e)));
+        for commits in by_chunks(commits, COMMIT_CHUNKS) {
+            let requests: Vec<api::Commit> = commits.iter().map(|(_, c)| c.clone()).collect();
+            let answer = rt::retry(options.retries, || client.commit(&requests)).await;
+            let mut s = lock(state);
+            let outcomes = match answer {
+                Ok(outcomes) => outcomes,
+                Err(e) => {
+                    for (f, _) in commits {
+                        s.resolve(f, Err(again(&e)));
+                    }
+                    continue;
                 }
-                continue;
-            }
-        };
-        for ((f, commit), outcome) in commits.into_iter().zip(outcomes) {
-            match outcome {
-                Err(Error::Api { error, .. })
-                    if error.code == "chunk_missing" && s.files[f].rounds + 1 < COMMIT_ROUNDS =>
-                {
-                    // Lost meanwhile (garbage-collected, or cancelled by a
-                    // parallel upload of the same content): those again;
-                    // without a list, every chunk of the file.
-                    s.files[f].rounds += 1;
-                    let library = s.files[f].target.library();
-                    let lost: Vec<Part> = s.files[f]
-                        .parts
-                        .iter()
-                        .zip(&commit.chunks)
-                        .filter(|(_, id)| error.chunks.is_empty() || error.chunks.contains(id))
-                        .map(|(p, _)| *p)
-                        .collect();
-                    let mut again = Vec::new();
-                    for part in lost {
-                        if !again.iter().any(|p: &Part| p.hash == part.hash) {
-                            again.push(part);
+            };
+            for ((f, commit), outcome) in commits.into_iter().zip(outcomes) {
+                match outcome {
+                    Err(Error::Api { error, .. })
+                        if error.code == "chunk_missing"
+                            && s.files[f].rounds + 1 < COMMIT_ROUNDS =>
+                    {
+                        // Lost meanwhile (garbage-collected, or cancelled by a
+                        // parallel upload of the same content): those again;
+                        // without a list, every chunk of the file.
+                        s.files[f].rounds += 1;
+                        let library = s.files[f].target.library();
+                        let lost: Vec<Part> = s.files[f]
+                            .parts
+                            .iter()
+                            .zip(&commit.chunks)
+                            .filter(|(_, id)| error.chunks.is_empty() || error.chunks.contains(id))
+                            .map(|(p, _)| *p)
+                            .collect();
+                        let mut again = Vec::new();
+                        for part in lost {
+                            if !again.iter().any(|p: &Part| p.hash == part.hash) {
+                                again.push(part);
+                            }
+                        }
+                        for part in again {
+                            let key = (library, part.hash);
+                            if let Some(chunk) = s.chunks.get_mut(&key)
+                                && chunk.status == Status::Ready
+                            {
+                                chunk.from = (f, part);
+                            }
+                            s.look_up(key, f, part);
                         }
                     }
-                    for part in again {
-                        let key = (library, part.hash);
-                        if let Some(chunk) = s.chunks.get_mut(&key)
-                            && chunk.status == Status::Ready
-                        {
-                            chunk.from = (f, part);
-                        }
-                        s.look_up(key, f, part);
-                    }
+                    result => s.resolve(f, result),
                 }
-                result => s.resolve(f, result),
             }
         }
     }
+}
+
+/// Commits in requests of at most `max` chunks in all (one alone may be more:
+/// it goes on its own).
+fn by_chunks(commits: Vec<(usize, api::Commit)>, max: usize) -> Vec<Vec<(usize, api::Commit)>> {
+    let mut groups: Vec<Vec<(usize, api::Commit)>> = Vec::new();
+    let mut total = 0;
+    for c in commits {
+        let n = c.1.chunks.len();
+        if groups.is_empty() || total + n > max {
+            groups.push(Vec::new());
+            total = 0;
+        }
+        total += n;
+        groups.last_mut().expect("pushed").push(c);
+    }
+    groups
 }
 
 fn commit_request<P>(state: &State<'_, P>, f: usize, options: &UploadOptions) -> api::Commit {
@@ -1175,5 +1199,55 @@ async fn free<P>(state: &Shared<'_, P>, client: &Client) {
     let ids = std::mem::take(&mut lock(state).to_free);
     if !ids.is_empty() {
         let _ = client.cancel(&ids).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// C17: commits go in requests of at most so many chunks in all.
+    #[test]
+    fn commits_are_cut_by_chunks() {
+        let commit = |n: usize| api::Commit {
+            library: Uuid::nil(),
+            file: None,
+            parent: None,
+            name: None,
+            base_version: None,
+            chunks: vec![Uuid::nil(); n],
+            message: None,
+            modified: None,
+        };
+        let commits = vec![
+            (0, commit(6)),
+            (1, commit(5)),
+            (2, commit(12)),
+            (3, commit(1)),
+        ];
+        let sizes: Vec<Vec<usize>> = by_chunks(commits, 10)
+            .iter()
+            .map(|g| g.iter().map(|(f, _)| *f).collect())
+            .collect();
+        assert_eq!(sizes, [vec![0], vec![1], vec![2], vec![3]]);
+        let commits = vec![(0, commit(3)), (1, commit(3)), (2, commit(5))];
+        assert_eq!(by_chunks(commits, 10).len(), 2);
+    }
+
+    /// C3: a network error stays one when an error is passed on to every file
+    /// waiting on it: transient, retried, not "an unexpected answer".
+    #[tokio::test]
+    async fn a_network_error_stays_transient() {
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", closed.local_addr().unwrap());
+        drop(closed);
+        let e = Client::new(&url).unwrap().limits().await.unwrap_err();
+        assert!(e.transient());
+        assert!(again(&e).transient(), "{}", again(&e));
+        let storage = Error::Storage {
+            chunk: Uuid::nil(),
+            status: 503,
+        };
+        assert!(again(&storage).transient());
     }
 }

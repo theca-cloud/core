@@ -12,7 +12,7 @@ fi
 # A host port: the one .env has, else `default` or the next free one (another
 # project may hold it), kept in .env from then on.
 port() {
-    value=$(sed -n "s/^$1=//p" .env 2>/dev/null)
+    value=$(sed -n "s/^$1=//p" .env 2>/dev/null || true)
     if [ -z "$value" ]; then
         value=$2
         while nc -z 127.0.0.1 "$value" 2>/dev/null; do

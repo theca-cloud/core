@@ -640,10 +640,13 @@ async fn fetch_chunk(
             other => break other?,
         }
     };
+    // Never past its size, `verify` or not: a server could send a frame that
+    // expands ~255 times.
+    let limit = usize::try_from(chunk.plain_size).map_err(|_| Error::Corrupted(chunk.chunk))?;
     let plain =
-        decompress(chunk.compression, &stored).map_err(|_| Error::Corrupted(chunk.chunk))?;
-    if options.verify
-        && (plain.len() as u64 != chunk.plain_size || ChunkHash::of(&plain) != chunk.hash)
+        decompress(chunk.compression, &stored, limit).map_err(|_| Error::Corrupted(chunk.chunk))?;
+    if plain.len() as u64 != chunk.plain_size
+        || (options.verify && ChunkHash::of(&plain) != chunk.hash)
     {
         return Err(Error::Corrupted(chunk.chunk));
     }
@@ -681,6 +684,11 @@ fn again(error: &Error) -> Error {
         Error::Api { status, error } => Error::Api {
             status: *status,
             error: error.clone(),
+        },
+        Error::Http(e) => Error::Http(e.clone()),
+        Error::Storage { chunk, status } => Error::Storage {
+            chunk: *chunk,
+            status: *status,
         },
         Error::Cancelled => Error::Cancelled,
         other => Error::Decode(other.to_string()),

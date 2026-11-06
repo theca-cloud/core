@@ -66,6 +66,9 @@ pub enum CompressionError {
     /// The compressed data is corrupted.
     #[error("corrupted compressed data: {0}")]
     Io(#[from] io::Error),
+    /// More than the chunk's plaintext size: corrupted, or crafted.
+    #[error("the chunk decompresses past its size")]
+    TooLarge,
 }
 
 /// Compresses a plaintext chunk according to the policy. Returns the algorithm
@@ -95,17 +98,29 @@ pub fn compress(
     Ok((policy.algorithm, compressed))
 }
 
-/// Restores the plaintext of a stored chunk.
-pub fn decompress(compression: Compression, data: &[u8]) -> Result<Vec<u8>, CompressionError> {
-    match compression {
-        Compression::None => Ok(data.to_vec()),
+/// Restores the plaintext of a stored chunk, at most `limit` bytes (its
+/// plaintext size): uploads are checked only against the hash of what is
+/// stored, so a crafted frame could otherwise expand ~255 times in memory.
+pub fn decompress(
+    compression: Compression,
+    data: &[u8],
+    limit: usize,
+) -> Result<Vec<u8>, CompressionError> {
+    let out = match compression {
+        Compression::None => data.to_vec(),
         Compression::Lz4 => {
             let mut out = Vec::new();
-            FrameDecoder::new(data).read_to_end(&mut out)?;
-            Ok(out)
+            FrameDecoder::new(data)
+                .take(limit as u64 + 1)
+                .read_to_end(&mut out)?;
+            out
         }
-        Compression::Unknown => Err(CompressionError::Unsupported),
+        Compression::Unknown => return Err(CompressionError::Unsupported),
+    };
+    if out.len() > limit {
+        return Err(CompressionError::TooLarge);
     }
+    Ok(out)
 }
 
 fn encode(algorithm: Compression, chunk: &[u8]) -> Result<Vec<u8>, CompressionError> {
@@ -167,7 +182,7 @@ mod tests {
         let (algo, stored) = compress(&CompressionPolicy::default(), &text()).unwrap();
         assert_eq!(algo, Compression::Lz4);
         assert!(stored.len() < text().len() / 2);
-        assert_eq!(decompress(algo, &stored).unwrap(), text());
+        assert_eq!(decompress(algo, &stored, text().len()).unwrap(), text());
     }
 
     #[test]
@@ -211,13 +226,27 @@ mod tests {
         assert_eq!(compress(&never, &text()).unwrap().0, Compression::None);
     }
 
+    /// C20: a stored chunk never decompresses past its plaintext size: a
+    /// crafted frame (LZ4 expands ~255 times) is refused, not allocated.
+    #[test]
+    fn decompression_is_bounded() {
+        let bomb = encode(Compression::Lz4, &vec![0; 10 * 1024 * 1024]).unwrap();
+        assert!(bomb.len() < 100 * 1024);
+        let max = crate::chunking::MAX_SIZE;
+        assert!(matches!(
+            decompress(Compression::Lz4, &bomb, max),
+            Err(CompressionError::TooLarge)
+        ));
+        assert!(decompress(Compression::None, &[0; 3], 2).is_err());
+    }
+
     #[test]
     fn unknown_algorithm() {
         assert_eq!(
             serde_json::from_str::<Compression>("\"zstd\"").unwrap(),
             Compression::Unknown
         );
-        assert!(decompress(Compression::Unknown, b"x").is_err());
+        assert!(decompress(Compression::Unknown, b"x", 1).is_err());
     }
 
     #[test]

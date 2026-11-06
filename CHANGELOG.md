@@ -1,6 +1,17 @@
 # Changelog
 
 Every release of `core`: the server, `@theca/client`, `openapi.json`.
+## [1.3.2] - 2026-11-06
+
+### Fixes
+
+- Dev.sh on a fresh clone (no .env)
+- What the sync client needs to never lose files (sprint 11)
+
+### Documentation
+
+- **readme**: A Discord link, for questions, support and saying you run Theca
+
 ## [1.3.1] - 2026-11-05
 
 ### Documentation

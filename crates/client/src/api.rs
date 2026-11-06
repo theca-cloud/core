@@ -13,8 +13,10 @@ pub enum Error {
     /// The server refused, with its error (`code` is stable).
     #[error("{} ({}, HTTP {status})", error.message, error.code)]
     Api { status: u16, error: api::ApiError },
+    /// Shared: one network error is passed on to every file waiting on the
+    /// request, and must stay a network error (transient) for each.
     #[error("HTTP: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(#[source] std::sync::Arc<reqwest::Error>),
     #[error("unexpected answer: {0}")]
     Decode(String),
     #[error("{0}")]
@@ -40,6 +42,12 @@ pub enum Error {
     /// never uploaded (`theca_common::name::is_ignored`).
     #[error("{0}: ignored")]
     Ignored(String),
+}
+
+impl From<reqwest::Error> for Error {
+    fn from(e: reqwest::Error) -> Self {
+        Error::Http(std::sync::Arc::new(e))
+    }
 }
 
 impl Error {
@@ -71,15 +79,18 @@ impl Error {
         }
     }
 
-    /// Worth retrying: the network, or the server's or storage's 5xx.
-    pub(crate) fn transient(&self) -> bool {
+    /// Worth retrying as is: the network, the server's or storage's 5xx, a
+    /// rate limit.
+    pub fn transient(&self) -> bool {
         match self {
             #[cfg(not(target_arch = "wasm32"))]
             Error::Http(e) => e.is_timeout() || e.is_connect() || e.is_request(),
             // The browser's fetch doesn't tell a connection error apart.
             #[cfg(target_arch = "wasm32")]
             Error::Http(e) => e.is_timeout() || e.is_request(),
-            Error::Api { status, .. } | Error::Storage { status, .. } => *status >= 500,
+            Error::Api { status, .. } | Error::Storage { status, .. } => {
+                *status >= 500 || *status == 429
+            }
             _ => false,
         }
     }
@@ -100,8 +111,17 @@ impl Client {
     pub fn new(base: &str) -> Result<Self, Error> {
         #[cfg(not(target_arch = "wasm32"))]
         let _ = rustls::crypto::ring::default_provider().install_default();
+        let builder = reqwest::Client::builder();
+        // A stalled server fails the request instead of hanging it forever. Per
+        // read, not per request: a long transfer is fine while bytes come. 75 s
+        // is over two of the event feed's 30 s pings: a feed that stopped
+        // without a word reconnects. (The browser has its own.)
+        #[cfg(not(target_arch = "wasm32"))]
+        let builder = builder
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .read_timeout(std::time::Duration::from_secs(75));
         Ok(Self {
-            http: reqwest::Client::builder().build()?,
+            http: builder.build()?,
             base: base.trim_end_matches('/').to_owned(),
             token: None,
         })
@@ -718,6 +738,23 @@ mod tests {
             .map(|r| r.map(|n| n.path).map_err(|e| e.to_string()))
             .collect()
             .await
+    }
+
+    /// C1, C2: a server that accepts and then never answers fails the
+    /// request (the clock paused: it runs at once), instead of hanging the
+    /// round, or a feed whose pings stopped, forever.
+    #[tokio::test(start_paused = true)]
+    async fn a_silent_server_times_out() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let held: Vec<_> = listener.incoming().collect();
+            drop(held);
+        });
+        let client = Client::new(&url).unwrap();
+        let answered =
+            tokio::time::timeout(std::time::Duration::from_secs(600), client.limits()).await;
+        assert!(matches!(answered, Ok(Err(_))), "{answered:?}");
     }
 
     #[tokio::test]

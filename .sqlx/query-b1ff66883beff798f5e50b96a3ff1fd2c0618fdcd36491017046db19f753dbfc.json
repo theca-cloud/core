@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE version SET modified_at = coalesce($2, modified_at) WHERE pk = $1\n                   RETURNING uuid, old.modified_at IS DISTINCT FROM new.modified_at AS \"touched!\"",
+  "query": "UPDATE version SET modified_at = coalesce($2, modified_at) WHERE pk = $1\n               RETURNING uuid, old.modified_at IS DISTINCT FROM new.modified_at AS \"touched!\"",
   "describe": {
     "columns": [
       {
@@ -25,5 +25,5 @@
       null
     ]
   },
-  "hash": "70298fd45affbae56286d36b55822d5d0ea20e54a511ab4efc2e77abb98fdd73"
+  "hash": "b1ff66883beff798f5e50b96a3ff1fd2c0618fdcd36491017046db19f753dbfc"
 }

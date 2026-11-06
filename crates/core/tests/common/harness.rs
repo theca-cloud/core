@@ -608,7 +608,8 @@ impl Client {
         let download = self.manifest(file, None).await?;
         let mut data = Vec::new();
         for chunk in download.chunks {
-            let plain = decompress(chunk.compression, &self.fetch(&chunk.url).await).unwrap();
+            let limit = chunk.plain_size as usize;
+            let plain = decompress(chunk.compression, &self.fetch(&chunk.url).await, limit).unwrap();
             assert_eq!(ChunkHash::of(&plain), chunk.hash);
             data.extend(plain);
         }
