@@ -111,7 +111,7 @@ pub fn decompress(
         Compression::Lz4 => {
             let mut out = Vec::new();
             FrameDecoder::new(data)
-                .take(limit as u64 + 1)
+                .take((limit as u64).saturating_add(1))
                 .read_to_end(&mut out)?;
             out
         }

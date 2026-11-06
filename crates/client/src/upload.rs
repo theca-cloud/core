@@ -950,7 +950,7 @@ async fn put(
     let mut renewed = false;
     loop {
         let result = rt::retry(options.retries, || async {
-            let mut request = client.http().put(&url.url).body(bytes.to_vec());
+            let mut request = client.sending().put(&url.url).body(bytes.to_vec());
             for (name, value) in &url.headers {
                 request = request.header(name, value);
             }
@@ -1232,6 +1232,27 @@ mod tests {
         assert_eq!(sizes, [vec![0], vec![1], vec![2], vec![3]]);
         let commits = vec![(0, commit(3)), (1, commit(3)), (2, commit(5))];
         assert_eq!(by_chunks(commits, 10).len(), 2);
+    }
+
+    /// An upload slower than the read timeout still goes through: that
+    /// timeout covers the whole request until the answer's headers (reqwest),
+    /// so a chunk on a slow uplink would never make it. (Tests' timeouts are
+    /// short: the server here answers after twice the read timeout.)
+    #[tokio::test]
+    async fn a_slow_upload_is_not_timed_out() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/blob", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            let mut buffer = [0; 4096];
+            let _ = conn.read(&mut buffer);
+            std::thread::sleep(2 * crate::api::READ_TIMEOUT);
+            let _ = conn.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n");
+        });
+        let client = Client::new("http://unused").unwrap();
+        let sent = client.sending().put(&url).body(vec![0; 1024]).send().await;
+        assert!(sent.is_ok(), "{sent:?}");
     }
 
     /// C3: a network error stays one when an error is passed on to every file

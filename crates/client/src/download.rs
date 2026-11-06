@@ -642,7 +642,9 @@ async fn fetch_chunk(
     };
     // Never past its size, `verify` or not: a server could send a frame that
     // expands ~255 times.
-    let limit = usize::try_from(chunk.plain_size).map_err(|_| Error::Corrupted(chunk.chunk))?;
+    let limit = usize::try_from(chunk.plain_size)
+        .unwrap_or(usize::MAX)
+        .min(theca_common::chunking::MAX_SIZE);
     let plain =
         decompress(chunk.compression, &stored, limit).map_err(|_| Error::Corrupted(chunk.chunk))?;
     if plain.len() as u64 != chunk.plain_size

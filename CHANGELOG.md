@@ -1,6 +1,12 @@
 # Changelog
 
 Every release of `core`: the server, `@theca/client`, `openapi.json`.
+## [1.3.3] - 2026-11-06
+
+### Fixes
+
+- Uploads on a slow uplink, very large commits (1.3.2's review)
+
 ## [1.3.2] - 2026-11-06
 
 ### Fixes
