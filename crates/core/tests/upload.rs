@@ -221,6 +221,14 @@ async fn unchanged_content_creates_no_version(kind: Kind, pool: PgPool) {
         .await
         .unwrap();
     assert_eq!(listed[0].current_version, Some(v2.version));
+
+    // The base's content, also the current version's (a version that came
+    // back): the current one answers, so the client has nothing to fetch.
+    let v3 = alice.upload(&lib, on(v2.version), &content).await.unwrap();
+    assert!(!v3.unchanged);
+    let both = alice.upload(&lib, on(v1.version), &content).await.unwrap();
+    assert!(both.unchanged);
+    assert_eq!(both.version, v3.version, "the current version");
 }
 
 /// The commit's `modified` is the file's time everywhere; the same chunks with

@@ -96,10 +96,25 @@ impl Error {
     }
 }
 
+/// How long a request may wait for its answer's headers, then between two
+/// reads of its body: a stalled server fails it instead of hanging it. Over
+/// two of the event feed's 30 s pings: a feed that stopped without a word
+/// reconnects. Short in tests.
+#[cfg(not(test))]
+pub(crate) const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(75);
+#[cfg(test)]
+pub(crate) const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// A connection to a server.
 #[derive(Clone)]
 pub struct Client {
     http: reqwest::Client,
+    /// For what sends a body that can take long (presigned uploads, commits):
+    /// reqwest's read timeout counts from the request's start until the
+    /// answer's headers, so it would cut a chunk on a slow uplink every time.
+    /// ponytail: a server that stalls during one of those hangs it (TCP
+    /// keepalive catches a dead one); a timeout on progress if that shows.
+    sending: reqwest::Client,
     base: String,
     /// `Bearer` token (an app password or a session); `None` in the browser,
     /// where the session cookie goes along by itself.
@@ -111,17 +126,17 @@ impl Client {
     pub fn new(base: &str) -> Result<Self, Error> {
         #[cfg(not(target_arch = "wasm32"))]
         let _ = rustls::crypto::ring::default_provider().install_default();
-        let builder = reqwest::Client::builder();
-        // A stalled server fails the request instead of hanging it forever. Per
-        // read, not per request: a long transfer is fine while bytes come. 75 s
-        // is over two of the event feed's 30 s pings: a feed that stopped
-        // without a word reconnects. (The browser has its own.)
+        // (The browser has its own timeouts.)
         #[cfg(not(target_arch = "wasm32"))]
-        let builder = builder
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .read_timeout(std::time::Duration::from_secs(75));
+        let builder = || reqwest::Client::builder().connect_timeout(10 * READ_TIMEOUT / 75);
+        #[cfg(target_arch = "wasm32")]
+        let builder = reqwest::Client::builder;
+        let http = builder();
+        #[cfg(not(target_arch = "wasm32"))]
+        let http = http.read_timeout(READ_TIMEOUT);
         Ok(Self {
-            http: builder.build()?,
+            http: http.build()?,
+            sending: builder().build()?,
             base: base.trim_end_matches('/').to_owned(),
             token: None,
         })
@@ -139,7 +154,16 @@ impl Client {
     }
 
     pub(crate) fn request(&self, method: Method, path: &str) -> reqwest::RequestBuilder {
-        let request = self.http.request(method, format!("{}{path}", self.base));
+        self.request_on(&self.http, method, path)
+    }
+
+    fn request_on(
+        &self,
+        http: &reqwest::Client,
+        method: Method,
+        path: &str,
+    ) -> reqwest::RequestBuilder {
+        let request = http.request(method, format!("{}{path}", self.base));
         #[cfg(target_arch = "wasm32")]
         let request = request.fetch_credentials_include();
         match &self.token {
@@ -550,14 +574,18 @@ impl Client {
         &self,
         commits: &[api::Commit],
     ) -> Result<Vec<Result<api::Committed, Error>>, Error> {
-        let outcomes: Vec<api::CommitOutcome> = self
-            .post(
-                "/api/v1/files/commit",
-                &api::Commits {
-                    commits: commits.to_vec(),
-                },
-            )
+        // On the client for long bodies: up to 64 MiB of chunk IDs.
+        let body = api::Commits {
+            commits: commits.to_vec(),
+        };
+        let json = serde_json::to_vec(&body).map_err(|e| Error::Decode(e.to_string()))?;
+        let response = self
+            .request_on(&self.sending, Method::POST, "/api/v1/files/commit")
+            .header("content-type", "application/json")
+            .body(json)
+            .send()
             .await?;
+        let outcomes: Vec<api::CommitOutcome> = decode(response).await?;
         Ok(outcomes
             .into_iter()
             .map(|o| match (o.committed, o.error) {
@@ -602,6 +630,11 @@ impl Client {
     /// the credential).
     pub(crate) fn http(&self) -> &reqwest::Client {
         &self.http
+    }
+
+    /// The HTTP client for long bodies (presigned uploads, commits).
+    pub(crate) fn sending(&self) -> &reqwest::Client {
+        &self.sending
     }
 }
 
@@ -741,9 +774,9 @@ mod tests {
     }
 
     /// C1, C2: a server that accepts and then never answers fails the
-    /// request (the clock paused: it runs at once), instead of hanging the
-    /// round, or a feed whose pings stopped, forever.
-    #[tokio::test(start_paused = true)]
+    /// request on its read timeout, instead of hanging the round, or a feed
+    /// whose pings stopped, forever.
+    #[tokio::test]
     async fn a_silent_server_times_out() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
@@ -752,9 +785,16 @@ mod tests {
             drop(held);
         });
         let client = Client::new(&url).unwrap();
-        let answered =
-            tokio::time::timeout(std::time::Duration::from_secs(600), client.limits()).await;
-        assert!(matches!(answered, Ok(Err(_))), "{answered:?}");
+        let started = web_time::Instant::now();
+        let answered = tokio::time::timeout(10 * READ_TIMEOUT, client.limits()).await;
+        assert!(
+            matches!(&answered, Ok(Err(Error::Http(e))) if e.is_timeout()),
+            "{answered:?}"
+        );
+        assert!(
+            started.elapsed() >= READ_TIMEOUT,
+            "the read timed out, not the connection"
+        );
     }
 
     #[tokio::test]

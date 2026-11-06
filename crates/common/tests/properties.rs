@@ -29,6 +29,16 @@ proptest! {
         prop_assert_eq!(first, cut());
     }
 
+    /// Input with no cut point (one byte repeated) is still cut at the
+    /// maximum, never past it.
+    #[test]
+    fn chunks_never_pass_the_maximum(byte in any::<u8>(), len in MAX_SIZE..3 * MAX_SIZE) {
+        let data = vec![byte; len];
+        let sizes: Vec<usize> = chunks(&data[..]).map(|c| c.unwrap().data.len()).collect();
+        prop_assert!(sizes.iter().all(|s| *s <= MAX_SIZE));
+        prop_assert_eq!(sizes.iter().sum::<usize>(), len);
+    }
+
     /// What is compressed decompresses to itself, within its size.
     #[test]
     fn compression_round_trips(data in prop::collection::vec(any::<u8>(), 0..20_000), repeat in 1usize..50) {
@@ -45,7 +55,7 @@ proptest! {
     /// A name `Name::new` accepts can't step out of its folder on any disk,
     /// and is already what it normalizes to.
     #[test]
-    fn accepted_names_stay_in_their_folder(raw in "\\PC{0,12}|\\.{1,3}|[a./\\\\:]{0,4}") {
+    fn accepted_names_stay_in_their_folder(raw in "\\PC{0,12}|\\.{1,3}|[a./\\\\:\\x00]{0,4}") {
         if let Ok(name) = Name::new(&raw) {
             let s = name.as_str();
             prop_assert!(!s.contains('/') && !s.contains('\\') && s != "." && s != "..");

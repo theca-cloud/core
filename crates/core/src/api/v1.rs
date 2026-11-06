@@ -516,7 +516,7 @@ async fn commit_one(
         .with_chunks(chunks),
         CommitError::ChunksNotAllowed(chunks) => {
             tracing::warn!(anomaly = "commit_chunk_not_allowed", account = %user.account_uuid, library = %req.library,
-                ?chunks, "commit with chunks outside the library's dedup scope");
+                chunks = chunks.len(), "commit with chunks outside the library's dedup scope");
             HttpError::forbidden("chunks outside this library's dedup scope")
                 .with_chunks(chunks)
                 .into_code("chunk_not_allowed")

@@ -60,8 +60,8 @@ pub fn plausible_modified(t: DateTime<Utc>) -> bool {
 /// The same chunks as the current version: nothing is created, it is returned
 /// (`unchanged`; the message is dropped), its modification time set to
 /// `modified` if given (a touch). The same chunks as a base no longer current:
-/// nothing either, the base returned (`unchanged`), the current one kept. `modified`: the file's time on
-/// the client; none, the commit's.
+/// nothing either, the base returned (`unchanged`), the current one kept.
+/// `modified`: the file's time on the client; none, the commit's.
 pub async fn commit(
     tx: &mut Transaction<'_, Postgres>,
     access: &Access,
@@ -143,9 +143,12 @@ pub async fn commit(
     )
     .fetch_all(&mut **tx)
     .await?;
+    // By ID: a commit can name a million chunks (64 MiB).
+    let found: std::collections::HashMap<Uuid, i64> =
+        allowed.iter().map(|a| (a.uuid, a.pk)).collect();
     let refused: Vec<Uuid> = unique
         .iter()
-        .filter(|u| !allowed.iter().any(|a| a.uuid == **u))
+        .filter(|u| !found.contains_key(u))
         .copied()
         .collect();
     if !refused.is_empty() {
@@ -161,10 +164,7 @@ pub async fn commit(
     if !missing.is_empty() {
         return Err(CommitError::ChunksMissing(missing));
     }
-    let pks: Vec<i64> = chunks
-        .iter()
-        .map(|u| allowed.iter().find(|a| a.uuid == *u).expect("allowed").pk)
-        .collect();
+    let pks: Vec<i64> = chunks.iter().map(|u| found[u]).collect();
 
     // Content a version already has changes nothing (decisions.md,
     // Conflicts): the current one's (a folder uploaded again, a file only
@@ -172,21 +172,6 @@ pub async fn commit(
     // a fork would bury a newer version), or the base's while a newer one is
     // current (a stale copy only touched: the newer stays current, and the
     // client downloads it).
-    if let Some(stale) = base
-        && base != current
-        && chunks_of(tx, stale).await? == pks
-    {
-        let version = sqlx::query_scalar!("SELECT uuid FROM version WHERE pk = $1", stale)
-            .fetch_one(&mut **tx)
-            .await?;
-        return Ok(Committed {
-            file: file_uuid,
-            version,
-            conflict: false,
-            unchanged: true,
-            touched: false,
-        });
-    }
     if let Some(now) = current
         && chunks_of(tx, now).await? == pks
     {
@@ -209,6 +194,21 @@ pub async fn commit(
         });
     }
 
+    if let Some(stale) = base
+        && base != current
+        && chunks_of(tx, stale).await? == pks
+    {
+        let version = sqlx::query_scalar!("SELECT uuid FROM version WHERE pk = $1", stale)
+            .fetch_one(&mut **tx)
+            .await?;
+        return Ok(Committed {
+            file: file_uuid,
+            version,
+            conflict: false,
+            unchanged: true,
+            touched: false,
+        });
+    }
     let version = sqlx::query!(
         "INSERT INTO version (organization, file, parent_version, message, author, size, modified_at)
          SELECT $1, $2, $3, $4, $5, coalesce(sum(c.plain_size), 0), coalesce($7, now())
