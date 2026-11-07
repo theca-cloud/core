@@ -25,26 +25,14 @@ pub fn router() -> Router<AppState> {
 /// A cut stream resumes from the last positions received.
 #[utoipa::path(post, path = "/api/v1/events", request_body = api::Events, responses(
     (status = 200, description = "Server-Sent Events: `libraries` (a list of FeedLibrary), then `changes` (Changes)", content_type = "text/event-stream", body = api::Changes),
-    (status = 429, description = "`too_many_streams`: at most 10 per credential", body = api::ApiError),
 ))]
 pub async fn events(
     axum::extract::State(state): axum::extract::State<AppState>,
     user: CurrentAccount,
     ApiJson(req): ApiJson<api::Events>,
 ) -> Result<axum::response::Response, HttpError> {
-    let registration = state
-        .events
-        .register(user.token, user.account)
-        .ok_or_else(|| {
-            HttpError::new(
-                axum::http::StatusCode::TOO_MANY_REQUESTS,
-                "too_many_streams",
-                format!(
-                    "at most {} event streams per credential",
-                    crate::events::STREAMS_PER_CREDENTIAL
-                ),
-            )
-        })?;
+    // At most `STREAMS_PER_CREDENTIAL`: one more ends the oldest.
+    let registration = state.events.register(user.token, user.account);
     // Small: a client not reading holds the stream back, never fills memory.
     let (out, body) = tokio::sync::mpsc::channel(4);
     let interval = state.events.interval;

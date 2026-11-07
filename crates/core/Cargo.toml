@@ -57,6 +57,8 @@ sha2.workspace = true
 # v7: random test IDs (native only; WASM would need a randomness source).
 uuid = { workspace = true, features = ["v7"] }
 tracing-subscriber.workspace = true
+# The name key's test normalizes every character as `Name::new` does.
+unicode-normalization.workspace = true
 
 [lints]
 workspace = true

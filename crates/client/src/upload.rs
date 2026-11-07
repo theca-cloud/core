@@ -205,6 +205,8 @@ struct Chunk {
     ours: bool,
     /// Open files that need it: none left after a cancel, it's dropped.
     users: usize,
+    /// Looked up again after its declaration was refused: once only.
+    relooked: bool,
 }
 
 struct File<'a> {
@@ -330,8 +332,50 @@ impl<P: FnMut(&UploadProgress)> State<'_, P> {
         }
     }
 
+    /// A chunk whose declaration was refused, since another upload of the
+    /// same content (they share a library's pending chunks) uploaded it
+    /// meanwhile: looked up again, ready now. A second refusal fails it.
+    fn look_up_again(&mut self, key: Key, error: &Error) {
+        let Some(chunk) = self.chunks.get_mut(&key) else {
+            return;
+        };
+        if chunk.relooked {
+            self.fail(key, error);
+            return;
+        }
+        chunk.relooked = true;
+        chunk.status = Status::LookingUp;
+        chunk.id = None;
+        if let Some(queue) = &self.queues.lookup {
+            let _ = queue.unbounded_send(key);
+        }
+    }
+
     /// `key` looked up again (lost by the server, or newly needed by `f`).
     fn look_up(&mut self, key: Key, f: usize, part: Part) {
+        let was_ready = self
+            .chunks
+            .get(&key)
+            .is_some_and(|c| c.status == Status::Ready);
+        // A chunk lost while ready: every other open file using it waits for
+        // it again (one queued to commit would ask for a chunk without an ID).
+        let others: Vec<usize> = if was_ready {
+            self.files
+                .iter()
+                .enumerate()
+                .filter(|(i, file)| {
+                    *i != f
+                        && file.done.is_some()
+                        && file
+                            .parts
+                            .iter()
+                            .any(|p| (file.target.library(), p.hash) == key)
+                })
+                .map(|(i, _)| i)
+                .collect()
+        } else {
+            Vec::new()
+        };
         let chunk = self.chunks.entry(key).or_insert(Chunk {
             id: None,
             status: Status::Ready,
@@ -339,9 +383,12 @@ impl<P: FnMut(&UploadProgress)> State<'_, P> {
             from: (f, part),
             ours: false,
             users: 0,
+            relooked: false,
         });
-        chunk.waiters.push(f);
-        self.files[f].waiting += 1;
+        for w in std::iter::once(f).chain(others) {
+            chunk.waiters.push(w);
+            self.files[w].waiting += 1;
+        }
         if chunk.status == Status::Ready {
             chunk.status = Status::LookingUp;
             chunk.id = None;
@@ -416,14 +463,25 @@ impl<'a, P: FnMut(&UploadProgress) + MaybeSync + 'a> Uploader<'a, P> {
             let state = state.clone();
             async move {
                 let s = &state;
-                futures::join!(
-                    hash_stage(s, hash_rx, options, cancel),
-                    lookup_stage(s, lookup_rx, client, options),
-                    window_stage(s, upload_rx, client, options, cancel),
-                    commit_stage(s, commit_rx, client, options),
-                    keepalive_stage(s, keepalive_rx, client, options),
-                    cancel_watch(s, cancel_rx, client, cancel),
-                );
+                let stages = std::pin::pin!(async {
+                    futures::join!(
+                        hash_stage(s, hash_rx, options, cancel),
+                        lookup_stage(s, lookup_rx, client, options),
+                        window_stage(s, upload_rx, client, options, cancel),
+                        commit_stage(s, commit_rx, client, options),
+                        keepalive_stage(s, keepalive_rx, client, options),
+                    );
+                });
+                let watch = std::pin::pin!(cancel_watch(s, cancel_rx, client, cancel));
+                // Cancelled: the stages go at once (a chunk's upload has no
+                // read timeout, and a stalled connection would hold the run).
+                match select(stages, watch).await {
+                    Either::Left(((), watch)) => {
+                        watch.await;
+                    }
+                    Either::Right((true, _)) => {}
+                    Either::Right((false, stages)) => stages.await,
+                }
             }
         };
         (Self { state, files }, run)
@@ -870,15 +928,35 @@ async fn declare<P: FnMut(&UploadProgress)>(
         };
         ready.push((*key, declare, bytes, part.len as u64));
     }
-    if ready.is_empty() {
-        return Ok(Vec::new());
-    }
-    let declarations: Vec<api::Declare> = ready.iter().map(|(_, d, _, _)| *d).collect();
     let urls = loop {
         cancel.check()?;
+        if ready.is_empty() {
+            return Ok(Vec::new());
+        }
+        let declarations: Vec<api::Declare> = ready.iter().map(|(_, d, _, _)| *d).collect();
         match rt::retry(options.retries, || client.upload_urls(&declarations)).await {
             // The account's other uploads hold the window: wait for slots.
             Err(Error::Api { status: 429, .. }) => rt::sleep(Duration::from_secs(1)).await,
+            // Chunks uploaded meanwhile by another upload of the same content:
+            // looked up again; the others declared without them.
+            Err(Error::Api { status: 403, error })
+                if error.code == "chunk_not_allowed" && !error.chunks.is_empty() =>
+            {
+                let refused: Vec<Key> = ready
+                    .iter()
+                    .filter(|(_, d, _, _)| error.chunks.contains(&d.chunk))
+                    .map(|(key, ..)| *key)
+                    .collect();
+                if refused.is_empty() {
+                    return Err(Error::Api { status: 403, error });
+                }
+                ready.retain(|(_, d, _, _)| !error.chunks.contains(&d.chunk));
+                let e = Error::Api { status: 403, error };
+                let mut s = lock(state);
+                for key in refused {
+                    s.look_up_again(key, &e);
+                }
+            }
             other => break other?,
         }
     };
@@ -984,14 +1062,7 @@ async fn commit_stage<P: FnMut(&UploadProgress)>(
     options: &UploadOptions,
 ) {
     while let Some(batch) = next_batch(&mut files, COMMIT_BATCH, options.flush).await {
-        let commits: Vec<(usize, api::Commit)> = {
-            let s = lock(state);
-            batch
-                .into_iter()
-                .filter(|f| s.files[*f].done.is_some())
-                .map(|f| (f, commit_request(&s, f, options)))
-                .collect()
-        };
+        let commits = commits(&lock(state), batch, options);
         if commits.is_empty() {
             continue;
         }
@@ -1064,6 +1135,20 @@ fn by_chunks(commits: Vec<(usize, api::Commit)>, max: usize) -> Vec<Vec<(usize, 
         groups.last_mut().expect("pushed").push(c);
     }
     groups
+}
+
+/// The commits of a batch of files: those still open, and not waiting for a
+/// chunk again (`ready` queues them once it's back).
+fn commits<P>(
+    state: &State<'_, P>,
+    batch: Vec<usize>,
+    options: &UploadOptions,
+) -> Vec<(usize, api::Commit)> {
+    batch
+        .into_iter()
+        .filter(|f| state.files[*f].done.is_some() && state.files[*f].waiting == 0)
+        .map(|f| (f, commit_request(state, f, options)))
+        .collect()
 }
 
 fn commit_request<P>(state: &State<'_, P>, f: usize, options: &UploadOptions) -> api::Commit {
@@ -1158,7 +1243,7 @@ async fn cancel_watch<P: FnMut(&UploadProgress)>(
     mut stop: mpsc::UnboundedReceiver<()>,
     client: &Client,
     cancel: &Cancel,
-) {
+) -> bool {
     // ponytail: polled; a waker in `Cancel` if a tenth of a second matters.
     loop {
         free(state, client).await;
@@ -1169,7 +1254,7 @@ async fn cancel_watch<P: FnMut(&UploadProgress)>(
             Either::Left(_) => {}
             Either::Right(_) => {
                 free(state, client).await;
-                return;
+                return false;
             }
         }
     }
@@ -1192,6 +1277,7 @@ async fn cancel_watch<P: FnMut(&UploadProgress)>(
         let _ = client.cancel(&pending).await;
     }
     lock(state).to_free.clear();
+    true
 }
 
 /// Frees the chunks of cancelled files on the server.
@@ -1205,6 +1291,88 @@ async fn free<P>(state: &Shared<'_, P>, client: &Client) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Two open files of one chunk, `x`, ready on the server.
+    fn two_files_one_chunk<'a>(
+        source: &'a crate::source::MemorySource,
+    ) -> (State<'a, impl FnMut(&UploadProgress)>, Key, Part) {
+        let (library, hash) = (Uuid::from_u128(1), ChunkHash::of(b"x"));
+        let part = Part {
+            offset: 0,
+            len: 1,
+            hash,
+        };
+        let file = || File {
+            source,
+            target: Target::New {
+                library,
+                parent: Uuid::from_u128(2),
+                name: theca_common::name::Name::new("x").unwrap(),
+            },
+            parts: vec![part],
+            waiting: 0,
+            rounds: 0,
+            done: Some(oneshot::channel().0),
+        };
+        let chunk = Chunk {
+            id: Some(Uuid::from_u128(3)),
+            status: Status::Ready,
+            waiters: Vec::new(),
+            from: (0, part),
+            ours: false,
+            users: 2,
+            relooked: false,
+        };
+        let state = State {
+            files: vec![file(), file()],
+            chunks: HashMap::from([((library, hash), chunk)]),
+            open: 2,
+            input_closed: true,
+            cancelled: false,
+            to_free: Vec::new(),
+            progress: UploadProgress::default(),
+            report: |_: &UploadProgress| {},
+            queues: Queues::default(),
+        };
+        (state, (library, hash), part)
+    }
+
+    /// A chunk two files share, lost by the server (one file's commit said
+    /// `chunk_missing`) and looked up again: the other file, queued to commit
+    /// meanwhile, waits for it too, rather than ask for a chunk without an ID
+    /// (it panicked, killing the engine).
+    #[test]
+    fn a_chunk_looked_up_again_holds_every_file_using_it() {
+        let source = crate::source::MemorySource(b"x".to_vec());
+        let (mut s, key, part) = two_files_one_chunk(&source);
+        // File 1's commit lost the chunk; file 0 is queued to commit.
+        s.look_up(key, 1, part);
+        assert!(commits(&s, vec![0], &UploadOptions::default()).is_empty());
+        assert_eq!(s.files[0].waiting, 1);
+        s.chunks.get_mut(&key).unwrap().id = Some(Uuid::from_u128(4));
+        s.ready(key);
+        assert_eq!(
+            commits(&s, vec![0], &UploadOptions::default())[0].1.chunks,
+            [Uuid::from_u128(4)]
+        );
+    }
+
+    /// A declaration refused looks the chunk up again once: refused again
+    /// (not another upload's, then), its files fail rather than loop.
+    #[test]
+    fn a_refused_declaration_is_looked_up_again_once() {
+        let source = crate::source::MemorySource(b"x".to_vec());
+        let (mut s, key, part) = two_files_one_chunk(&source);
+        s.look_up(key, 1, part);
+        s.chunks.get_mut(&key).unwrap().status = Status::Uploading;
+        let refused = Error::Decode("refused".into());
+        s.look_up_again(key, &refused);
+        assert!(s.chunks[&key].status == Status::LookingUp);
+        assert!(s.files.iter().all(|f| f.done.is_some()));
+        s.look_up_again(key, &refused);
+        assert!(!s.chunks.contains_key(&key));
+        assert!(s.files.iter().all(|f| f.done.is_none()));
+    }
 
     /// C17: commits go in requests of at most so many chunks in all.
     #[test]

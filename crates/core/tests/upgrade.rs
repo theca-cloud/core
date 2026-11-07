@@ -83,14 +83,11 @@ struct Version {
     content: String,
 }
 
-/// Each library's position, as the event feed's `libraries` message
-/// announces it on a stream opened from `after`.
-async fn positions(
-    client: &Client,
-    after: std::collections::BTreeMap<Uuid, i64>,
-) -> std::collections::BTreeMap<Uuid, i64> {
+/// Each library's position and its event's ID, as the event feed's
+/// `libraries` message announces them on a stream opened from the start.
+async fn positions(client: &Client) -> std::collections::BTreeMap<Uuid, (i64, Option<Uuid>)> {
     use futures::StreamExt;
-    let mut feed = Box::pin(client.events(after));
+    let mut feed = Box::pin(client.events(Default::default()));
     let first = tokio::time::timeout(std::time::Duration::from_secs(15), feed.next())
         .await
         .expect("the feed answers")
@@ -99,7 +96,10 @@ async fn positions(
     let theca_client::FeedMessage::Libraries(libraries) = first else {
         panic!("the feed starts with libraries");
     };
-    libraries.into_iter().map(|l| (l.id, l.position)).collect()
+    libraries
+        .into_iter()
+        .map(|l| (l.id, (l.position, l.event)))
+        .collect()
 }
 
 fn dumps() -> std::path::PathBuf {
@@ -444,9 +444,9 @@ async fn fill() {
             position: None,
         });
     }
-    let positions = positions(&admin, std::collections::BTreeMap::new()).await;
+    let positions = positions(&admin).await;
     for library in &mut libraries {
-        library.position = positions.get(&library.id).copied();
+        library.position = positions.get(&library.id).map(|p| p.0);
     }
     let manifest = Manifest {
         version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -688,16 +688,25 @@ async fn check(server: &Server, manifest: &Manifest, context: &dyn Fn(&str) -> S
         .collect();
     if !recorded.is_empty() {
         use futures::StreamExt;
-        let announced = positions(&admin, std::collections::BTreeMap::new()).await;
+        let announced = positions(&admin).await;
         for (library, position) in &recorded {
             assert_eq!(
-                announced.get(library),
-                Some(position),
+                announced.get(library).map(|p| p.0),
+                Some(*position),
                 "{}",
                 context("event positions")
             );
+            // Events from before their IDs existed got one.
+            assert!(
+                *position == 0 || announced[library].1.is_some(),
+                "{}",
+                context("event IDs")
+            );
         }
-        let from_start = recorded.keys().map(|l| (*l, 0)).collect();
+        let from_start = recorded
+            .keys()
+            .map(|l| (*l, api::Position::Seq(0)))
+            .collect();
         let mut feed = Box::pin(admin.events(from_start));
         let mut reached = std::collections::BTreeMap::new();
         while reached != recorded {

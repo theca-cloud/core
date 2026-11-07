@@ -1410,9 +1410,46 @@ pub struct ExportedFile {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct Events {
-    /// Library → the number of the last event applied.
+    /// Library → the last event applied.
     #[serde(default)]
-    pub after: BTreeMap<Uuid, i64>,
+    pub after: BTreeMap<Uuid, Position>,
+}
+
+/// A client's position in a library: the last event it applied, by number
+/// and by ID. The ID tells the server it's still that event: a database
+/// restored from a backup numbers its new events from its restore point, so
+/// a number alone can name another event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(untagged)]
+pub enum Position {
+    /// The event's number, and its ID (none before the library's first).
+    Event {
+        /// The event's number in its library.
+        seq: i64,
+        /// Its ID.
+        #[serde(default)]
+        event: Option<Uuid>,
+    },
+    /// The number alone, from clients before core 1.4.0.
+    Seq(i64),
+}
+
+impl Position {
+    /// The event's number.
+    pub fn seq(self) -> i64 {
+        match self {
+            Self::Event { seq, .. } | Self::Seq(seq) => seq,
+        }
+    }
+
+    /// The event's ID, when the client sent it.
+    pub fn event(self) -> Option<Uuid> {
+        match self {
+            Self::Event { event, .. } => event,
+            Self::Seq(_) => None,
+        }
+    }
 }
 
 /// A library of the event feed's `libraries` message: every library the
@@ -1437,9 +1474,13 @@ pub struct FeedLibrary {
     /// The number of its last event: a library the client doesn't follow yet
     /// is followed from here (after listing its tree).
     pub position: i64,
-    /// The client's position was beyond this library's last event (the
-    /// database was restored from a backup): it is followed from `position`,
-    /// and the client resyncs it.
+    /// The ID of that event (none before the library's first).
+    #[serde(default)]
+    pub event: Option<Uuid>,
+    /// The client's position was beyond this library's last event, or named
+    /// another event than the one of that number (the database was restored
+    /// from a backup): it is followed from `position`, and the client resyncs
+    /// it.
     #[serde(default)]
     pub reset: bool,
 }
@@ -1585,6 +1626,9 @@ pub struct Changes {
     pub entries: Vec<Change>,
     /// The new position of each library the batch covered.
     pub positions: BTreeMap<Uuid, i64>,
+    /// The ID of each new position's event.
+    #[serde(default)]
+    pub events: BTreeMap<Uuid, Uuid>,
 }
 
 #[cfg(test)]

@@ -351,11 +351,22 @@ impl<'a, P: FnMut(&DownloadProgress) + MaybeSync + 'a> Downloader<'a, P> {
             let state = state.clone();
             async move {
                 let s = &state;
-                futures::join!(
-                    manifest_stage(s, manifest_rx, client, options),
-                    fetch_stage(s, fetch_rx, client, options),
-                    cancel_watch(s, stop_rx, cancel),
-                );
+                let stages = std::pin::pin!(async {
+                    futures::join!(
+                        manifest_stage(s, manifest_rx, client, options),
+                        fetch_stage(s, fetch_rx, client, options),
+                    );
+                });
+                let watch = std::pin::pin!(cancel_watch(s, stop_rx, cancel));
+                // Cancelled: the stages go at once (one waiting on a stalled
+                // connection would hold the run until its timeout).
+                match select(stages, watch).await {
+                    Either::Left(((), watch)) => {
+                        watch.await;
+                    }
+                    Either::Right((true, _)) => {}
+                    Either::Right((false, stages)) => stages.await,
+                }
             }
         };
         (Self { state, files }, run)
@@ -656,20 +667,20 @@ async fn fetch_chunk(
 }
 
 /// Notices a cancel: every open file fails (its partial content dropped) and
-/// the stages close.
+/// the stages close. Whether it was cancelled (otherwise the run ended).
 // ponytail: polled; a waker in `Cancel` if a tenth of a second matters.
 async fn cancel_watch<P: FnMut(&DownloadProgress)>(
     state: &Shared<'_, P>,
     mut stop: mpsc::UnboundedReceiver<()>,
     cancel: &Cancel,
-) {
+) -> bool {
     loop {
         if cancel.is_cancelled() {
             break;
         }
         match select(Box::pin(rt::sleep(CANCEL_POLL)), stop.next()).await {
             Either::Left(_) => {}
-            Either::Right(_) => return,
+            Either::Right(_) => return false,
         }
     }
     let mut s = lock(state);
@@ -678,6 +689,7 @@ async fn cancel_watch<P: FnMut(&DownloadProgress)>(
         s.resolve(f, Err(Error::Cancelled));
     }
     s.queues = Queues::default();
+    true
 }
 
 /// The same error again, for every file a failure touches.

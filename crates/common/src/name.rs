@@ -2,7 +2,8 @@
 //! downloaded on every platform (Windows sets most limits).
 //!
 //! Case-insensitive uniqueness is checked by the database only (`lower()` with
-//! the `C.UTF-8` collation), so there is a single definition of "same name".
+//! the `C.UTF-8` collation), so there is a single definition of "same name";
+//! [`key`] is its copy for clients, tested against it.
 
 use std::fmt;
 
@@ -95,6 +96,26 @@ impl Name {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// What two names are the same by, as the server compares them (`node_name`,
+/// `lower(name)` of the NFC name): clients find a server's file on disk by it.
+/// PostgreSQL lowers each character alone (Unicode's simple mapping), where
+/// Rust's `to_lowercase` applies the full one: `İ` would become `i̇` (two
+/// characters), a final `Σ` would become `ς`. Checked against PostgreSQL on
+/// every character (`core`'s `the_name_key_is_lower`): a Rust or PostgreSQL
+/// upgrade changing either side fails it.
+pub fn key(name: &str) -> String {
+    let mut key = String::with_capacity(name.len());
+    for c in name.nfc() {
+        match c {
+            'İ' => key.push('i'),
+            // New in Unicode 17, which PostgreSQL 18 doesn't know: unchanged.
+            '\u{A7CE}' | '\u{A7D2}' | '\u{A7D4}' | '\u{16EA0}'..='\u{16EB8}' => key.push(c),
+            c => key.extend(c.to_lowercase()),
+        }
+    }
+    key
 }
 
 /// A file the operating system leaves beside the user's (macOS's `._*` and
@@ -233,5 +254,19 @@ mod tests {
         ] {
             assert!(!is_ignored(name), "{name}");
         }
+    }
+
+    /// Names as the server compares them: a word's last Σ is σ like any
+    /// other (Rust's `to_lowercase` would give ς), İ is i, and the encoding
+    /// of accents doesn't count.
+    #[test]
+    fn key_is_the_servers_rule() {
+        // Σ ending the name, or a word before a space (before `.txt`, Rust
+        // already gives σ: it looks past the dot).
+        assert_eq!(key("ΟΔΟΣ"), key("οδοσ"));
+        assert_ne!(key("ΟΔΟΣ"), key("οδος"));
+        assert_eq!(key("ΟΔΟΣ 2.txt"), "οδοσ 2.txt");
+        assert_eq!(key("İ.txt"), key("i.txt"));
+        assert_eq!(key("Cafe\u{301}.TXT"), key("café.txt"));
     }
 }

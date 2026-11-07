@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.library AS \"library!\", e.uuid\n             FROM unnest($1::uuid[], $2::bigint[]) AS c (library, seq)\n             JOIN library l ON l.uuid = c.library\n             JOIN event e ON e.library = l.pk AND e.seq = c.seq",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "library!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      null,
+      false
+    ]
+  },
+  "hash": "eb878764296c3816c0782ad263749791fafcd9bca41746b76c75eebd45c7932a"
+}
