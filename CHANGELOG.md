@@ -1,6 +1,16 @@
 # Changelog
 
 Every release of `core`: the server, `@theca/client`, `openapi.json`.
+## [1.4.0] - 2026-11-07
+
+### Features
+
+- The feed's cursor names its event; client fixes from sprint 12
+
+### Documentation
+
+- **claude**: Reqwest's read timeout and the paused clock, two traps of sprint 11
+
 ## [1.3.3] - 2026-11-06
 
 ### Fixes

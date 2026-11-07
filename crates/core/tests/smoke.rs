@@ -409,6 +409,128 @@ async fn commit_recovers_lost_chunks(pool: PgPool) {
     assert_eq!(fetch(&client, committed.file, None).await, bytes);
 }
 
+/// Two uploads of the same content into one library share its pending
+/// chunks: one declaring a chunk the other has uploaded meanwhile is refused
+/// (`chunk_not_allowed`), and looks it up again, ready now, rather than fail.
+#[sqlx::test]
+async fn a_chunk_another_upload_finished_is_looked_up_again(pool: PgPool) {
+    let server = start(&pool).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut client = Client::new(&server.url).unwrap();
+    let setup: api::Setup = serde_json::from_value(json!({
+        "admin_email": "admin@test.theca", "admin_password": "a long password", "organization": "Acme",
+        "storages": [{ "name": "main", "implementation": "filesystem", "path": dir.path() }],
+    }))
+    .unwrap();
+    let me = client.setup(&setup, None).await.unwrap();
+    let library = client
+        .create_library(me.organizations[0].organization, "Docs")
+        .await
+        .unwrap();
+
+    let bytes = data(6 * 1024 * 1024, 7);
+    let last = theca_common::chunking::chunks(&bytes[..])
+        .last()
+        .unwrap()
+        .unwrap()
+        .offset;
+    let source = Gated {
+        inner: MemorySource(bytes.clone()),
+        last,
+        reads: Default::default(),
+        reached: Default::default(),
+        release: Default::default(),
+    };
+    let target = |name: &str| Target::New {
+        library: library.id,
+        parent: library.root,
+        name: Name::new(name).unwrap(),
+    };
+    let options = UploadOptions {
+        parallel: 1,
+        window: Some(1),
+        ..Default::default()
+    };
+    let never = Cancel::default();
+    let first = upload(&client, &source, target("a.bin"), &options, |_| {}, &never);
+    let second = async {
+        // The first is about to declare its last chunk: the second uploads
+        // the same content, that chunk included, then lets it go on.
+        source.reached.notified().await;
+        let copy = MemorySource(bytes.clone());
+        let committed = upload(&client, &copy, target("b.bin"), &options, |_| {}, &never).await;
+        source.release.notify_one();
+        committed
+    };
+    let (first, second) = tokio::time::timeout(Duration::from_secs(60), async {
+        tokio::join!(first, second)
+    })
+    .await
+    .expect("both uploads finish");
+    let (first, second) = (first.unwrap(), second.unwrap());
+    assert_eq!(fetch(&client, first.file, None).await, bytes);
+    assert_eq!(fetch(&client, second.file, None).await, bytes);
+}
+
+/// A cancel ends an upload at once, even while a stage waits on something
+/// that doesn't come (here the source; a stalled connection in real life,
+/// which a chunk's upload has no timeout for).
+#[sqlx::test]
+async fn a_cancel_ends_a_stalled_upload(pool: PgPool) {
+    let server = start(&pool).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut client = Client::new(&server.url).unwrap();
+    let setup: api::Setup = serde_json::from_value(json!({
+        "admin_email": "admin@test.theca", "admin_password": "a long password", "organization": "Acme",
+        "storages": [{ "name": "main", "implementation": "filesystem", "path": dir.path() }],
+    }))
+    .unwrap();
+    let me = client.setup(&setup, None).await.unwrap();
+    let library = client
+        .create_library(me.organizations[0].organization, "Docs")
+        .await
+        .unwrap();
+    let bytes = data(6 * 1024 * 1024, 9);
+    let last = theca_common::chunking::chunks(&bytes[..])
+        .last()
+        .unwrap()
+        .unwrap()
+        .offset;
+    let source = Gated {
+        inner: MemorySource(bytes),
+        last,
+        reads: Default::default(),
+        reached: Default::default(),
+        release: Default::default(),
+    };
+    let target = Target::New {
+        library: library.id,
+        parent: library.root,
+        name: Name::new("stalled.bin").unwrap(),
+    };
+    let options = UploadOptions {
+        parallel: 1,
+        window: Some(1),
+        ..Default::default()
+    };
+    let cancel = Cancel::default();
+    let uploading = upload(&client, &source, target, &options, |_| {}, &cancel);
+    let stop = async {
+        source.reached.notified().await;
+        cancel.cancel();
+    };
+    // Never released: only the cancel ends it.
+    let (result, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(uploading, stop)
+    })
+    .await
+    .expect("the cancel ends the upload");
+    assert!(
+        matches!(result, Err(theca_client::Error::Cancelled)),
+        "{result:?}"
+    );
+}
+
 /// Many files through one engine: each committed (or failing on its own),
 /// identical content uploaded once, the results each file's own.
 #[sqlx::test]

@@ -1038,3 +1038,44 @@ async fn events(pool: PgPool) {
         .unwrap();
     assert_eq!(left, 0);
 }
+
+/// The clients' `name::key` is the server's `lower()` of a name normalized
+/// as `Name::new` does, character by character over all of Unicode: a
+/// difference would make a client merge two server files into one, or never
+/// find a file the server holds.
+#[sqlx::test]
+async fn the_name_key_is_lower(pool: PgPool) {
+    theca_core::db::check(&pool).await.unwrap();
+    use unicode_normalization::UnicodeNormalization;
+    // Every scalar value but NUL, which a Postgres string can't hold.
+    let chars: Vec<char> = (1..=0x10FFFF).filter_map(char::from_u32).collect();
+    let nfc: Vec<String> = chars
+        .iter()
+        .map(|c| c.to_string().nfc().collect())
+        .collect();
+    let lower: Vec<String> = sqlx::query_scalar(
+        "SELECT lower(n) FROM unnest($1::text[]) WITH ORDINALITY AS t (n, i) ORDER BY i",
+    )
+    .bind(&nfc)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let differ: Vec<String> = chars
+        .iter()
+        .zip(&lower)
+        .filter(|(c, l)| theca_common::name::key(&c.to_string()) != **l)
+        .map(|(c, l)| {
+            format!(
+                "U+{:04X} {c:?}: key {:?}, lower {l:?}",
+                *c as u32,
+                theca_common::name::key(&c.to_string())
+            )
+        })
+        .collect();
+    assert!(
+        differ.is_empty(),
+        "{} differ: {:#?}",
+        differ.len(),
+        &differ[..differ.len().min(40)]
+    );
+}

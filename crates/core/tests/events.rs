@@ -108,8 +108,8 @@ impl Feed {
 }
 
 impl Client {
-    /// Opens the event feed from `after`.
-    async fn feed(&self, after: &BTreeMap<Uuid, i64>) -> Result<Feed, (StatusCode, Value)> {
+    /// Opens the event feed from `after` (numbers, or numbers and IDs).
+    async fn feed(&self, after: &impl serde::Serialize) -> Result<Feed, (StatusCode, Value)> {
         let mut request =
             Request::post("/api/v1/events").header("content-type", "application/json");
         request = match &self.bearer {
@@ -142,7 +142,7 @@ impl Client {
     }
 
     async fn feed_start(&self) -> Feed {
-        self.feed(&BTreeMap::new()).await.unwrap()
+        self.feed(&BTreeMap::<Uuid, i64>::new()).await.unwrap()
     }
 
     async fn put_file(
@@ -1079,6 +1079,71 @@ async fn positions_and_resets(pool: PgPool) {
     assert!(feed.quiet().await);
 }
 
+/// A database restored from a backup, then given new events past a client's
+/// position: the numbers came back, the events didn't. The client's position
+/// names its event, which that number no longer is: reset. A number alone (a
+/// client before core 1.4.0) can't tell.
+#[sqlx::test]
+async fn a_restore_past_new_events_is_a_reset(pool: PgPool) {
+    let w = world(Kind::Filesystem, pool).await;
+    let mut alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    for name in ["a.txt", "b.txt", "c.txt"] {
+        alice.put_file(&docs, docs.root, name, b"x").await;
+    }
+    let mut feed = alice.feed_start().await;
+    let listed = feed.libraries().await;
+    let at = listed.iter().find(|l| l.id == docs.id).unwrap();
+    let (seq, event) = (at.position, at.event.expect("an event at 3"));
+    assert_eq!(seq, 3);
+    drop(feed);
+
+    // The backup was taken after the first event; three new ones since.
+    sqlx::query(
+        "DELETE FROM event e USING library l WHERE e.library = l.pk AND l.uuid = $1 AND e.seq > 1",
+    )
+    .bind(docs.id)
+    .execute(&w.pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE library SET event_seq = 1 WHERE uuid = $1")
+        .bind(docs.id)
+        .execute(&w.pool)
+        .await
+        .unwrap();
+    for name in ["d.txt", "e.txt", "f.txt"] {
+        alice.put_file(&docs, docs.root, name, b"y").await;
+    }
+
+    let named = json!({ docs.id.to_string(): { "seq": seq, "event": event } });
+    let mut feed = alice.feed(&named).await.unwrap();
+    let now = feed.libraries().await;
+    let now = now.iter().find(|l| l.id == docs.id).unwrap();
+    assert!(now.reset, "the restore is told");
+    assert_eq!(now.position, 4);
+    assert!(feed.quiet().await, "followed from the last event");
+    let last = now.event.unwrap();
+
+    // A number alone: today's rule, which can't tell.
+    let mut feed = alice.feed(&BTreeMap::from([(docs.id, seq)])).await.unwrap();
+    assert!(!feed.libraries().await[0].reset);
+    drop(feed);
+
+    // The same event: followed, and a batch names its new position's event.
+    let same = json!({ docs.id.to_string(): { "seq": 4, "event": last } });
+    let mut feed = alice.feed(&same).await.unwrap();
+    assert!(!feed.libraries().await[0].reset);
+    alice.put_file(&docs, docs.root, "g.txt", b"z").await;
+    let changes = feed.changes().await;
+    assert_eq!(changes.positions[&docs.id], 5);
+    let fifth = changes.events[&docs.id];
+    drop(feed);
+    let resumed = json!({ docs.id.to_string(): { "seq": 5, "event": fifth } });
+    let mut feed = alice.feed(&resumed).await.unwrap();
+    assert!(!feed.libraries().await[0].reset);
+    assert!(feed.quiet().await);
+}
+
 #[sqlx::test]
 async fn pings(pool: PgPool) {
     let w = world(Kind::Filesystem, pool).await;
@@ -1090,31 +1155,31 @@ async fn pings(pool: PgPool) {
     assert!(feed.pings >= 2, "{} pings", feed.pings);
 }
 
+/// At most ten streams per credential: the eleventh closes the oldest, which
+/// is a client gone without closing (asleep, a network change, a proxy holding
+/// the upstream) more often than not. A client still there reconnects.
 #[sqlx::test]
 async fn at_most_ten_streams_per_credential(pool: PgPool) {
     let w = world(Kind::Filesystem, pool).await;
     let alice = w.as_user(1).await;
     let mut feeds = Vec::new();
     for _ in 0..10 {
-        feeds.push(alice.feed_start().await);
+        let mut feed = alice.feed_start().await;
+        feed.libraries().await;
+        feeds.push(feed);
     }
-    let refused = alice.feed(&BTreeMap::new()).await.err().unwrap();
-    assert_eq!(
-        (refused.0, refused.1["code"].as_str()),
-        (StatusCode::TOO_MANY_REQUESTS, Some("too_many_streams"))
+    let mut eleventh = alice.feed(&BTreeMap::<Uuid, i64>::new()).await.unwrap();
+    eleventh.libraries().await;
+    assert!(
+        feeds[0].ends_within(Duration::from_secs(5)).await,
+        "the oldest ends"
     );
+    for feed in &mut feeds[1..] {
+        assert!(feed.quiet().await, "the others go on");
+    }
     // Another credential of the same account has its own ten.
     let other = alice.with_app_password(json!({})).await;
     other.feed_start().await;
-    // A stream gone frees its place.
-    feeds.pop();
-    for _ in 0..50 {
-        if alice.feed(&BTreeMap::new()).await.is_ok() {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    panic!("the closed stream's place was never freed");
 }
 
 #[sqlx::test]

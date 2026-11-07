@@ -31,7 +31,7 @@ type Body = Pin<Box<dyn Stream<Item = reqwest::Result<bytes::Bytes>> + Send>>;
 struct State {
     client: Client,
     /// The last event received in each library followed.
-    positions: BTreeMap<Uuid, i64>,
+    positions: BTreeMap<Uuid, api::Position>,
     /// The response's body, and what arrived of the next message (bytes: a
     /// character can be split across two chunks).
     connection: Option<(Body, Vec<u8>)>,
@@ -43,10 +43,10 @@ impl Client {
     /// The event feed from `after` (empty on a first launch), then live. Cut,
     /// it reconnects from the last positions received, waiting longer each
     /// time (up to 30 s). It ends after an error that waiting won't fix (the
-    /// credential refused, too many streams), given as its last item.
+    /// credential refused), given as its last item.
     pub fn events(
         &self,
-        after: BTreeMap<Uuid, i64>,
+        after: BTreeMap<Uuid, api::Position>,
     ) -> impl Stream<Item = Result<FeedMessage, Error>> + Send + use<> {
         let start = State {
             client: self.clone(),
@@ -103,7 +103,7 @@ impl Client {
 /// Opens the stream from `positions`.
 async fn connect(
     client: &Client,
-    positions: &BTreeMap<Uuid, i64>,
+    positions: &BTreeMap<Uuid, api::Position>,
 ) -> Result<(Body, Vec<u8>), Error> {
     let body = serde_json::to_vec(&api::Events {
         after: positions.clone(),
@@ -140,11 +140,23 @@ impl State {
                     .iter()
                     .map(|l| match self.positions.get(&l.id) {
                         Some(&p) if !l.reset => (l.id, p),
-                        _ => (l.id, l.position),
+                        _ => (
+                            l.id,
+                            api::Position::Event {
+                                seq: l.position,
+                                event: l.event,
+                            },
+                        ),
                     })
                     .collect();
             }
-            FeedMessage::Changes(changes) => self.positions.extend(&changes.positions),
+            FeedMessage::Changes(changes) => {
+                for (library, &seq) in &changes.positions {
+                    let event = changes.events.get(library).copied();
+                    self.positions
+                        .insert(*library, api::Position::Event { seq, event });
+                }
+            }
         }
     }
 }

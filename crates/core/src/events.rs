@@ -16,7 +16,11 @@ use crate::api::AppState;
 use crate::db::account::Credential;
 
 /// Most streams one credential holds open: a long-lived connection escapes
-/// the per-request rate limits. A sync client uses one.
+/// the per-request rate limits. A sync client uses one. One more closes the
+/// oldest: a client gone without closing (asleep, a network change, a proxy
+/// holding the upstream) keeps its stream until TCP gives up, and behind a
+/// reverse proxy the server can't tell. It is always older than its client's
+/// reconnection.
 pub const STREAMS_PER_CREDENTIAL: usize = 10;
 
 /// How often a stream pings its client (a comment: proxies close silent
@@ -81,11 +85,23 @@ impl Registry {
     }
 
     /// A new stream, before its first read (so an event committed meanwhile
-    /// still wakes it). `None`: the credential holds too many.
-    pub fn register(self: &Arc<Self>, token: i64, account: i64) -> Option<Registration> {
+    /// still wakes it). At the credential's limit, its oldest stream is ended
+    /// and its place taken at once, even while it waits on a client that
+    /// doesn't read.
+    pub fn register(self: &Arc<Self>, token: i64, account: i64) -> Registration {
         let mut streams = self.lock();
-        if streams.values().filter(|e| e.token == token).count() >= STREAMS_PER_CREDENTIAL {
-            return None;
+        let mut ours: Vec<u64> = streams
+            .iter()
+            .filter(|(_, e)| e.token == token)
+            .map(|(id, _)| *id)
+            .collect();
+        ours.sort_unstable();
+        let over = (ours.len() + 1).saturating_sub(STREAMS_PER_CREDENTIAL);
+        for id in &ours[..over] {
+            if let Some(oldest) = streams.remove(id) {
+                oldest.signal.closed.store(true, Ordering::Relaxed);
+                oldest.signal.notify.notify_one();
+            }
         }
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let signal = Arc::new(Signal::default());
@@ -98,11 +114,11 @@ impl Registry {
                 signal: signal.clone(),
             },
         );
-        Some(Registration {
+        Registration {
             registry: self.clone(),
             id,
             signal,
-        })
+        }
     }
 
     fn set_libraries(&self, id: u64, libraries: HashSet<i64>) {
@@ -182,33 +198,63 @@ struct Feed {
 impl Feed {
     /// The libraries the credential can access now, trash included, each with
     /// its position: kept for those already followed, the client's for those
-    /// in `after` (unless beyond the library's last event: `reset`), the last
-    /// event's for the others. Libraries out of reach are dropped.
+    /// in `after` (unless beyond the library's last event, or naming another
+    /// event than the one of that number: `reset`), the last event's for the
+    /// others. Libraries out of reach are dropped.
     async fn libraries(
         &mut self,
         state: &AppState,
-        after: &BTreeMap<Uuid, i64>,
+        after: &BTreeMap<Uuid, api::Position>,
     ) -> sqlx::Result<Vec<api::FeedLibrary>> {
         let rows = sqlx::query!(
             r#"SELECT l.pk, l.uuid AS id, o.uuid AS organization, l.name, n.uuid AS root,
-                      a.can_write AS "writable!", l.deleted_at IS NOT NULL AS "trashed!", l.event_seq
+                      a.can_write AS "writable!", l.deleted_at IS NOT NULL AS "trashed!", l.event_seq,
+                      e.uuid AS "event?"
                FROM library_access_any($1) a
                JOIN library l ON l.pk = a.library
                JOIN organization o ON o.pk = l.owner
                JOIN node n ON n.library = l.pk AND n.parent IS NULL
+               LEFT JOIN event e ON e.library = l.pk AND e.seq = l.event_seq
                ORDER BY lower(o.name), lower(l.name)"#,
             self.token
         )
         .fetch_all(&state.pool)
         .await?;
+        // The events the client's positions name, as they are here now.
+        let (named, seqs): (Vec<Uuid>, Vec<i64>) = after
+            .iter()
+            .filter(|(_, p)| p.event().is_some())
+            .map(|(l, p)| (*l, p.seq()))
+            .unzip();
+        let here: HashMap<Uuid, Uuid> = sqlx::query!(
+            "SELECT c.library AS \"library!\", e.uuid
+             FROM unnest($1::uuid[], $2::bigint[]) AS c (library, seq)
+             JOIN library l ON l.uuid = c.library
+             JOIN event e ON e.library = l.pk AND e.seq = c.seq",
+            &named,
+            &seqs
+        )
+        .fetch_all(&state.pool)
+        .await?
+        .into_iter()
+        .map(|r| (r.library, r.uuid))
+        .collect();
         let mut positions = HashMap::with_capacity(rows.len());
         let mut out = Vec::with_capacity(rows.len());
         for r in rows {
             let (position, reset) = match self.positions.get(&r.pk) {
                 Some(&(_, p)) => (p, false),
                 None => match after.get(&r.id) {
-                    Some(&p) if p > r.event_seq => (r.event_seq, true),
-                    Some(&p) => (p, false),
+                    Some(p) if p.seq() > r.event_seq => (r.event_seq, true),
+                    // Another event under that number. One not found (deleted
+                    // events, a position at 0) can't be told: kept.
+                    Some(p)
+                        if p.event()
+                            .is_some_and(|id| here.get(&r.id).is_some_and(|h| *h != id)) =>
+                    {
+                        (r.event_seq, true)
+                    }
+                    Some(p) => (p.seq(), false),
                     None => (r.event_seq, false),
                 },
             };
@@ -221,6 +267,7 @@ impl Feed {
                 writable: r.writable,
                 trashed: r.trashed,
                 position: r.event_seq,
+                event: r.event,
                 reset,
             });
         }
@@ -249,7 +296,7 @@ impl Feed {
         }
         // The access join again: a library left reads nothing from here.
         let events = sqlx::query!(
-            "SELECT e.library, e.seq, e.resource, e.resource_kind, e.action
+            "SELECT e.library, e.seq, e.uuid, e.resource, e.resource_kind, e.action
              FROM unnest($1::bigint[], $2::bigint[]) AS c (library, seq)
              JOIN event e ON e.library = c.library AND e.seq > c.seq
              JOIN library_access_any($3) a ON a.library = e.library
@@ -267,11 +314,12 @@ impl Feed {
         let full = events.len() as i64 == BATCH;
         // Collapsed: each resource's latest event.
         let mut latest: HashMap<(Uuid, api::ResourceKind), api::EventAction> = HashMap::new();
-        let mut positions = BTreeMap::new();
+        let (mut positions, mut ids) = (BTreeMap::new(), BTreeMap::new());
         for e in &events {
             let entry = self.positions.get_mut(&e.library).expect("followed");
             entry.1 = e.seq;
             positions.insert(entry.0, e.seq);
+            ids.insert(entry.0, e.uuid);
             let kind = if e.resource_kind == api::ResourceKind::Library.as_str() {
                 api::ResourceKind::Library
             } else {
@@ -370,7 +418,11 @@ impl Feed {
             entries.push(change(*id, api::ResourceKind::Node, None));
         }
         Ok(Some(Batch {
-            changes: api::Changes { entries, positions },
+            changes: api::Changes {
+                entries,
+                positions,
+                events: ids,
+            },
             full,
         }))
     }
@@ -381,7 +433,7 @@ impl Feed {
 pub async fn run(
     state: AppState,
     who: Credential,
-    after: BTreeMap<Uuid, i64>,
+    after: BTreeMap<Uuid, api::Position>,
     registration: Registration,
     out: mpsc::Sender<SseEvent>,
 ) {
@@ -393,7 +445,7 @@ pub async fn run(
 async fn live(
     state: &AppState,
     who: &Credential,
-    after: &BTreeMap<Uuid, i64>,
+    after: &BTreeMap<Uuid, api::Position>,
     registration: &Registration,
     out: &mpsc::Sender<SseEvent>,
 ) -> sqlx::Result<()> {
@@ -460,8 +512,8 @@ mod tests {
     #[tokio::test]
     async fn wakes_the_streams_concerned() {
         let registry = Registry::new(INTERVAL);
-        let photos = registry.register(1, 10).unwrap();
-        let docs = registry.register(2, 20).unwrap();
+        let photos = registry.register(1, 10);
+        let docs = registry.register(2, 20);
         registry.set_libraries(photos.id, HashSet::from([100]));
         registry.set_libraries(docs.id, HashSet::from([200]));
 
@@ -485,19 +537,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ten_per_credential_and_freed_on_drop() {
+    async fn ten_per_credential_the_oldest_closed_and_freed_on_drop() {
         let registry = Registry::new(INTERVAL);
-        let mut held: Vec<_> = (0..STREAMS_PER_CREDENTIAL)
-            .map(|_| registry.register(1, 10).unwrap())
+        let held: Vec<_> = (0..STREAMS_PER_CREDENTIAL)
+            .map(|_| registry.register(1, 10))
             .collect();
-        assert!(registry.register(1, 10).is_none());
-        assert!(
-            registry.register(2, 10).is_some(),
-            "per credential, not account"
-        );
-        held.pop();
-        assert!(registry.register(1, 10).is_some());
-        drop(held);
+        let other = registry.register(2, 10);
+        let eleventh = registry.register(1, 10);
+        // The oldest ended, its place taken; the others, and the other
+        // credential's, untouched.
+        assert!(woken(&held[0]).await && held[0].signal.closed.load(Ordering::Relaxed));
+        for r in &held[1..] {
+            assert!(!r.signal.closed.load(Ordering::Relaxed));
+        }
+        assert!(!other.signal.closed.load(Ordering::Relaxed));
+        assert_eq!(registry.lock().len(), STREAMS_PER_CREDENTIAL + 1);
+        drop((held, other, eleventh));
         assert_eq!(registry.lock().len(), 0);
     }
 }
