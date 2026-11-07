@@ -1,6 +1,12 @@
 # Changelog
 
 Every release of `core`: the server, `@theca/client`, `openapi.json`.
+## [1.5.0] - 2026-11-07
+
+### Features
+
+- **client**: Check_version gives the server's version
+
 ## [1.4.0] - 2026-11-07
 
 ### Features
