@@ -203,15 +203,17 @@ impl Client {
         self.call(Method::POST, path, Some(body)).await
     }
 
-    /// Checks the server speaks API v1.
-    pub async fn check_version(&self) -> Result<(), Error> {
+    /// Checks the server speaks API v1, and gives its version (the `core` it
+    /// runs): a client compares it with the oldest it works with.
+    pub async fn check_version(&self) -> Result<String, Error> {
         #[derive(serde::Deserialize)]
         struct Version {
+            server: String,
             api: Vec<String>,
         }
         let version: Version = self.get("/api/version").await?;
         if version.api.iter().any(|v| v == "v1") {
-            Ok(())
+            Ok(version.server)
         } else {
             Err(Error::Version)
         }

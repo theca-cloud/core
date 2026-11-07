@@ -59,7 +59,10 @@ async fn fetch(client: &Client, file: uuid::Uuid, version: Option<uuid::Uuid>) -
 async fn scenario(pool: PgPool, storage: serde_json::Value) {
     let server = start(&pool).await;
     let mut client = Client::new(&server.url).unwrap();
-    client.check_version().await.unwrap();
+    assert_eq!(
+        client.check_version().await.unwrap(),
+        env!("CARGO_PKG_VERSION")
+    );
     let setup: api::Setup = serde_json::from_value(json!({
         "admin_email": "admin@test.theca",
         "admin_password": "a long password",
