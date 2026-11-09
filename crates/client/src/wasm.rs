@@ -22,6 +22,7 @@ use crate::place::place;
 use crate::rt::BoxFuture;
 use crate::source::Source;
 use crate::upload::{Cancel, UploadOptions, UploadProgress, Uploader};
+use theca_common::ignore::Problem;
 
 /// A browser `Blob` (a `File` from an `<input>` or a drop), read by slices.
 struct BlobSource(web_sys::Blob);
@@ -74,6 +75,17 @@ enum Event<'a> {
     },
     /// A file the operating system left (`.DS_Store`, `._*`...): not uploaded.
     Skipped { path: &'a str },
+    /// A file an ignore file (`.thecaignore`) names: not uploaded.
+    Ignored { path: &'a str },
+    /// What in an ignore file doesn't apply: `line`, a line that isn't a
+    /// pattern; none, the file past 64 KiB. `path` is the ignore file's,
+    /// below the folder or from the library's root when above it.
+    #[serde(rename = "ignore_problem")]
+    IgnoreProblem {
+        path: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        line: Option<usize>,
+    },
     /// A file failed (the others go on).
     Failed {
         path: &'a str,
@@ -141,8 +153,11 @@ impl ThecaClient {
     /// `on_event` gets `{ kind: "progress", total, hashed, uploaded, skipped }`
     /// (bytes, every file together), and each file's outcome: `{ kind: "done",
     /// path, file, version, conflict, unchanged }`, `{ kind: "skipped", path }`
-    /// (a file the operating system left, `.DS_Store`, `._*`...: not uploaded)
-    /// or `{ kind: "failed", path, code, message }`. Resolves once every file is done or failed; rejects
+    /// (a file the operating system left, `.DS_Store`, `._*`...: not uploaded),
+    /// `{ kind: "ignored", path }` (a file an ignore file names: not uploaded)
+    /// or `{ kind: "failed", path, code, message }`; before them, for what in
+    /// an ignore file doesn't apply, `{ kind: "ignore_problem", path, line? }`
+    /// (no `line`: the file is past 64 KiB). Resolves once every file is done or failed; rejects
     /// with `{ code, message }` when nothing could start (folders not created).
     #[allow(clippy::too_many_arguments)]
     pub async fn upload(
@@ -169,9 +184,36 @@ impl ThecaClient {
         let (cancels, mut cancelled) = mpsc::unbounded();
         self.uploads.borrow_mut().insert(id, cancels);
         let result = async {
-            let targets = place(&self.client, library, folder, &folders, &paths)
-                .await
-                .map_err(|e| js_error(&e))?;
+            // The dropped ignore files, read first: they apply to this upload.
+            let mut ignore_files = Vec::new();
+            for (path, source) in paths.iter().zip(&sources) {
+                if theca_common::ignore::is_ignore_file(path.rsplit('/').next().unwrap_or("")) {
+                    let len = source.len().min(theca_common::ignore::MAX_LEN as u64 + 1);
+                    let content = source
+                        .read(0, len as usize)
+                        .await
+                        .map_err(|e| js_error(&Error::from(e)))?;
+                    ignore_files.push((path.clone(), content));
+                }
+            }
+            let placed = place(
+                &self.client,
+                library,
+                folder,
+                &folders,
+                &paths,
+                &ignore_files,
+            )
+            .await
+            .map_err(|e| js_error(&e))?;
+            for (path, problem) in &placed.problems {
+                let line = match problem {
+                    Problem::Line { line, .. } => Some(*line),
+                    Problem::TooLong => None,
+                };
+                emit(&on_event, &Event::IgnoreProblem { path, line });
+            }
+            let targets = placed.targets;
             let cancel = Cancel::default();
             let options = UploadOptions {
                 message,
@@ -197,6 +239,10 @@ impl ThecaClient {
                     Ok(target) => target,
                     Err(Error::Ignored(_)) => {
                         emit(&on_event, &Event::Skipped { path });
+                        continue;
+                    }
+                    Err(Error::IgnoreFile(_)) => {
+                        emit(&on_event, &Event::Ignored { path });
                         continue;
                     }
                     Err(e) => {

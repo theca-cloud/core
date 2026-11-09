@@ -6,6 +6,7 @@
 //! root). Every operation goes through [`crate::files`], like the API; reads
 //! stream through [`crate::stream`].
 
+use std::collections::HashMap;
 use std::io::{SeekFrom, Write};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -23,6 +24,7 @@ use dav_server::fs::{
 };
 use dav_server::{DavHandler, memls::MemLs};
 use futures::FutureExt;
+use theca_common::ignore::{self as ignore_file, Ignores};
 use theca_common::name::{Name, is_ignored};
 use uuid::Uuid;
 
@@ -39,7 +41,10 @@ use crate::stream::VersionReader;
 pub fn handler(state: AppState) -> DavHandler<Who> {
     DavHandler::builder()
         .strip_prefix("/dav")
-        .filesystem(Box::new(Fs { state }))
+        .filesystem(Box::new(Fs {
+            state,
+            ignore_files: Arc::default(),
+        }))
         .locksystem(MemLs::new())
         .build_handler()
 }
@@ -121,7 +126,15 @@ impl std::ops::Deref for Who {
 #[derive(Clone)]
 pub struct Fs {
     state: AppState,
+    /// Ignore files' content (their first `ignore::MAX_LEN` bytes and one
+    /// more) by version: a version never changes, so a copy of many files
+    /// reads each ignore file once.
+    ignore_files: Arc<Mutex<HashMap<Uuid, Arc<[u8]>>>>,
 }
+
+/// The most ignore files' contents kept (each at most 64 KiB): past it, the
+/// cache starts over.
+const IGNORE_FILES_CACHED: usize = 1024;
 
 /// What a path names.
 enum Item {
@@ -250,6 +263,15 @@ impl Fs {
 
     /// Resolves a path, following the password's scope.
     async fn resolve(&self, who: &Credential, segments: &[String]) -> FsResult<Item> {
+        match self.deepest(who, segments).await? {
+            (item, found) if found == segments.len() => Ok(item),
+            _ => Err(FsError::NotFound),
+        }
+    }
+
+    /// The deepest item of a path that exists, and how many of its segments
+    /// that took.
+    async fn deepest(&self, who: &Credential, segments: &[String]) -> FsResult<(Item, usize)> {
         let mut rest = segments.iter();
         let mut item = match (who.library, who.organization) {
             (Some(library), _) => {
@@ -265,34 +287,133 @@ impl Fs {
             (None, Some(organization)) => Item::Organization { pk: organization },
             (None, None) => Item::Root,
         };
+        let mut found = 0;
         for segment in rest.by_ref() {
-            item = match item {
+            let next = match &item {
                 Item::Root => {
                     let orgs = self.organizations(who).await?;
-                    let (pk, _) = orgs
-                        .into_iter()
+                    orgs.into_iter()
                         .find(|(_, name)| name.to_lowercase() == segment.to_lowercase())
-                        .ok_or(FsError::NotFound)?;
-                    Item::Organization { pk }
+                        .map(|(pk, _)| Item::Organization { pk })
                 }
                 Item::Organization { pk } => {
-                    let (_, root) = self
-                        .libraries(who, pk)
+                    match self
+                        .libraries(who, *pk)
                         .await?
                         .into_iter()
                         .find(|(name, _)| name.to_lowercase() == segment.to_lowercase())
-                        .ok_or(FsError::NotFound)?;
-                    Item::Node(self.node(who, root).await?)
+                    {
+                        Some((_, root)) => Some(Item::Node(self.node(who, root).await?)),
+                        None => None,
+                    }
                 }
-                Item::Node(node) if !node.is_file => Item::Node(
-                    self.child(who, &node, segment)
-                        .await?
-                        .ok_or(FsError::NotFound)?,
-                ),
-                Item::Node(_) => return Err(FsError::NotFound),
+                Item::Node(node) if !node.is_file => {
+                    self.child(who, node, segment).await?.map(Item::Node)
+                }
+                Item::Node(_) => None,
             };
+            let Some(next) = next else { break };
+            item = next;
+            found += 1;
         }
-        Ok(item)
+        Ok((item, found))
+    }
+
+    /// Whether `below` (names under `folder`, the target's last) is an
+    /// ignored file or folder: named by an ignore file in `folder` or above
+    /// it. What WebDAV writes there is discarded.
+    async fn ignored(&self, folder: &NodeAccess, below: &[String], is_dir: bool) -> FsResult<bool> {
+        let found = db::node::ignore_files(&self.state.pool, folder.node)
+            .await
+            .map_err(db_error)?;
+        let mut ignores = Ignores::new();
+        for file in &found.files {
+            let Some(version) = &file.version else {
+                continue;
+            };
+            let (content, fresh) = self.ignore_file(version.pk, version.id).await?;
+            let problems = ignores.add(&found.folder[..file.depth], &content);
+            if fresh {
+                for problem in problems {
+                    let path = found.path(file);
+                    tracing::warn!(version = %version.id, path, %problem,
+                        "part of an ignore file doesn't apply");
+                }
+            }
+        }
+        let mut path = found.folder;
+        path.extend_from_slice(below);
+        Ok(ignores.is_ignored(&path, is_dir))
+    }
+
+    /// An ignore file's content, as much as applies (and a byte more, which
+    /// tells it was longer); `true` when just read from storage.
+    async fn ignore_file(&self, pk: i64, version: Uuid) -> FsResult<(Arc<[u8]>, bool)> {
+        if let Some(content) = self
+            .ignore_files
+            .lock()
+            .expect("not poisoned")
+            .get(&version)
+        {
+            return Ok((content.clone(), false));
+        }
+        let failed = |e| {
+            tracing::error!(error = %e, "WebDAV: reading an ignore file");
+            FsError::GeneralFailure
+        };
+        let mut reader = VersionReader::open(&self.state, pk).await.map_err(failed)?;
+        let want = (reader.len() as usize).min(ignore_file::MAX_LEN + 1);
+        let mut content = Vec::with_capacity(want);
+        while content.len() < want {
+            let bytes = reader
+                .read(content.len() as u64, want - content.len())
+                .await
+                .map_err(failed)?;
+            if bytes.is_empty() {
+                break;
+            }
+            content.extend_from_slice(&bytes);
+        }
+        let content: Arc<[u8]> = content.into();
+        let mut cache = self.ignore_files.lock().expect("not poisoned");
+        if cache.len() >= IGNORE_FILES_CACHED {
+            cache.clear();
+        }
+        cache.insert(version, content.clone());
+        Ok((content, true))
+    }
+
+    /// Where a write goes: the folder a new item goes into, and its name; none
+    /// when an ignore file names the path (`is_dir`: a folder), which WebDAV
+    /// answers without storing anything. Decided before the parent must
+    /// exist: an ignored folder was never created. A folder already there is
+    /// answered as one, ignored or not.
+    async fn write_target(
+        &self,
+        who: &Credential,
+        path: &DavPath,
+        is_dir: bool,
+    ) -> FsResult<Option<(Item, String)>> {
+        let mut segments = segments(path)?;
+        let name = segments.pop().ok_or(FsError::Forbidden)?;
+        let (parent, found) = self.deepest(who, &segments).await?;
+        if let Item::Node(folder) = &parent
+            && !folder.is_file
+        {
+            if is_dir && found == segments.len() && self.child(who, folder, &name).await?.is_some()
+            {
+                return Err(FsError::Exists);
+            }
+            let mut below = segments[found..].to_vec();
+            below.push(name.clone());
+            if self.ignored(folder, &below, is_dir).await? {
+                return Ok(None);
+            }
+        }
+        if found < segments.len() {
+            return Err(FsError::NotFound);
+        }
+        Ok(Some((parent, name)))
     }
 
     /// The folder a new item goes into, and its name.
@@ -359,7 +480,9 @@ impl GuardedFileSystem<Who> for Fs {
                     meta,
                 }) as Box<dyn DavFile>);
             }
-            let (parent, name) = self.parent_of(who, path).await?;
+            let Some((parent, name)) = self.write_target(who, path, false).await? else {
+                return Ok(Box::new(Discarded::default()) as Box<dyn DavFile>);
+            };
             let Item::Node(parent) = parent else {
                 return Err(FsError::Forbidden);
             };
@@ -464,13 +587,14 @@ impl GuardedFileSystem<Who> for Fs {
 
     fn create_dir<'a>(&'a self, path: &'a DavPath, who: &'a Who) -> FsFuture<'a, ()> {
         async move {
-            let (parent, name) = self.parent_of(who, path).await?;
+            // An ignored folder: answered, not created, and every write below
+            // it discarded the same way.
+            let Some((parent, name)) = self.write_target(who, path, true).await? else {
+                return Ok(());
+            };
             let name = Name::new(&name).map_err(|_| FsError::Forbidden)?;
             match parent {
                 Item::Node(parent) => {
-                    if self.child(who, &parent, name.as_str()).await?.is_some() {
-                        return Err(FsError::Exists);
-                    }
                     files::create_folders(&self.state, &parent, &[name.as_str().to_owned()])
                         .await
                         .map_err(map)?;
@@ -747,6 +871,43 @@ impl DavFile for ReadFile {
         }
         self.position = target as u64;
         Box::pin(std::future::ready(Ok(self.position)))
+    }
+
+    fn flush(&mut self) -> FsFuture<'_, ()> {
+        Box::pin(std::future::ready(Ok(())))
+    }
+}
+
+/// A write to an ignored path: its bytes counted, never stored.
+#[derive(Debug, Default)]
+struct Discarded {
+    len: u64,
+}
+
+impl DavFile for Discarded {
+    fn metadata(&mut self) -> FsFuture<'_, Box<dyn DavMetaData>> {
+        let meta = Meta::file(self.len, SystemTime::now(), None);
+        Box::pin(std::future::ready(Ok(
+            Box::new(meta) as Box<dyn DavMetaData>
+        )))
+    }
+
+    fn write_buf(&mut self, buf: Box<dyn Buf + Send>) -> FsFuture<'_, ()> {
+        self.len += buf.remaining() as u64;
+        Box::pin(std::future::ready(Ok(())))
+    }
+
+    fn write_bytes(&mut self, buf: Bytes) -> FsFuture<'_, ()> {
+        self.len += buf.len() as u64;
+        Box::pin(std::future::ready(Ok(())))
+    }
+
+    fn read_bytes(&mut self, _count: usize) -> FsFuture<'_, Bytes> {
+        Box::pin(std::future::ready(Err(FsError::Forbidden)))
+    }
+
+    fn seek(&mut self, _pos: SeekFrom) -> FsFuture<'_, u64> {
+        Box::pin(std::future::ready(Err(FsError::NotImplemented)))
     }
 
     fn flush(&mut self) -> FsFuture<'_, ()> {

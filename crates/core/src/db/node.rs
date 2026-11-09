@@ -71,6 +71,86 @@ pub async fn info(pool: &PgPool, node: i64) -> sqlx::Result<api::NodeInfo> {
     })
 }
 
+/// The ignore files that apply in a folder: its own and every folder's above
+/// it (`.thecaignore` found by the `node_name` index, files outside the trash).
+pub struct IgnoreFiles {
+    /// The folder's names from its library's root (the root's own, empty,
+    /// left out).
+    pub folder: Vec<String>,
+    /// Root first.
+    pub files: Vec<IgnoreFile>,
+}
+
+impl IgnoreFiles {
+    /// An ignore file's path in the library (`/a/.thecaignore`).
+    pub fn path(&self, file: &IgnoreFile) -> String {
+        let mut names = self.folder[..file.depth].to_vec();
+        names.push(file.name.clone());
+        format!("/{}", names.join("/"))
+    }
+}
+
+/// An ignore file in a folder of an [`IgnoreFiles`]' chain.
+pub struct IgnoreFile {
+    pub id: Uuid,
+    /// As stored (`.thecaignore` in any case).
+    pub name: String,
+    /// Its folder: `IgnoreFiles::folder[..depth]`.
+    pub depth: usize,
+    pub version: Option<IgnoreVersion>,
+}
+
+/// An ignore file's current version.
+pub struct IgnoreVersion {
+    pub pk: i64,
+    pub id: Uuid,
+    pub size: i64,
+}
+
+/// The ignore files of `folder` and every folder above it.
+pub async fn ignore_files(pool: &PgPool, folder: i64) -> sqlx::Result<IgnoreFiles> {
+    let rows = sqlx::query!(
+        r#"WITH RECURSIVE up (pk, parent, name, depth) AS (
+               SELECT pk, parent, name, 0 FROM node WHERE pk = $1
+               UNION ALL
+               SELECT n.pk, n.parent, n.name, up.depth + 1 FROM node n JOIN up ON n.pk = up.parent
+           )
+           SELECT up.name AS "name!", up.parent IS NULL AS "root!", i.uuid AS "id?", i.name AS "file_name?",
+                  v.pk AS "version_pk?", v.uuid AS "version?", v.size AS "size?"
+           FROM up
+           LEFT JOIN node i ON i.parent = up.pk AND lower(i.name) = $2
+                            AND i.deleted_at IS NULL AND i.is_file
+           LEFT JOIN version v ON v.pk = i.current_version
+           ORDER BY up.depth DESC"#,
+        folder,
+        theca_common::ignore::FILE_NAME,
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut ignores = IgnoreFiles {
+        folder: Vec::new(),
+        files: Vec::new(),
+    };
+    for row in rows {
+        if !row.root {
+            ignores.folder.push(row.name);
+        }
+        if let Some((id, name)) = row.id.zip(row.file_name) {
+            ignores.files.push(IgnoreFile {
+                id,
+                name,
+                depth: ignores.folder.len(),
+                version: row
+                    .version_pk
+                    .zip(row.version)
+                    .zip(row.size)
+                    .map(|((pk, id), size)| IgnoreVersion { pk, id, size }),
+            });
+        }
+    }
+    Ok(ignores)
+}
+
 /// A folder's subtree outside the trash, as it streams from the database:
 /// paths below the folder, parents before their children (byte order puts a
 /// path before its extensions).

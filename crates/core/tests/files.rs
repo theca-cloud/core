@@ -1150,3 +1150,103 @@ async fn library_size(pool: PgPool) {
         StatusCode::NOT_FOUND
     );
 }
+
+/// The ignore files that apply in a folder: its own and every folder's above
+/// it, the root's first, as stored (any case); those in the trash, or below,
+/// left out. Reached like the folder; a file has none.
+#[sqlx::test]
+async fn ignore_files_above_a_folder(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let mut alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    let a = alice.mkdir(docs.root, "a").await;
+    let b = alice.mkdir(a, "B").await;
+    let c = alice.mkdir(b, "c").await;
+    let below = alice.mkdir(c, "below").await;
+    let root_file = alice
+        .upload(&docs, new_file(&docs, ".thecaignore"), b"*.log\n")
+        .await
+        .unwrap();
+    let b_file = alice
+        .upload(
+            &docs,
+            json!({ "parent": b, "name": ".TheCaIgnore" }),
+            b"*.tmp\n",
+        )
+        .await
+        .unwrap();
+    let trashed = alice
+        .upload(
+            &docs,
+            json!({ "parent": a, "name": ".thecaignore" }),
+            b"x\n",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        alice.trash_node(trashed.file, false).await,
+        StatusCode::NO_CONTENT
+    );
+    alice
+        .upload(
+            &docs,
+            json!({ "parent": below, "name": ".thecaignore" }),
+            b"y\n",
+        )
+        .await
+        .unwrap();
+    // Not an ignore file's name.
+    alice
+        .upload(&docs, json!({ "parent": c, "name": "thecaignore" }), b"z\n")
+        .await
+        .unwrap();
+
+    let found: api::IgnoreFiles = alice
+        .get(&format!("/api/v1/nodes/{c}/ignore-files"))
+        .await
+        .unwrap();
+    assert_eq!(found.path, "/a/B/c");
+    let files: Vec<_> = found
+        .files
+        .iter()
+        .map(|f| (f.id, f.path.as_str(), f.current_version, f.size))
+        .collect();
+    assert_eq!(
+        files,
+        [
+            (
+                root_file.file,
+                "/.thecaignore",
+                Some(root_file.version),
+                Some(6)
+            ),
+            (
+                b_file.file,
+                "/a/B/.TheCaIgnore",
+                Some(b_file.version),
+                Some(6)
+            ),
+        ]
+    );
+    let root: api::IgnoreFiles = alice
+        .get(&format!("/api/v1/nodes/{}/ignore-files", docs.root))
+        .await
+        .unwrap();
+    assert_eq!(root.path, "/");
+    assert_eq!(root.files.len(), 1);
+
+    let (status, body) = alice
+        .get::<Value>(&format!("/api/v1/nodes/{}/ignore-files", root_file.file))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (StatusCode::BAD_REQUEST, Some("not_a_folder"))
+    );
+    let bob = w.as_user(2).await;
+    let (status, _) = bob
+        .get::<Value>(&format!("/api/v1/nodes/{c}/ignore-files"))
+        .await
+        .unwrap_err();
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

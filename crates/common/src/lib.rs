@@ -1,5 +1,6 @@
 #![warn(missing_docs)]
 //! Shared types and algorithms: chunking, hashing, compression, name rules,
+//! ignore files,
 //! password strength.
 //!
 //! Everything here must behave identically on the server, in native clients and
@@ -9,5 +10,6 @@ pub mod api;
 pub mod chunking;
 pub mod compression;
 pub mod hash;
+pub mod ignore;
 pub mod name;
 pub mod password;

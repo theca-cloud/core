@@ -840,9 +840,10 @@ async fn placing_and_streaming(pool: PgPool) {
     ]
     .map(String::from)
     .into();
-    let targets = place(&client, id, root, &["Docs/empty".into()], &files)
+    let targets = place(&client, id, root, &["Docs/empty".into()], &files, &[])
         .await
-        .unwrap();
+        .unwrap()
+        .targets;
     assert!(matches!(&targets[0], Ok(Target::New { parent, .. }) if *parent == root));
     assert!(matches!(&targets[2], Ok(Target::New { name, .. }) if name.as_str() == "c.txt"));
     assert!(matches!(&targets[3], Err(Error::InvalidName(_))));
@@ -884,7 +885,10 @@ async fn placing_and_streaming(pool: PgPool) {
     // Again, names in another case: new versions of the files there, based
     // on their current versions; a file where a folder is refused.
     let files: Vec<String> = ["A.TXT", "docs/B.txt", "Docs"].map(String::from).into();
-    let targets = place(&client, id, root, &[], &files).await.unwrap();
+    let targets = place(&client, id, root, &[], &files, &[])
+        .await
+        .unwrap()
+        .targets;
     for (target, done) in targets.iter().zip(&committed) {
         assert!(matches!(target,
             Ok(Target::Version { file, base, .. }) if *file == done.file && *base == Some(done.version)));
@@ -918,6 +922,126 @@ async fn placing_and_streaming(pool: PgPool) {
         .unwrap();
     assert!(chunks.len() > 2);
     assert_eq!(chunks.concat(), big);
+}
+
+/// What an ignore file names is skipped and its folders never created: the
+/// ignore files of the destination and above, those already below it on the
+/// server, and the dropped ones, each in place of the server's in its folder.
+#[sqlx::test]
+async fn placing_skips_what_ignore_files_name(pool: PgPool) {
+    let server = start(&pool).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut client = Client::new(&server.url).unwrap();
+    let setup: api::Setup = serde_json::from_value(json!({
+        "admin_email": "admin@test.theca", "admin_password": "a long password", "organization": "Acme",
+        "storages": [{ "name": "main", "implementation": "filesystem", "path": dir.path() }],
+    }))
+    .unwrap();
+    let me = client.setup(&setup, None).await.unwrap();
+    let library = client
+        .create_library(me.organizations[0].organization, "Docs")
+        .await
+        .unwrap();
+    let (id, root) = (library.id, library.root);
+    let put = async |parent: uuid::Uuid, name: &str, content: &[u8]| {
+        let target = Target::New {
+            library: id,
+            parent,
+            name: Name::new(name).unwrap(),
+        };
+        upload(
+            &client,
+            &MemorySource(content.to_vec()),
+            target,
+            &UploadOptions::default(),
+            |_| {},
+            &Cancel::default(),
+        )
+        .await
+        .unwrap();
+    };
+    let names = async |folder: uuid::Uuid| -> Vec<String> {
+        client
+            .children(folder)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|n| n.name)
+            .collect()
+    };
+    let folder = |path: &str| {
+        let client = client.clone();
+        let path = path.to_owned();
+        async move { client.create_folders(root, &[path]).await.unwrap()[0].id }
+    };
+    put(root, ".thecaignore", b"*.log\n[z-a]\n").await;
+    let proj = folder("proj").await;
+    put(proj, ".thecaignore", b"build/\n").await;
+    // In a folder this upload doesn't touch: never read, nothing said.
+    let unrelated = folder("proj/unrelated").await;
+    put(unrelated, ".thecaignore", b"[z-a]\n").await;
+    let sub = folder("sub").await;
+
+    let files: Vec<String> = [
+        "a.log",
+        "proj/build/x.o",
+        "proj/src/y.rs",
+        "new/.thecaignore",
+        "new/z.tmp",
+        "new/k.txt",
+        "proj/build/.DS_Store",
+    ]
+    .map(String::from)
+    .into();
+    let dropped = [("new/.thecaignore".to_owned(), b"*.tmp\n".to_vec())];
+    let placed = place(
+        &client,
+        id,
+        root,
+        &["proj/build/empty".into()],
+        &files,
+        &dropped,
+    )
+    .await
+    .unwrap();
+    let ignored: Vec<bool> = placed
+        .targets
+        .iter()
+        .map(|t| matches!(t, Err(Error::IgnoreFile(_))))
+        .collect();
+    assert_eq!(
+        ignored,
+        [true, true, false, false, true, false, false],
+        "{:?}",
+        placed.targets
+    );
+    // What the operating system left stays silent, even in an ignored folder.
+    assert!(matches!(&placed.targets[6], Err(Error::Ignored(_))));
+    // The root's malformed line, said with its file's path.
+    assert_eq!(placed.problems.len(), 1, "{:?}", placed.problems);
+    assert_eq!(placed.problems[0].0, "/.thecaignore");
+    // The ignored folder was never created.
+    assert_eq!(names(proj).await, ["src", "unrelated", ".thecaignore"]);
+
+    // A dropped ignore file in place of the server's: `build/` no longer.
+    let files: Vec<String> = ["proj/.thecaignore", "proj/build/x.o"]
+        .map(String::from)
+        .into();
+    let dropped = [("proj/.thecaignore".to_owned(), b"# nothing\n".to_vec())];
+    let placed = place(&client, id, root, &[], &files, &dropped)
+        .await
+        .unwrap();
+    assert!(
+        placed.targets.iter().all(Result::is_ok),
+        "{:?}",
+        placed.targets
+    );
+
+    // Into a folder: the ignore files above it apply.
+    let files: Vec<String> = ["c.log", "c.txt"].map(String::from).into();
+    let placed = place(&client, id, sub, &[], &files, &[]).await.unwrap();
+    assert!(matches!(&placed.targets[0], Err(Error::IgnoreFile(_))));
+    assert!(placed.targets[1].is_ok());
 }
 
 /// The feed's next message, in time.

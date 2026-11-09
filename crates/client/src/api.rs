@@ -42,6 +42,9 @@ pub enum Error {
     /// never uploaded (`theca_common::name::is_ignored`).
     #[error("{0}: ignored")]
     Ignored(String),
+    /// A path an ignore file (`.thecaignore`) names: skipped, never uploaded.
+    #[error("{0}: ignored by an ignore file")]
+    IgnoreFile(String),
 }
 
 impl From<reqwest::Error> for Error {
@@ -68,6 +71,7 @@ impl Error {
             Error::InvalidName(_) => "invalid_name",
             Error::FolderExists(_) => "folder_exists",
             Error::Ignored(_) => "ignored",
+            Error::IgnoreFile(_) => "ignore_file",
         }
     }
 
@@ -323,6 +327,13 @@ impl Client {
     ) -> Result<api::Library, Error> {
         let body = serde_json::json!({ "name": name, "organization": organization });
         self.post("/api/v1/libraries", &body).await
+    }
+
+    /// The ignore files that apply in a folder: its own and every folder's
+    /// above it, the root's first.
+    pub async fn ignore_files(&self, folder: Uuid) -> Result<api::IgnoreFiles, Error> {
+        self.get(&format!("/api/v1/nodes/{folder}/ignore-files"))
+            .await
     }
 
     pub async fn children(&self, folder: Uuid) -> Result<Vec<api::Node>, Error> {
