@@ -6,6 +6,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io;
+use std::rc::Rc;
 
 use futures::channel::{mpsc, oneshot};
 use futures::future::{Either, join_all, select};
@@ -130,7 +131,9 @@ type CancelSender = mpsc::UnboundedSender<Option<String>>;
 #[wasm_bindgen]
 pub struct ThecaClient {
     client: Client,
-    uploads: RefCell<HashMap<u32, CancelSender>>,
+    /// Each run's cancels, shared with the run's own future (it removes its
+    /// entry when it ends).
+    uploads: Rc<RefCell<HashMap<u32, CancelSender>>>,
 }
 
 #[wasm_bindgen]
@@ -140,7 +143,7 @@ impl ThecaClient {
     pub fn new(base_url: &str) -> Result<ThecaClient, JsValue> {
         Ok(Self {
             client: Client::new(base_url).map_err(|e| js_error(&e))?,
-            uploads: RefCell::default(),
+            uploads: Rc::default(),
         })
     }
 
@@ -159,8 +162,12 @@ impl ThecaClient {
     /// an ignore file doesn't apply, `{ kind: "ignore_problem", path, line? }`
     /// (no `line`: the file is past 64 KiB). Resolves once every file is done or failed; rejects
     /// with `{ code, message }` when nothing could start (folders not created).
+    ///
+    /// The run is registered by the call itself, not by the first poll of an
+    /// `async fn`: a cancel sent right after (the page's "Cancel all" while
+    /// the module still loads) finds it, never an unknown run.
     #[allow(clippy::too_many_arguments)]
-    pub async fn upload(
+    pub fn upload(
         &self,
         id: u32,
         entries: js_sys::Array,
@@ -169,7 +176,7 @@ impl ThecaClient {
         folder: String,
         message: Option<String>,
         on_event: js_sys::Function,
-    ) -> Result<(), JsValue> {
+    ) -> Result<js_sys::Promise, JsValue> {
         let (library, folder) = (uuid(&library)?, uuid(&folder)?);
         let mut paths = Vec::new();
         let mut sources = Vec::new();
@@ -183,124 +190,120 @@ impl ThecaClient {
         }
         let (cancels, mut cancelled) = mpsc::unbounded();
         self.uploads.borrow_mut().insert(id, cancels);
-        let result = async {
-            // The dropped ignore files, read first: they apply to this upload.
-            let mut ignore_files = Vec::new();
-            for (path, source) in paths.iter().zip(&sources) {
-                if theca_common::ignore::is_ignore_file(path.rsplit('/').next().unwrap_or("")) {
-                    let len = source.len().min(theca_common::ignore::MAX_LEN as u64 + 1);
-                    let content = source
-                        .read(0, len as usize)
-                        .await
-                        .map_err(|e| js_error(&Error::from(e)))?;
-                    ignore_files.push((path.clone(), content));
+        let (client, uploads) = (self.client.clone(), self.uploads.clone());
+        Ok(wasm_bindgen_futures::future_to_promise(async move {
+            let result = async {
+                // The dropped ignore files, read first: they apply to this upload.
+                let mut ignore_files = Vec::new();
+                for (path, source) in paths.iter().zip(&sources) {
+                    if theca_common::ignore::is_ignore_file(path.rsplit('/').next().unwrap_or("")) {
+                        let len = source.len().min(theca_common::ignore::MAX_LEN as u64 + 1);
+                        let content = source
+                            .read(0, len as usize)
+                            .await
+                            .map_err(|e| js_error(&Error::from(e)))?;
+                        ignore_files.push((path.clone(), content));
+                    }
                 }
-            }
-            let placed = place(
-                &self.client,
-                library,
-                folder,
-                &folders,
-                &paths,
-                &ignore_files,
-            )
-            .await
-            .map_err(|e| js_error(&e))?;
-            for (path, problem) in &placed.problems {
-                let line = match problem {
-                    Problem::Line { line, .. } => Some(*line),
-                    Problem::TooLong => None,
+                let placed = place(&client, library, folder, &folders, &paths, &ignore_files)
+                    .await
+                    .map_err(|e| js_error(&e))?;
+                for (path, problem) in &placed.problems {
+                    let line = match problem {
+                        Problem::Line { line, .. } => Some(*line),
+                        Problem::TooLong => None,
+                    };
+                    emit(&on_event, &Event::IgnoreProblem { path, line });
+                }
+                let targets = placed.targets;
+                let cancel = Cancel::default();
+                let options = UploadOptions {
+                    message,
+                    ..UploadOptions::default()
                 };
-                emit(&on_event, &Event::IgnoreProblem { path, line });
-            }
-            let targets = placed.targets;
-            let cancel = Cancel::default();
-            let options = UploadOptions {
-                message,
-                ..UploadOptions::default()
-            };
-            let report = |p: &UploadProgress| {
-                emit(
-                    &on_event,
-                    &Event::Progress {
-                        total: p.total,
-                        hashed: p.hashed,
-                        uploaded: p.uploaded,
-                        skipped: p.skipped,
-                    },
-                );
-            };
-            let (uploader, run) = Uploader::new(&self.client, &options, &cancel, report);
-            // Each file: its outcome, or its own cancel (it then fails as cancelled).
-            let mut per_file: HashMap<&str, oneshot::Sender<()>> = HashMap::new();
-            let mut files = Vec::new();
-            for ((path, source), target) in paths.iter().zip(&sources).zip(targets) {
-                let target = match target {
-                    Ok(target) => target,
-                    Err(Error::Ignored(_)) => {
-                        emit(&on_event, &Event::Skipped { path });
-                        continue;
-                    }
-                    Err(Error::IgnoreFile(_)) => {
-                        emit(&on_event, &Event::Ignored { path });
-                        continue;
-                    }
-                    Err(e) => {
-                        failed(&on_event, path, &e);
-                        continue;
-                    }
+                let report = |p: &UploadProgress| {
+                    emit(
+                        &on_event,
+                        &Event::Progress {
+                            total: p.total,
+                            hashed: p.hashed,
+                            uploaded: p.uploaded,
+                            skipped: p.skipped,
+                        },
+                    );
                 };
-                let submitted = uploader.submit(source, target);
-                let (stop, stopped) = oneshot::channel();
-                per_file.insert(path.as_str(), stop);
-                let on_event = &on_event;
-                files.push(async move {
-                    let result = match select(submitted, stopped).await {
-                        Either::Left((result, _)) => result,
-                        Either::Right((_, submitted)) => {
-                            submitted.cancel();
-                            submitted.await
+                let (uploader, run) = Uploader::new(&client, &options, &cancel, report);
+                // Each file: its outcome, or its own cancel (it then fails as cancelled).
+                let mut per_file: HashMap<&str, oneshot::Sender<()>> = HashMap::new();
+                let mut files = Vec::new();
+                for ((path, source), target) in paths.iter().zip(&sources).zip(targets) {
+                    let target = match target {
+                        Ok(target) => target,
+                        Err(Error::Ignored(_)) => {
+                            emit(&on_event, &Event::Skipped { path });
+                            continue;
+                        }
+                        Err(Error::IgnoreFile(_)) => {
+                            emit(&on_event, &Event::Ignored { path });
+                            continue;
+                        }
+                        Err(e) => {
+                            failed(&on_event, path, &e);
+                            continue;
                         }
                     };
-                    match result {
-                        Ok(c) => emit(
-                            on_event,
-                            &Event::Done {
-                                path,
-                                file: c.file,
-                                version: c.version,
-                                conflict: c.conflict,
-                                unchanged: c.unchanged,
-                            },
-                        ),
-                        Err(e) => failed(on_event, path, &e),
-                    }
-                });
-            }
-            drop(uploader);
-            // Cancels are listened to until every file is done or failed.
-            let cancels = async {
-                while let Some(path) = cancelled.next().await {
-                    match path {
-                        Some(path) => {
-                            if let Some(stop) = per_file.remove(path.as_str()) {
-                                let _ = stop.send(());
+                    let submitted = uploader.submit(source, target);
+                    let (stop, stopped) = oneshot::channel();
+                    per_file.insert(path.as_str(), stop);
+                    let on_event = &on_event;
+                    files.push(async move {
+                        let result = match select(submitted, stopped).await {
+                            Either::Left((result, _)) => result,
+                            Either::Right((_, submitted)) => {
+                                submitted.cancel();
+                                submitted.await
                             }
+                        };
+                        match result {
+                            Ok(c) => emit(
+                                on_event,
+                                &Event::Done {
+                                    path,
+                                    file: c.file,
+                                    version: c.version,
+                                    conflict: c.conflict,
+                                    unchanged: c.unchanged,
+                                },
+                            ),
+                            Err(e) => failed(on_event, path, &e),
                         }
-                        None => cancel.cancel(),
-                    }
+                    });
                 }
-            };
-            select(
-                Box::pin(async { futures::join!(run, join_all(files)) }),
-                Box::pin(cancels),
-            )
+                drop(uploader);
+                // Cancels are listened to until every file is done or failed.
+                let cancels = async {
+                    while let Some(path) = cancelled.next().await {
+                        match path {
+                            Some(path) => {
+                                if let Some(stop) = per_file.remove(path.as_str()) {
+                                    let _ = stop.send(());
+                                }
+                            }
+                            None => cancel.cancel(),
+                        }
+                    }
+                };
+                select(
+                    Box::pin(async { futures::join!(run, join_all(files)) }),
+                    Box::pin(cancels),
+                )
+                .await;
+                Ok(())
+            }
             .await;
-            Ok(())
-        }
-        .await;
-        self.uploads.borrow_mut().remove(&id);
-        result
+            uploads.borrow_mut().remove(&id);
+            result.map(|()| JsValue::UNDEFINED)
+        }))
     }
 
     /// Cancels one file of the upload run `id` (`path`), or all of it.

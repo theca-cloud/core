@@ -3,12 +3,15 @@
 //! (`gitignore(5)`): the last matching line of a file wins, a deeper file wins
 //! over a parent's, and nothing is re-included below an ignored folder. Names
 //! are matched by their key, as Theca compares them (without case, in NFC).
+//! Each file's patterns go through gitoxide's matcher (`gix-ignore`, git's own
+//! wildmatch): a pattern git wouldn't match, matches nothing here either.
 
 use std::collections::HashMap;
 use std::fmt;
 
-use ignore::Match;
-use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use bstr::ByteSlice;
+use gix_ignore::Search;
+use gix_ignore::glob::pattern::Case;
 
 use crate::name::key;
 
@@ -28,8 +31,7 @@ pub fn is_ignore_file(name: &str) -> bool {
 /// applies.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Problem {
-    /// A line that isn't a pattern (a glob the matcher refuses, bytes that
-    /// aren't UTF-8), numbered from 1.
+    /// A line that isn't a pattern (bytes that aren't UTF-8), numbered from 1.
     Line {
         /// The line's number.
         line: usize,
@@ -53,7 +55,7 @@ impl fmt::Display for Problem {
 /// folder's path from the tree's root.
 #[derive(Debug, Default, Clone)]
 pub struct Ignores {
-    files: HashMap<Vec<String>, Gitignore>,
+    files: HashMap<Vec<String>, Search>,
 }
 
 impl Ignores {
@@ -65,8 +67,8 @@ impl Ignores {
     /// The ignore file of `folder` (its names from the root; empty for the
     /// root), replacing any it had: what in it doesn't apply.
     pub fn add<S: AsRef<str>>(&mut self, folder: &[S], content: &[u8]) -> Vec<Problem> {
-        let (gitignore, problems) = parse(content);
-        self.files.insert(keys(folder), gitignore);
+        let (search, problems) = parse(content);
+        self.files.insert(keys(folder), search);
         problems
     }
 
@@ -83,13 +85,17 @@ impl Ignores {
     /// Whether the ignore files above `path` ignore it, its folders aside.
     fn decides(&self, path: &[String], is_dir: bool) -> bool {
         for depth in (0..path.len()).rev() {
-            let Some(gitignore) = self.files.get(&path[..depth]) else {
+            let Some(search) = self.files.get(&path[..depth]) else {
                 continue;
             };
-            match gitignore.matched(path[depth..].join("/"), is_dir) {
-                Match::Ignore(_) => return true,
-                Match::Whitelist(_) => return false,
-                Match::None => {}
+            let below = path[depth..].join("/");
+            // The file's last matching line decides: `!` re-includes.
+            if let Some(m) = search.pattern_matching_relative_path(
+                below.as_bytes().as_bstr(),
+                Some(is_dir),
+                Case::Sensitive,
+            ) {
+                return !m.pattern.is_negative();
             }
         }
         false
@@ -101,7 +107,7 @@ fn keys<S: AsRef<str>>(names: &[S]) -> Vec<String> {
 }
 
 /// An ignore file's patterns, by their key, and what was left out.
-fn parse(content: &[u8]) -> (Gitignore, Vec<Problem>) {
+fn parse(content: &[u8]) -> (Search, Vec<Problem>) {
     let mut problems = Vec::new();
     let mut content = content;
     // The bound counts every byte read (a byte-order mark too): a line is
@@ -115,7 +121,9 @@ fn parse(content: &[u8]) -> (Gitignore, Vec<Problem>) {
         problems.push(Problem::TooLong);
     }
     let content = content.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(content);
-    let mut builder = GitignoreBuilder::new("");
+    // By key, one line for each read (the matcher numbers them): a line that
+    // isn't UTF-8 becomes an empty one.
+    let mut patterns = String::with_capacity(content.len());
     for (i, line) in content.split(|&b| b == b'\n').enumerate() {
         // As git does: a line ending in CR LF is the line without the CR.
         let line = line.strip_suffix(b"\r").unwrap_or(line);
@@ -126,52 +134,23 @@ fn parse(content: &[u8]) -> (Gitignore, Vec<Problem>) {
                     line: i + 1,
                     reason: "not UTF-8".into(),
                 });
-                continue;
+                ""
             }
         };
-        if let Err(e) = builder.add_line(None, &literal_braces(&key(line))) {
-            problems.push(Problem::Line {
-                line: i + 1,
-                reason: e.to_string(),
-            });
-        }
+        patterns.push_str(&key(line));
+        patterns.push('\n');
     }
-    let gitignore = builder.build().unwrap_or_else(|_| Gitignore::empty());
+    let mut search = Search::default();
+    // From bytes, never an I/O error (the path is only named, not read).
+    let _ = search.add_patterns_buffer(
+        patterns.as_bytes(),
+        FILE_NAME,
+        None,
+        gix_ignore::search::Ignore::default(),
+    );
     // The last problem is TooLong's place: it reads best last.
     problems.sort_by_key(|p| matches!(p, Problem::TooLong));
-    (gitignore, problems)
-}
-
-/// `{` and `}` as git reads them, literally: the matcher would expand `{a,b}`
-/// (checked with git: `{a,b}.txt` matches only itself). Escaped, or inside a
-/// class, they stay as written.
-fn literal_braces(line: &str) -> String {
-    let mut out = String::with_capacity(line.len());
-    let mut chars = line.chars();
-    let mut class = false;
-    while let Some(c) = chars.next() {
-        match c {
-            '\\' => {
-                out.push(c);
-                out.extend(chars.next());
-            }
-            '[' if !class => {
-                class = true;
-                out.push(c);
-            }
-            ']' if class => {
-                class = false;
-                out.push(c);
-            }
-            '{' | '}' if !class => {
-                out.push('[');
-                out.push(c);
-                out.push(']');
-            }
-            c => out.push(c),
-        }
-    }
-    out
+    (search, problems)
 }
 
 #[cfg(test)]
@@ -318,27 +297,24 @@ mod tests {
     }
 
     #[test]
-    fn malformed_lines_are_skipped() {
+    fn lines_that_aren_t_utf8_are_skipped() {
         let mut ignores = Ignores::new();
         let problems = ignores.add(&[] as &[&str], b"*.log\n[z-a]\n\xff\xfe\nbuild/\nend\\\n");
-        assert_eq!(problems.len(), 3, "{problems:?}");
-        assert!(
-            matches!(&problems[0], Problem::Line { line: 2, .. }),
-            "{problems:?}"
-        );
         assert_eq!(
-            problems[1],
-            Problem::Line {
+            problems,
+            vec![Problem::Line {
                 line: 3,
                 reason: "not UTF-8".into()
-            }
-        );
-        assert!(
-            matches!(&problems[2], Problem::Line { line: 5, .. }),
-            "{problems:?}"
+            }]
         );
         assert!(ignored(&ignores, "a.log"));
         assert!(ignored(&ignores, "build/x"));
+        // Lines another matcher would refuse, as git reads them (checked with
+        // git 2.47.3): `[z-a]` matches `z` only, a trailing backslash nothing.
+        assert!(ignored(&ignores, "z"));
+        assert!(!ignored(&ignores, "a"));
+        assert!(!ignored(&ignores, "end"));
+        assert!(!ignored(&ignores, "end\\"));
     }
 
     #[test]

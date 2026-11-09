@@ -974,12 +974,12 @@ async fn placing_skips_what_ignore_files_name(pool: PgPool) {
         let path = path.to_owned();
         async move { client.create_folders(root, &[path]).await.unwrap()[0].id }
     };
-    put(root, ".thecaignore", b"*.log\n[z-a]\n").await;
+    put(root, ".thecaignore", b"*.log\n\xff\n").await;
     let proj = folder("proj").await;
     put(proj, ".thecaignore", b"build/\n").await;
     // In a folder this upload doesn't touch: never read, nothing said.
     let unrelated = folder("proj/unrelated").await;
-    put(unrelated, ".thecaignore", b"[z-a]\n").await;
+    put(unrelated, ".thecaignore", b"\xff\n").await;
     let sub = folder("sub").await;
 
     let files: Vec<String> = [

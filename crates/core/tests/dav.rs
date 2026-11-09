@@ -524,7 +524,7 @@ async fn an_ignore_file_s_malformed_lines_are_skipped(pool: PgPool) {
     let docs = alice.create_library("Docs").await;
     let dav = w.dav(1, json!({ "library": docs.id })).await;
 
-    let mut content = b"[z-a]\n*.log\n\xff\n".to_vec();
+    let mut content = b"\xff\n*.log\n".to_vec();
     while content.len() < 64 * 1024 {
         content.extend_from_slice(b"# padding\n");
     }
