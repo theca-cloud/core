@@ -1,6 +1,16 @@
 # Changelog
 
 Every release of `core`: the server, `@theca/client`, `openapi.json`.
+## [1.6.0] - 2026-11-09
+
+### Features
+
+- Ignore files (.thecaignore): WebDAV and the engine skip what they name
+
+### Fixes
+
+- **ci**: Run the checks on prod and version tags, before any release
+
 ## [1.5.0] - 2026-11-07
 
 ### Features

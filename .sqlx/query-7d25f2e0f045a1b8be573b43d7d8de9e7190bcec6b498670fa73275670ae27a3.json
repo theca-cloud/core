@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH RECURSIVE up (pk, parent, name, depth) AS (\n               SELECT pk, parent, name, 0 FROM node WHERE pk = $1\n               UNION ALL\n               SELECT n.pk, n.parent, n.name, up.depth + 1 FROM node n JOIN up ON n.pk = up.parent\n           )\n           SELECT up.name AS \"name!\", up.parent IS NULL AS \"root!\", i.uuid AS \"id?\", i.name AS \"file_name?\",\n                  v.pk AS \"version_pk?\", v.uuid AS \"version?\", v.size AS \"size?\"\n           FROM up\n           LEFT JOIN node i ON i.parent = up.pk AND lower(i.name) = $2\n                            AND i.deleted_at IS NULL AND i.is_file\n           LEFT JOIN version v ON v.pk = i.current_version\n           ORDER BY up.depth DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "root!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "file_name?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "version_pk?",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "version?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "size?",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7d25f2e0f045a1b8be573b43d7d8de9e7190bcec6b498670fa73275670ae27a3"
+}

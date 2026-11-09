@@ -23,7 +23,7 @@ pub use download::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use events::FeedMessage;
-pub use place::{Existing, path_key, place, target};
+pub use place::{Existing, Placed, path_key, place, target};
 #[cfg(not(target_arch = "wasm32"))]
 pub use source::FileSource;
 pub use source::{MemorySource, Source};

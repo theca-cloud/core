@@ -794,6 +794,32 @@ pub struct NodeInfo {
     pub modified: Option<DateTime<Utc>>,
 }
 
+/// `GET /nodes/{id}/ignore-files`: the ignore files (`.thecaignore`) that
+/// apply in a folder, its own and every folder's above it; their content is
+/// downloaded like any file's.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct IgnoreFiles {
+    /// The folder's path in its library, e.g. `/a/b` (`/` for the root).
+    pub path: String,
+    /// The ignore files, the root's first.
+    pub files: Vec<IgnoreFile>,
+}
+
+/// An ignore file above or in a folder.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct IgnoreFile {
+    /// The file.
+    pub id: Uuid,
+    /// Its path in its library, e.g. `/a/.thecaignore`.
+    pub path: String,
+    /// Its current version; none for a file without a version yet.
+    pub current_version: Option<Uuid>,
+    /// Its size in bytes (its current version's).
+    pub size: Option<i64>,
+}
+
 /// A folder above a node.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

@@ -27,6 +27,7 @@ pub fn router() -> Router<AppState> {
         .route("/nodes/{id}", get(info))
         .route("/nodes/{id}/folders", post(create_folder))
         .route("/nodes/{id}/tree", get(tree))
+        .route("/nodes/{id}/ignore-files", get(ignore_files))
         .route("/libraries/{id}/trash", get(trash))
         .route("/files/{id}/versions", get(versions))
         .route("/files/{id}/content", get(super::content::content))
@@ -63,6 +64,43 @@ pub async fn info(
 ) -> Result<Json<api::NodeInfo>, HttpError> {
     let node = node(&state, &user, id).await?;
     Ok(Json(db::node::info(&state.pool, node.node).await?))
+}
+
+/// The ignore files (`.thecaignore`) that apply in a folder: its own and every
+/// folder's above it, the root's first. Clients read their content themselves
+/// (as any file's: an E2EE library's too) and skip what they name when
+/// uploading; the server enforces nothing here.
+#[utoipa::path(get, path = "/api/v1/nodes/{id}/ignore-files", params(("id" = Uuid, Path)), responses(
+    (status = 200, body = api::IgnoreFiles),
+    (status = 400, description = "`not_a_folder`", body = api::ApiError),
+    (status = 404, body = api::ApiError),
+))]
+pub async fn ignore_files(
+    State(state): State<AppState>,
+    user: CurrentAccount,
+    Path(id): Path<Uuid>,
+) -> Result<Json<api::IgnoreFiles>, HttpError> {
+    let folder = node(&state, &user, id).await?;
+    if folder.is_file {
+        return Err(HttpError::bad_request(
+            "not_a_folder",
+            "a file has no ignore files",
+        ));
+    }
+    let found = db::node::ignore_files(&state.pool, folder.node).await?;
+    Ok(Json(api::IgnoreFiles {
+        path: format!("/{}", found.folder.join("/")),
+        files: found
+            .files
+            .iter()
+            .map(|f| api::IgnoreFile {
+                id: f.id,
+                path: found.path(f),
+                current_version: f.version.as_ref().map(|v| v.id),
+                size: f.version.as_ref().map(|v| v.size),
+            })
+            .collect(),
+    }))
 }
 
 /// Most paths in one folders request.

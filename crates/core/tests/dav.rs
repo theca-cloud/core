@@ -351,6 +351,193 @@ async fn discards_what_the_os_leaves(pool: PgPool) {
     assert!(dav.list("/").await.is_empty());
 }
 
+/// What an ignore file (`.thecaignore`) names, in its folder or below, is
+/// never uploaded: a `PUT` or `MKCOL` there answers and stores nothing, below
+/// an ignored folder never created too. What is stored stays: listed, read,
+/// deleted and moved as any file; only writes to it are discarded.
+#[sqlx::test]
+async fn discards_what_an_ignore_file_names(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    let dav = w.dav(1, json!({ "library": docs.id })).await;
+    let chunks = || async {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM chunk")
+            .fetch_one(&w.pool)
+            .await
+            .unwrap()
+    };
+    let missing = async |path: &str| {
+        assert_eq!(dav.get(path, None).await.0, StatusCode::NOT_FOUND, "{path}");
+        assert_eq!(
+            dav.status("PROPFIND", path, &[("depth", "0")]).await,
+            StatusCode::NOT_FOUND,
+            "{path}"
+        );
+    };
+
+    assert_eq!(
+        dav.put("/keep.bak", b"stored before").await,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        dav.status("MKCOL", "/stored", &[]).await,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        dav.put("/.thecaignore", b"node_modules/\n*.log\n").await,
+        StatusCode::CREATED
+    );
+    let before = chunks().await;
+
+    // A file the root's ignore file names, and an ignored folder with
+    // everything below it: answered, nothing stored.
+    assert_eq!(dav.put("/a.log", b"a log").await, StatusCode::CREATED);
+    assert_eq!(
+        dav.status("MKCOL", "/node_modules", &[]).await,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        dav.put("/node_modules/x.js", b"x").await,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        dav.status("MKCOL", "/node_modules/sub", &[]).await,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        dav.put("/node_modules/sub/y.js", b"y").await,
+        StatusCode::CREATED
+    );
+    for path in [
+        "/a.log",
+        "/node_modules",
+        "/node_modules/x.js",
+        "/node_modules/sub/y.js",
+    ] {
+        missing(path).await;
+    }
+    assert_eq!(dav.list("/").await, [".thecaignore", "keep.bak", "stored"]);
+    assert_eq!(chunks().await, before, "nothing stored");
+
+    // A deeper ignore file adds its own; a grandparent's still applies.
+    assert_eq!(dav.status("MKCOL", "/proj", &[]).await, StatusCode::CREATED);
+    assert_eq!(
+        dav.put("/proj/.thecaignore", b"*.tmp\n").await,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        dav.status("MKCOL", "/proj/deep", &[]).await,
+        StatusCode::CREATED
+    );
+    assert_eq!(dav.put("/proj/deep/a.tmp", b"t").await, StatusCode::CREATED);
+    assert_eq!(dav.put("/proj/deep/b.log", b"l").await, StatusCode::CREATED);
+    assert_eq!(
+        dav.put("/proj/deep/c.txt", b"kept").await,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        dav.put("/a.tmp", b"not ignored here").await,
+        StatusCode::CREATED
+    );
+    assert_eq!(dav.list("/proj/deep/").await, ["c.txt"]);
+    assert_eq!(dav.get("/a.tmp", None).await.0, StatusCode::OK);
+
+    // A stored file a new version of the ignore file names: listed and read
+    // as before, a write to it discarded; deleted and moved as asked.
+    assert_eq!(
+        dav.put("/.thecaignore", b"node_modules/\n*.log\n*.bak\nstored/\n")
+            .await,
+        StatusCode::NO_CONTENT
+    );
+    // Answered as any write over a stored file (204), nothing stored.
+    assert_eq!(
+        dav.put("/keep.bak", b"overwritten?").await,
+        StatusCode::NO_CONTENT
+    );
+    // A folder already there is answered as one, ignored or not.
+    assert_eq!(
+        dav.status("MKCOL", "/stored", &[]).await,
+        StatusCode::METHOD_NOT_ALLOWED
+    );
+    assert_eq!(
+        dav.get("/keep.bak", None).await,
+        (StatusCode::OK, b"stored before".to_vec())
+    );
+    let dest = [("destination", "/dav/moved.bak")];
+    assert_eq!(
+        dav.status("MOVE", "/keep.bak", &dest).await,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        dav.status("DELETE", "/moved.bak", &[]).await,
+        StatusCode::NO_CONTENT
+    );
+    // A move to an ignored name isn't an upload: stored as asked.
+    let dest = [("destination", "/dav/c.log")];
+    assert_eq!(
+        dav.status("MOVE", "/proj/deep/c.txt", &dest).await,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        dav.get("/c.log", None).await,
+        (StatusCode::OK, b"kept".to_vec())
+    );
+
+    // An ignore file in the trash names nothing.
+    assert_eq!(
+        dav.status("DELETE", "/proj/.thecaignore", &[]).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(dav.put("/proj/deep/a.tmp", b"t").await, StatusCode::CREATED);
+    assert_eq!(dav.list("/proj/deep/").await, ["a.tmp"]);
+
+    // Through an account's password, the same paths below its levels.
+    let account = w.dav(1, json!({})).await;
+    assert_eq!(
+        account.put("/one/Docs/b.log", b"l").await,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        account.put("/one/Docs/node_modules/z.js", b"z").await,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        account.list("/one/Docs/").await,
+        [".thecaignore", "a.tmp", "c.log", "proj", "stored"]
+    );
+
+    // A missing parent that no ignore file names: refused as before.
+    assert_eq!(dav.put("/nowhere/x.txt", b"x").await, StatusCode::CONFLICT);
+    assert_eq!(
+        dav.status("MKCOL", "/nowhere/sub", &[]).await,
+        StatusCode::CONFLICT
+    );
+}
+
+/// An ignore file's malformed lines are skipped, the rest applies; past
+/// 64 KiB, only its beginning does.
+#[sqlx::test]
+async fn an_ignore_file_s_malformed_lines_are_skipped(pool: PgPool) {
+    let w = fs_world(pool).await;
+    let alice = w.as_user(1).await;
+    let docs = alice.create_library("Docs").await;
+    let dav = w.dav(1, json!({ "library": docs.id })).await;
+
+    let mut content = b"[z-a]\n*.log\n\xff\n".to_vec();
+    while content.len() < 64 * 1024 {
+        content.extend_from_slice(b"# padding\n");
+    }
+    content.extend_from_slice(b"*.tmp\n");
+    assert_eq!(
+        dav.put("/.thecaignore", &content).await,
+        StatusCode::CREATED
+    );
+    assert_eq!(dav.put("/a.log", b"l").await, StatusCode::CREATED);
+    assert_eq!(dav.put("/a.tmp", b"past 64 KiB").await, StatusCode::CREATED);
+    assert_eq!(dav.list("/").await, [".thecaignore", "a.tmp"]);
+}
+
 /// Each version keeps its client's modification time (`X-OC-Mtime`, as rclone
 /// sends it): shown by WebDAV and the API; the same bytes with another time
 /// update the current version (a touch, no new version); a restored version

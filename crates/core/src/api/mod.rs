@@ -111,6 +111,7 @@ pub struct AppState {
         nodes::info,
         nodes::create_folder,
         nodes::tree,
+        nodes::ignore_files,
         nodes::update,
         nodes::trash_nodes,
         nodes::copy,
