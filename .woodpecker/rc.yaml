@@ -3,7 +3,9 @@
 # computes it) plus -rc: rc, 1-rc, 1.2-rc, 1.2.3-rc. The core image is web's dev
 # and test server only, never shipped (the CE image compiles its own).
 # The server inside still reports the last release's version: Cargo.toml is
-# bumped by the release itself.
+# bumped by the release itself. amd64 only: its users, web's CI and dev
+# servers, run on amd64 (or emulate it); the releases' images keep arm64, and
+# a candidate skips cross-compiling it.
 when:
   - event: push
     branch: dev
@@ -43,7 +45,7 @@ steps:
     environment:
       SQLX_OFFLINE: "true"
     commands:
-      - scripts/release-ci.sh binaries
+      - scripts/release-ci.sh binaries amd64
 
   # The only privileged plugin the server trusts (WOODPECKER_PLUGINS_PRIVILEGED):
   # keep this exact version.
@@ -53,7 +55,7 @@ steps:
     settings:
       registry: git.pband.ch
       repo: git.pband.ch/theca/core
-      platforms: linux/amd64,linux/arm64
+      platforms: linux/amd64
       dockerfile: Dockerfile
       tags_file: .tags
       username:

@@ -1,6 +1,12 @@
 # Changelog
 
 Every release of `core`: the server, `@theca/client`, `openapi.json`.
+## [1.6.1] - 2026-11-10
+
+### Fixes
+
+- **client**: A cancel right after an upload starts is never lost; ignore files on gix-ignore
+
 ## [1.6.0] - 2026-11-09
 
 ### Features

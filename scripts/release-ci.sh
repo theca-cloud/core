@@ -1,7 +1,8 @@
 #!/usr/bin/env sh
 # The pipelines' steps the YAML can't say (.woodpecker/rc.yaml, release.yaml).
 # The version is Cargo.toml's (written by scripts/release.sh).
-#   binaries  static binaries for amd64 and arm64 in dist/ (cargo zigbuild), for
+#   binaries [ARCH...]  static binaries in dist/<arch>/ (cargo zigbuild),
+#             amd64 and arm64 unless named (release candidates: amd64), for
 #             the core image: web's dev and test server, never shipped (the CE
 #             image compiles its own, natively per architecture)
 #   npm       @theca/client on the Gitea npm registry (needs GITEA_TOKEN)
@@ -14,18 +15,36 @@ version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
 
 case "${1:-}" in
 binaries)
-    cargo zigbuild --release --locked -p theca-core --bin theca-server \
-        --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl
-    mkdir -p dist/amd64 dist/arm64
-    cp target/x86_64-unknown-linux-musl/release/theca-server dist/amd64/
-    cp target/aarch64-unknown-linux-musl/release/theca-server dist/arm64/
-    # amd64 runs here (an unknown command exits 2 after printing the usage);
-    # arm64 must at least be an aarch64 ELF (machine 0xB7 at offset 18).
-    status=0
-    dist/amd64/theca-server version-check 2>/dev/null || status=$?
-    [ "$status" = 2 ] || { echo "the amd64 binary doesn't run" >&2; exit 1; }
-    [ "$(od -An -tx1 -j18 -N1 dist/arm64/theca-server | tr -d ' ')" = b7 ] ||
-        { echo "the arm64 binary isn't aarch64" >&2; exit 1; }
+    shift
+    [ $# -gt 0 ] || set -- amd64 arm64
+    targets=
+    for arch in "$@"; do
+        case "$arch" in
+        amd64) targets="$targets --target x86_64-unknown-linux-musl" ;;
+        arm64) targets="$targets --target aarch64-unknown-linux-musl" ;;
+        *) echo "unknown architecture: $arch (amd64, arm64)" >&2; exit 2 ;;
+        esac
+    done
+    # shellcheck disable=SC2086 # one word per --target and its triple
+    cargo zigbuild --release --locked -p theca-core --bin theca-server $targets
+    for arch in "$@"; do
+        mkdir -p "dist/$arch"
+        case "$arch" in
+        amd64)
+            cp target/x86_64-unknown-linux-musl/release/theca-server dist/amd64/
+            # It runs here (an unknown command exits 2 after printing the usage).
+            status=0
+            dist/amd64/theca-server version-check 2>/dev/null || status=$?
+            [ "$status" = 2 ] || { echo "the amd64 binary doesn't run" >&2; exit 1; }
+            ;;
+        arm64)
+            cp target/aarch64-unknown-linux-musl/release/theca-server dist/arm64/
+            # At least an aarch64 ELF (machine 0xB7 at offset 18).
+            [ "$(od -An -tx1 -j18 -N1 dist/arm64/theca-server | tr -d ' ')" = b7 ] ||
+                { echo "the arm64 binary isn't aarch64" >&2; exit 1; }
+            ;;
+        esac
+    done
     ls -l dist/*/theca-server
     ;;
 npm)

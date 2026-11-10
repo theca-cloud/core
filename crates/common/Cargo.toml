@@ -8,7 +8,8 @@ publish.workspace = true
 [dependencies]
 fastcdc.workspace = true
 futures.workspace = true
-ignore.workspace = true
+bstr.workspace = true
+gix-ignore.workspace = true
 lz4_flex.workspace = true
 serde.workspace = true
 chrono.workspace = true
