@@ -1,0 +1,97 @@
+{
+  "version": "1.6.2",
+  "admin": {
+    "email": "admin@upgrade.theca",
+    "password": "admin's long password",
+    "totp": null
+  },
+  "member": {
+    "email": "member-01a1cc74-e9d0-74ec-a79d-a7aa58fa88e0@upgrade.theca",
+    "password": "member's long password",
+    "totp": "KGI52OHFQITWWPGYM5BDEGLHJFXWC4AG"
+  },
+  "organization": "01a1cc74-e9be-7599-9212-7331cd13a4fd",
+  "app_password": "th_8f735a343d2b47dce8149dcf.6ebf09391d0a8211199b9a0679fad5c40bcc03e6ba2ddb0e316249eee91252d1",
+  "libraries": [
+    {
+      "id": "01a1cc74-eae8-7a22-a803-0c177ae2d10b",
+      "name": "Docs",
+      "root": "01a1cc74-eaea-7bfa-aecb-c551ad63ccbf",
+      "namespace": "01a1cc74-eae2-76d1-99ea-58970a38f336",
+      "member_role": "write",
+      "listing": [
+        "notes",
+        "readme.txt"
+      ],
+      "files": [
+        {
+          "id": "01a1cc74-eb7e-747f-8b95-b86f741534c0",
+          "name": "readme.txt",
+          "parent": "01a1cc74-eaea-7bfa-aecb-c551ad63ccbf",
+          "versions": [
+            {
+              "id": "01a1cc74-eb9a-7eb9-b5a4-89e57a526516",
+              "number": "1",
+              "author": "admin@upgrade.theca",
+              "message": "first",
+              "content": "Hello, version 1\n"
+            },
+            {
+              "id": "01a1cc74-ec0f-72d4-bb10-d58e041ed8bf",
+              "number": "2",
+              "author": "member-01a1cc74-e9d0-74ec-a79d-a7aa58fa88e0@upgrade.theca",
+              "message": "second",
+              "content": "Hello, version 2\n"
+            }
+          ]
+        },
+        {
+          "id": "01a1cc74-ec7d-7501-80f6-c33768fdd322",
+          "name": "plan.txt",
+          "parent": "01a1cc74-ec19-752a-a376-8e7901aeeb43",
+          "versions": [
+            {
+              "id": "01a1cc74-ec83-78c0-84f8-ff27185f0013",
+              "number": "1",
+              "author": "member-01a1cc74-e9d0-74ec-a79d-a7aa58fa88e0@upgrade.theca",
+              "message": "a plan",
+              "content": "The plan.\n"
+            }
+          ]
+        }
+      ],
+      "trash": [
+        "old.txt"
+      ],
+      "position": 6
+    },
+    {
+      "id": "01a1cc74-eaf2-749c-b996-a16948b0c134",
+      "name": "Photos",
+      "root": "01a1cc74-eaf4-7392-9071-bf8255bbbddd",
+      "namespace": null,
+      "member_role": null,
+      "listing": [
+        "cat.txt"
+      ],
+      "files": [
+        {
+          "id": "01a1cc74-edb8-769f-9eb3-c2f6e4cce594",
+          "name": "cat.txt",
+          "parent": "01a1cc74-eaf4-7392-9071-bf8255bbbddd",
+          "versions": [
+            {
+              "id": "01a1cc74-edcb-76bb-858d-bac9a6acb489",
+              "number": "1",
+              "author": "admin@upgrade.theca",
+              "message": "meow",
+              "content": "A cat.\n"
+            }
+          ]
+        }
+      ],
+      "trash": [],
+      "position": 1
+    }
+  ]
+}

@@ -48,7 +48,13 @@ pub enum Error {
 }
 
 impl From<reqwest::Error> for Error {
-    fn from(e: reqwest::Error) -> Self {
+    /// Without its URL's query: a presigned storage URL's is its signature
+    /// (anyone holding it reads or writes the chunk until it expires), and
+    /// this error's text reaches a client's notices and log files.
+    fn from(mut e: reqwest::Error) -> Self {
+        if let Some(url) = e.url_mut() {
+            url.set_query(None);
+        }
         Error::Http(std::sync::Arc::new(e))
     }
 }
@@ -784,6 +790,26 @@ mod tests {
             .map(|r| r.map(|n| n.path).map_err(|e| e.to_string()))
             .collect()
             .await
+    }
+
+    /// A network error says where it failed, never the URL's query: a
+    /// presigned storage URL's is its signature.
+    #[tokio::test]
+    async fn a_network_error_has_no_query() {
+        // A port nothing listens on.
+        let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!(
+            "http://{}/bucket/chunk?X-Amz-Signature=5ecre7",
+            free.local_addr().unwrap()
+        );
+        drop(free);
+        let failed: Error = reqwest::get(&url).await.unwrap_err().into();
+        let said = format!("{failed} / {failed:?}");
+        assert!(said.contains("/bucket/chunk"), "{said}");
+        assert!(
+            !said.contains("5ecre7") && !said.contains("X-Amz"),
+            "{said}"
+        );
     }
 
     /// C1, C2: a server that accepts and then never answers fails the

@@ -1,6 +1,12 @@
 # Changelog
 
 Every release of `core`: the server, `@theca/client`, `openapi.json`.
+## [1.6.2] - 2026-11-11
+
+### Fixes
+
+- **client**: A network error no longer carries its URL's query
+
 ## [1.6.1] - 2026-11-10
 
 ### Fixes
